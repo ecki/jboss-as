@@ -12,10 +12,7 @@ rem # variables that domain.bat uses. It is recommended to use this file to
 rem # configure these variables, rather than modifying domain.bat itself.
 rem #
 
-if not "x%JAVA_OPTS%" == "x" (
-  echo "JAVA_OPTS already set in environment; overriding default settings with values: %JAVA_OPTS%"
-  goto JAVA_OPTS_SET
-)
+if not "x%JAVA_OPTS%" == "x" goto JAVA_OPTS_SET
 
 rem #
 rem # Specify the JBoss Profiler configuration file to load.
@@ -45,8 +42,8 @@ rem #
 rem # JVM memory allocation pool parameters - modify as appropriate.
 set JAVA_OPTS=-Xms64M -Xmx512M -XX:MaxPermSize=256M
 
-rem # Prefer IPv4
-set "JAVA_OPTS=%JAVA_OPTS% -Djava.net.preferIPv4Stack=true"
+rem # Reduce the RMI GCs to once per hour for Sun JVMs.
+set JAVA_OPTS=%JAVA_OPTS% -Dsun.rmi.dgc.client.gcInterval=3600000 -Dsun.rmi.dgc.server.gcInterval=3600000
 
 rem # Warn when resolving remote XML DTDs or schemas.
 set JAVA_OPTS=%JAVA_OPTS% -Dorg.jboss.resolver.warning=true
@@ -55,24 +52,13 @@ rem # Make Byteman classes visible in all module loaders
 rem # This is necessary to inject Byteman rules into AS7 deployments
 set JAVA_OPTS=%JAVA_OPTS% -Djboss.modules.system.pkgs=org.jboss.byteman
 
-rem # Set the default configuration files to use if -c, --domain-config or --host-config are not used
-set "JAVA_OPTS=%JAVA_OPTS% -Djboss.domain.default.config=domain.xml -Djboss.host.default.config=host.xml"
+rem # Sample JPDA settings for remote socket debugging
+rem set JAVA_OPTS=%JAVA_OPTS% -Xrunjdwp:transport=dt_socket,address=8787,server=y,suspend=n
+
+rem # Sample JPDA settings for shared memory debugging 
+rem set JAVA_OPTS=%JAVA_OPTS% -Xrunjdwp:transport=dt_shmem,address=jboss,server=y,suspend=n
 
 rem # Use JBoss Modules lockless mode
-rem set "JAVA_OPTS=%JAVA_OPTS% -Djboss.modules.lockless=true"
-
-rem The ProcessController process uses its own set of java options
-set "PROCESS_CONTROLLER_JAVA_OPTS=%JAVA_OPTS%"
-
-rem The HostController process uses its own set of java options
-set "HOST_CONTROLLER_JAVA_OPTS=%JAVA_OPTS%"
-
-rem # Sample JPDA settings for remote socket debugging
-rem set "PROCESS_CONTROLLER_JAVA_OPTS=%PROCESS_CONTROLLER_JAVA_OPTS% -agentlib:jdwp=transport=dt_socket,address=8788,server=y,suspend=n"
-rem set "HOST_CONTROLLER_JAVA_OPTS=%HOST_CONTROLLER_JAVA_OPTS% -agentlib:jdwp=transport=dt_socket,address=8787,server=y,suspend=n"
-
-rem # Sample JPDA settings for shared memory debugging
-rem set "PROCESS_CONTROLLER_JAVA_OPTS=%PROCESS_CONTROLLER_JAVA_OPTS% -agentlib:jdwp=transport=dt_shmem,address=jboss,server=y,suspend=n"
-rem set "HOST_CONTROLLER_JAVA_OPTS=%HOST_CONTROLLER_JAVA_OPTS% -agentlib:jdwp=transport=dt_shmem,address=jboss,server=y,suspend=n"
+rem set JAVA_OPTS=$JAVA_OPTS -Djboss.modules.lockless=true
 
 :JAVA_OPTS_SET
