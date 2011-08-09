@@ -19,8 +19,8 @@ if "%OS%" == "Windows_NT" (
 rem If JBOSS_HOME is not specified, use parent of script
 rem Will be needed in domain.conf.bat
 if "x%JBOSS_HOME%" == "x" (
-  pushd "%DIRNAME%.."
-  set JBOSS_HOME="%CD%"
+  pushd %DIRNAME%..
+  set "JBOSS_HOME=%CD%"
   popd
 )
 
@@ -68,11 +68,6 @@ rem Setup JBoss specific properties
 rem Setup the java endorsed dirs
 set JBOSS_ENDORSED_DIRS="%JBOSS_HOME%\lib\endorsed"
 
-rem Set default module root paths
-if "x%MODULEPATH%" == "x" (
-  set  "MODULEPATH=%JBOSS_HOME%\modules"
-)
-
 echo ===============================================================================
 echo.
 echo   JBoss Bootstrap Environment
@@ -87,19 +82,19 @@ echo ===========================================================================
 echo.
 
 :RESTART
-"%JAVA%" %PROCESS_CONTROLLER_JAVA_OPTS% ^
- -Dorg.jboss.boot.log.file="%JBOSS_HOME%\domain\log\process-controller\boot.log" ^
+"%JAVA%" %JAVA_OPTS% ^
+ -Dorg.jboss.boot.log.file="%JBOSS_HOME%\process-controller\log\boot.log" ^
  -Dlogging.configuration="file:%JBOSS_HOME%/domain/configuration/logging.properties" ^
-    -jar "%JBOSS_HOME%\jboss-modules.jar" ^
-    -mp "%MODULEPATH%" ^
-    -logmodule "org.jboss.logmanager" ^
+    -jar "%RUNJAR%" ^
+    -mp "%JBOSS_HOME%\modules" ^
+    -logmodule org.jboss.logmanager ^
      org.jboss.as.process-controller ^
     -jboss-home "%JBOSS_HOME%" ^
     -jvm "%JAVA%" ^
     -- ^
     -Dorg.jboss.boot.log.file="%JBOSS_HOME%\domain\log\host-controller\boot.log" ^
     -Dlogging.configuration="file:%JBOSS_HOME%/domain/configuration/logging.properties" ^
-    %HOST_CONTROLLER_JAVA_OPTS% ^
+    %JAVA_OPTS% ^
     -- ^
     -default-jvm "%JAVA%" ^
     %*
