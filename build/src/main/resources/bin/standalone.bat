@@ -14,14 +14,6 @@ if "%OS%" == "Windows_NT" (
   set PROGNAME=standalone.bat
 )
 
-rem If JBOSS_HOME is not specified, use parent of script
-rem Will be needed in standalone.conf.bat
-if "x%JBOSS_HOME%" == "x" (
-  pushd "%DIRNAME%.."
-  set JBOSS_HOME="%CD%"
-  popd
-)
-
 rem Read an optional configuration file.
 if "x%STANDALONE_CONF%" == "x" (   
    set STANDALONE_CONF=%DIRNAME%standalone.conf.bat
@@ -33,8 +25,14 @@ if exist "%STANDALONE_CONF%" (
    echo Config file not found "%STANDALONE_CONF%".
 )
 
-set DIRNAME=
+rem If no JBOSS_HOME is specified use script's parent dir
+if "x%JBOSS_HOME%" == "x" (
+  pushd %DIRNAME%..
+  set JBOSS_HOME=%CD%
+  popd
+)
 
+set DIRNAME=
 
 rem Setup JBoss specific properties
 set JAVA_OPTS=-Dprogram.name=%PROGNAME% %JAVA_OPTS%
@@ -66,11 +64,6 @@ rem Setup JBoss specific properties
 rem Setup the java endorsed dirs
 set JBOSS_ENDORSED_DIRS=%JBOSS_HOME%\lib\endorsed
 
-rem Set default module root paths
-if "x%MODULEPATH%" == "x" (
-  set  "MODULEPATH=%JBOSS_HOME%\modules"
-)
-
 echo ===============================================================================
 echo.
 echo   JBoss Bootstrap Environment
@@ -88,10 +81,10 @@ echo.
 "%JAVA%" %JAVA_OPTS% ^
  -Dorg.jboss.boot.log.file="%JBOSS_HOME%\standalone\log\boot.log" ^
  -Dlogging.configuration="file:%JBOSS_HOME%/standalone/configuration/logging.properties" ^
-    -jar "%JBOSS_HOME%\jboss-modules.jar" ^
-    -mp "%MODULEPATH%" ^
-    -logmodule "org.jboss.logmanager" ^
-    -jaxpmodule "javax.xml.jaxp-provider" ^
+    -jar "%RUNJAR%" ^
+    -mp "%JBOSS_HOME%\modules" ^
+    -logmodule org.jboss.logmanager ^
+    -jaxpmodule javax.xml.jaxp-provider ^
      org.jboss.as.standalone ^
     -Djboss.home.dir="%JBOSS_HOME%" ^
      %*
