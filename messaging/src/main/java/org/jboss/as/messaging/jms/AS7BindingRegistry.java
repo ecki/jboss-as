@@ -23,15 +23,17 @@
 package org.jboss.as.messaging.jms;
 
 import org.hornetq.spi.core.naming.BindingRegistry;
-import org.jboss.as.naming.NamingStore;
+import org.jboss.as.naming.ServiceBasedNamingStore;
 import org.jboss.as.naming.ValueManagedReferenceFactory;
 import org.jboss.as.naming.deployment.ContextNames;
 import org.jboss.as.naming.service.BinderService;
-import org.jboss.logging.Logger;
 import org.jboss.msc.service.ServiceContainer;
 import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.value.Values;
+
+import static org.jboss.as.messaging.MessagingLogger.ROOT_LOGGER;
+import static org.jboss.as.messaging.MessagingMessages.MESSAGES;
 
 /**
  * A {@link BindingRegistry} implementation for JBoss AS7.
@@ -40,8 +42,6 @@ import org.jboss.msc.value.Values;
  * @author Jaikiran Pai
  */
 public class AS7BindingRegistry implements BindingRegistry {
-
-    private static final Logger logger = Logger.getLogger(AS7BindingRegistry.class);
 
     private final ServiceContainer container;
 
@@ -69,43 +69,33 @@ public class AS7BindingRegistry implements BindingRegistry {
     @Override
     public boolean bind(String name, Object obj) {
         if (name == null || name.isEmpty()) {
-            throw new IllegalArgumentException("Cannot bind a null or empty string as jndi name");
+            throw MESSAGES.cannotBindJndiName();
         }
-        if (name.equals("java:jboss/") || name.equals("java:comp/") || name.equals("java:module/")
-                || name.equals("java:/app") || name.equals("java:global/") || name.equals("java:/")) {
-            throw new IllegalArgumentException("Missing relative path in (invalid) jndi name: " + name);
-        }
-        final JndiBinding jndiBinding = JndiBinding.parse(name);
-        if (jndiBinding == null) {
-            throw new IllegalArgumentException("Binding to " + name + " isn't allowed, since it belongs to a unknown/unsupported jndi name context");
-        }
-        // create the binding service
-        final BinderService binderService = new BinderService(jndiBinding.relativeJndiName);
-        container.addService(jndiBinding.jndiContextServiceName.append(jndiBinding.relativeJndiName), binderService)
-                .addDependency(jndiBinding.jndiContextServiceName, NamingStore.class, binderService.getNamingStoreInjector())
+        final ContextNames.BindInfo bindInfo = ContextNames.bindInfoFor(name);
+        final BinderService binderService = new BinderService(bindInfo.getBindName());
+        container.addService(bindInfo.getBinderServiceName(), binderService)
+                .addDependency(bindInfo.getParentContextServiceName(), ServiceBasedNamingStore.class, binderService.getNamingStoreInjector())
                 .addInjection(binderService.getManagedObjectInjector(), new ValueManagedReferenceFactory(Values.immediateValue(obj)))
                 .setInitialMode(ServiceController.Mode.ACTIVE)
                 .install();
-        logger.info("Bound messaging object to jndi name " + jndiBinding);
+        ROOT_LOGGER.boundJndiName(bindInfo.getAbsoluteJndiName());
         return true;
     }
 
     @Override
     public void unbind(String name) {
         if (name == null || name.isEmpty()) {
-            throw new IllegalArgumentException("Cannot unbind null or empty jndi name");
+            throw MESSAGES.cannotUnbindJndiName();
         }
-        final JndiBinding jndiBinding = JndiBinding.parse(name);
-        if (jndiBinding == null) {
-            throw new IllegalArgumentException("Cannot unbind " + name + " since it belongs to a unknown/unsupported jndi name context");
-        }
-        ServiceController<?> bindingService = container.getService(jndiBinding.jndiContextServiceName.append(jndiBinding.relativeJndiName));
+        final ContextNames.BindInfo bindInfo = ContextNames.bindInfoFor(name);
+        ServiceController<?> bindingService = container.getService(bindInfo.getBinderServiceName());
         if (bindingService == null) {
-            logger.debug("Cannot unbind " + name + " since no binding exists with that name");
+            ROOT_LOGGER.debugf("Cannot unbind %s since no binding exists with that name", name);
             return;
         }
         // remove the binding service
         bindingService.setMode(ServiceController.Mode.REMOVE);
+        ROOT_LOGGER.unboundJndiName(bindInfo.getAbsoluteJndiName());
     }
 
     @Override
@@ -132,10 +122,10 @@ public class AS7BindingRegistry implements BindingRegistry {
 
         JndiBinding(final ServiceName contextServiceName, final String relativeJndiName) {
             if (contextServiceName == null) {
-                throw new IllegalArgumentException("ServiceName of jndi context cannot be null");
+                throw MESSAGES.nullVar("contextServiceName");
             }
             if (relativeJndiName == null) {
-                throw new IllegalArgumentException("Relative jndi name cannot be null");
+                throw MESSAGES.nullVar("relativeJndiName");
             }
             this.jndiContextServiceName = contextServiceName;
             this.relativeJndiName = relativeJndiName;
@@ -201,7 +191,7 @@ public class AS7BindingRegistry implements BindingRegistry {
             final StringBuffer sb = new StringBuffer();
             if (this.jndiContextServiceName.equals(ContextNames.JBOSS_CONTEXT_SERVICE_NAME)) {
                 sb.append("java:jboss/");
-            } else if (this.jndiContextServiceName.equals(ContextNames.APPLICATION_CONTEXT_NAME)) {
+            } else if (this.jndiContextServiceName.equals(ContextNames.APPLICATION_CONTEXT_SERVICE_NAME)) {
                 sb.append("java:app/");
             } else if (this.jndiContextServiceName.equals(ContextNames.MODULE_CONTEXT_SERVICE_NAME)) {
                 sb.append("java:module/");
@@ -209,8 +199,6 @@ public class AS7BindingRegistry implements BindingRegistry {
                 sb.append("java:comp/");
             } else if (this.jndiContextServiceName.equals(ContextNames.GLOBAL_CONTEXT_SERVICE_NAME)) {
                 sb.append("java:global/");
-            } else if (this.jndiContextServiceName.equals(ContextNames.JAVA_CONTEXT_SERVICE_NAME)) {
-                sb.append("java:/");
             }
             sb.append(this.relativeJndiName);
             return sb.toString();

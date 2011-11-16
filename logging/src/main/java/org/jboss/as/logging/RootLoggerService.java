@@ -30,35 +30,35 @@ import org.jboss.msc.service.StopContext;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 
+import static org.jboss.as.logging.LoggingLogger.ROOT_LOGGER;
+
 /**
  * @author <a href="mailto:david.lloyd@redhat.com">David M. Lloyd</a>
  */
 final class RootLoggerService extends AbstractLoggerService {
-
-    private static final org.jboss.logging.Logger log = org.jboss.logging.Logger.getLogger("org.jboss.as.logging");
 
     private Level level;
 
     private Handler[] saved;
 
     protected RootLoggerService() {
-        super("");
+        super(CommonAttributes.ROOT_LOGGER_NAME);
     }
 
-    protected void start(final StartContext context, final Logger logger) throws StartException {
+    protected synchronized void start(final StartContext context, final Logger logger) throws StartException {
         logger.setLevel(level);
-        log.info("Removing bootstrap log handlers");
+        ROOT_LOGGER.removingBootstrapLogHandlers();
         saved = logger.clearHandlers();
     }
 
-    protected void stop(final StopContext context, final Logger logger) {
+    protected synchronized void stop(final StopContext context, final Logger logger) {
         logger.setLevel(null);
         logger.setUseParentHandlers(true);
         logger.clearHandlers();
         for (Handler handler : saved) {
             logger.addHandler(handler);
         }
-        log.info("Restored bootstrap log handlers");
+        ROOT_LOGGER.restoredBootstrapLogHandlers();
     }
 
     public synchronized Level getLevel() {

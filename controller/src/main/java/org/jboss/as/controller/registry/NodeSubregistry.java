@@ -31,9 +31,11 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
 import org.jboss.as.controller.ProxyController;
-import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.PathElement;
+import org.jboss.as.controller.ResourceDefinition;
 import org.jboss.as.controller.descriptions.DescriptionProvider;
+
+import static org.jboss.as.controller.ControllerMessages.MESSAGES;
 
 /**
  * A registry of values within a specific key type.
@@ -65,7 +67,7 @@ final class NodeSubregistry {
         return new HashSet<String>(snapshot.keySet());
     }
 
-    ManagementResourceRegistration register(final String elementValue, final DescriptionProvider provider, boolean runtimeOnly) {
+    ManagementResourceRegistration register(final String elementValue, final ResourceDefinition provider, boolean runtimeOnly) {
         final AbstractResourceRegistration newRegistry = new ConcreteResourceRegistration(elementValue, this, provider, runtimeOnly);
         register(elementValue, newRegistry);
         return newRegistry;
@@ -81,7 +83,7 @@ final class NodeSubregistry {
         }
         final AbstractResourceRegistration appearingRegistry = childRegistriesUpdater.putIfAbsent(this, elementValue, newRegistry);
         if (appearingRegistry != null) {
-            throw new IllegalArgumentException("A node is already registered at '" + getLocationString() + elementValue + ")'");
+            throw MESSAGES.nodeAlreadyRegistered(getLocationString(), elementValue);
         }
     }
 
@@ -89,7 +91,7 @@ final class NodeSubregistry {
         final ProxyControllerRegistration newRegistry = new ProxyControllerRegistration(elementValue, this, proxyController);
         final AbstractResourceRegistration appearingRegistry = childRegistriesUpdater.putIfAbsent(this, elementValue, newRegistry);
         if (appearingRegistry != null) {
-            throw new IllegalArgumentException("A node is already registered at '" + getLocationString() + elementValue + ")'");
+            throw MESSAGES.nodeAlreadyRegistered(getLocationString(), elementValue);
         }
         //register(elementValue, newRegistry);
         return newRegistry;
@@ -99,15 +101,15 @@ final class NodeSubregistry {
         childRegistriesUpdater.remove(this, elementValue);
     }
 
-    OperationStepHandler getOperationHandler(final ListIterator<PathElement> iterator, final String child, final String operationName, OperationStepHandler inherited) {
+    OperationEntry getOperationEntry(final ListIterator<PathElement> iterator, final String child, final String operationName, OperationEntry inherited) {
         final Map<String, AbstractResourceRegistration> snapshot = childRegistriesUpdater.get(this);
         final AbstractResourceRegistration childRegistry = snapshot.get(child);
         if (childRegistry != null) {
-            return childRegistry.getOperationHandler(iterator, operationName, inherited);
+            return childRegistry.getOperationEntry(iterator, operationName, inherited);
         } else {
             final AbstractResourceRegistration wildcardRegistry = snapshot.get("*");
             if (wildcardRegistry != null) {
-                return wildcardRegistry.getOperationHandler(iterator, operationName, inherited);
+                return wildcardRegistry.getOperationEntry(iterator, operationName, inherited);
             } else {
                 return null;
             }
@@ -119,16 +121,12 @@ final class NodeSubregistry {
         final AbstractResourceRegistration childRegistry = snapshot.get(child);
         final AbstractResourceRegistration wildcardRegistry = snapshot.get("*");
         if (wildcardRegistry == null) {
-            if (childRegistry == null) {
-                return;
-            } else {
+            if (childRegistry != null) {
                 childRegistry.getOperationDescriptions(iterator, providers, inherited);
-                return;
             }
         } else {
             if (childRegistry == null) {
                 wildcardRegistry.getOperationDescriptions(iterator, providers, inherited);
-                return;
             } else {
                 wildcardRegistry.getOperationDescriptions(iterator, providers, inherited);
                 childRegistry.getOperationDescriptions(iterator, providers, inherited);
@@ -138,36 +136,6 @@ final class NodeSubregistry {
 
     String getLocationString() {
         return parent.getLocationString() + "(" + keyName + " => ";
-    }
-
-    DescriptionProvider getOperationDescription(final Iterator<PathElement> iterator, final String child, final String operationName, DescriptionProvider inherited) {
-        final Map<String, AbstractResourceRegistration> snapshot = childRegistries;
-        AbstractResourceRegistration childRegistry = snapshot.get(child);
-        if (childRegistry != null) {
-            return childRegistry.getOperationDescription(iterator, operationName, inherited);
-        } else {
-            final AbstractResourceRegistration wildcardRegistry = snapshot.get("*");
-            if (wildcardRegistry != null) {
-                return wildcardRegistry.getOperationDescription(iterator, operationName, inherited);
-            } else {
-                return null;
-            }
-        }
-    }
-
-    Set<OperationEntry.Flag> getOperationFlags(final ListIterator<PathElement> iterator, final String child, final String operationName, Set<OperationEntry.Flag> inherited) {
-        final Map<String, AbstractResourceRegistration> snapshot = childRegistriesUpdater.get(this);
-        final AbstractResourceRegistration childRegistry = snapshot.get(child);
-        if (childRegistry != null) {
-            return childRegistry.getOperationFlags(iterator, operationName, inherited);
-        } else {
-            final AbstractResourceRegistration wildcardRegistry = snapshot.get("*");
-            if (wildcardRegistry != null) {
-                return wildcardRegistry.getOperationFlags(iterator, operationName, inherited);
-            } else {
-                return null;
-            }
-        }
     }
 
     DescriptionProvider getModelDescription(final Iterator<PathElement> iterator, final String child) {

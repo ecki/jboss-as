@@ -26,8 +26,6 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.BOO
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.DEFAULT;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.DESCRIPTION;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.HEAD_COMMENT_ALLOWED;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.MIN_LENGTH;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.NAME;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.NAMESPACE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.NILLABLE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OPERATIONS;
@@ -38,18 +36,22 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.REQ
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SCHEMA_LOCATION;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.TAIL_COMMENT_ALLOWED;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.TYPE;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.URI;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.VALUE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.VALUE_TYPE;
 
 import java.util.Locale;
 import java.util.ResourceBundle;
 
+import org.jboss.as.controller.descriptions.ResourceDescriptionResolver;
+import org.jboss.as.controller.descriptions.StandardResourceDescriptionResolver;
 import org.jboss.as.controller.operations.common.NamespaceAddHandler;
 import org.jboss.as.controller.operations.common.NamespaceRemoveHandler;
 import org.jboss.as.controller.operations.common.SchemaLocationAddHandler;
 import org.jboss.as.controller.operations.common.SchemaLocationRemoveHandler;
 import org.jboss.as.controller.operations.common.SystemPropertyAddHandler;
 import org.jboss.as.controller.operations.common.SystemPropertyRemoveHandler;
+import org.jboss.as.controller.operations.global.GlobalOperationHandlers;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.ModelType;
 
@@ -61,6 +63,10 @@ import org.jboss.dmr.ModelType;
 public class CommonDescriptions {
 
     private static final String RESOURCE_NAME = CommonDescriptions.class.getPackage().getName() + ".LocalDescriptions";
+
+    public static ResourceDescriptionResolver getResourceDescriptionResolver(final String keyPrefix) {
+        return new StandardResourceDescriptionResolver(keyPrefix, RESOURCE_NAME, CommonDescriptions.class.getClassLoader(), true, true);
+    }
 
     public static ModelNode getNamespacePrefixAttribute(final Locale locale) {
         final ResourceBundle bundle = getResourceBundle(locale);
@@ -91,10 +97,12 @@ public class CommonDescriptions {
         final ModelNode root = new ModelNode();
         root.get(OPERATION_NAME).set(NamespaceAddHandler.OPERATION_NAME);
         root.get(DESCRIPTION).set(bundle.getString("namespaces.add"));
-        root.get(REQUEST_PROPERTIES, NAMESPACE, TYPE).set(ModelType.PROPERTY);
-        root.get(REQUEST_PROPERTIES, NAMESPACE, VALUE_TYPE).set(ModelType.STRING);
-        root.get(REQUEST_PROPERTIES, NAMESPACE, DESCRIPTION).set(bundle.getString("namespaces.add.namespace"));
+        root.get(REQUEST_PROPERTIES, NAMESPACE, TYPE).set(ModelType.STRING);
+        root.get(REQUEST_PROPERTIES, NAMESPACE, DESCRIPTION).set(bundle.getString("namespaces.add.prefix"));
         root.get(REQUEST_PROPERTIES, NAMESPACE, REQUIRED).set(true);
+        root.get(REQUEST_PROPERTIES, URI, TYPE).set(ModelType.STRING);
+        root.get(REQUEST_PROPERTIES, URI, DESCRIPTION).set(bundle.getString("namespaces.add.uri"));
+        root.get(REQUEST_PROPERTIES, URI, REQUIRED).set(true);
         root.get(REPLY_PROPERTIES).setEmptyObject();
 
         return root;
@@ -117,8 +125,10 @@ public class CommonDescriptions {
         final ModelNode root = new ModelNode();
         root.get(OPERATION_NAME).set(SchemaLocationAddHandler.OPERATION_NAME);
         root.get(DESCRIPTION).set(bundle.getString("schema-locations.add"));
-        root.get(REQUEST_PROPERTIES, SCHEMA_LOCATION, TYPE).set(ModelType.PROPERTY);
-        root.get(REQUEST_PROPERTIES, SCHEMA_LOCATION, VALUE_TYPE).set(ModelType.STRING);
+        root.get(REQUEST_PROPERTIES, URI, TYPE).set(ModelType.STRING);
+        root.get(REQUEST_PROPERTIES, URI, DESCRIPTION).set(bundle.getString("schema-locations.add.uri"));
+        root.get(REQUEST_PROPERTIES, URI, REQUIRED).set(true);
+        root.get(REQUEST_PROPERTIES, SCHEMA_LOCATION, TYPE).set(ModelType.STRING);
         root.get(REQUEST_PROPERTIES, SCHEMA_LOCATION, DESCRIPTION).set(bundle.getString("schema-locations.add.schema-location"));
         root.get(REQUEST_PROPERTIES, SCHEMA_LOCATION, REQUIRED).set(true);
         root.get(REPLY_PROPERTIES).setEmptyObject();
@@ -132,9 +142,9 @@ public class CommonDescriptions {
         final ModelNode root = new ModelNode();
         root.get(OPERATION_NAME).set(SchemaLocationRemoveHandler.OPERATION_NAME);
         root.get(DESCRIPTION).set(bundle.getString("schema-locations.remove"));
-        root.get(REQUEST_PROPERTIES, SCHEMA_LOCATION, TYPE).set(ModelType.STRING);
-        root.get(REQUEST_PROPERTIES, SCHEMA_LOCATION, DESCRIPTION).set(bundle.getString("schema-locations.remove.schema-location"));
-        root.get(REQUEST_PROPERTIES, SCHEMA_LOCATION, REQUIRED).set(true);
+        root.get(REQUEST_PROPERTIES, URI, TYPE).set(ModelType.STRING);
+        root.get(REQUEST_PROPERTIES, URI, DESCRIPTION).set(bundle.getString("schema-locations.remove.schema-uri"));
+        root.get(REQUEST_PROPERTIES, URI, REQUIRED).set(true);
         root.get(REPLY_PROPERTIES).setEmptyObject();
         return root;
     }
@@ -199,6 +209,16 @@ public class CommonDescriptions {
         return root;
     }
 
+    public static ModelNode getValidateAddressOperation(final Locale locale) {
+        final ResourceBundle bundle = getResourceBundle(locale);
+        final ModelNode root = new ModelNode();
+        root.get(OPERATION_NAME).set(GlobalOperationHandlers.VALIDATE_ADDRESS_OPERATION_NAME);
+        root.get(DESCRIPTION).set(bundle.getString("validate-address"));
+        root.get(REQUEST_PROPERTIES).setEmptyObject();
+        root.get(REPLY_PROPERTIES).setEmptyObject();
+        return root;
+    }
+
     public static ModelNode getSubsystemDescribeOperation(final Locale locale) {
         final ResourceBundle bundle = getResourceBundle(locale);
         final ModelNode root = new ModelNode();
@@ -217,6 +237,84 @@ public class CommonDescriptions {
         root.get(TAIL_COMMENT_ALLOWED).set(false);
         root.get(OPERATIONS);
         return root;
+    }
+
+    public static ModelNode getDescriptionOnlyOperation(final ResourceBundle bundle, final String operationName, final String descriptionPrefix) {
+
+        final ModelNode node = new ModelNode();
+        node.get(OPERATION_NAME).set(operationName);
+        String descriptionKey = descriptionPrefix == null ? operationName : descriptionPrefix + "." + operationName;
+        node.get(DESCRIPTION).set(bundle.getString(descriptionKey));
+
+        node.get(REQUEST_PROPERTIES).setEmptyObject();
+        node.get(REPLY_PROPERTIES).setEmptyObject();
+
+        return node;
+    }
+
+    public static ModelNode getSingleParamOnlyOperation(final ResourceBundle bundle, final String operationName,
+                                                         final String descriptionPrefix, final String paramName,
+                                                        final ModelType paramType, final boolean nillable) {
+
+        final ModelNode node = new ModelNode();
+        node.get(OPERATION_NAME).set(operationName);
+        String descriptionKey = descriptionPrefix == null ? operationName : descriptionPrefix + "." + operationName;
+        node.get(DESCRIPTION).set(bundle.getString(descriptionKey));
+
+        final ModelNode param = node.get(REQUEST_PROPERTIES, paramName);
+        param.get(DESCRIPTION).set(bundle.getString(descriptionKey + "." + paramName));
+        param.get(TYPE).set(paramType);
+        param.get(REQUIRED).set(!nillable);
+        param.get(NILLABLE).set(nillable);
+
+        node.get(REPLY_PROPERTIES).setEmptyObject();
+
+        return node;
+    }
+
+    public static ModelNode getNoArgSimpleReplyOperation(final ResourceBundle bundle, final String operationName,
+                                                         final String descriptionPrefix, final ModelType replyType,
+                                                         final boolean describeReply) {
+        final ModelNode result = getDescriptionOnlyOperation(bundle, operationName, descriptionPrefix);
+        if (describeReply) {
+            String replyKey = descriptionPrefix == null ? operationName + ".reply" : descriptionPrefix + "." + operationName + ".reply";
+            result.get(REPLY_PROPERTIES, DESCRIPTION).set(bundle.getString(replyKey));
+        }
+        result.get(REPLY_PROPERTIES, TYPE).set(replyType);
+
+        return result;
+    }
+
+    public static ModelNode getSingleParamSimpleReplyOperation(final ResourceBundle bundle, final String operationName,
+                                                         final String descriptionPrefix, final String paramName,
+                                                         final ModelType paramType, final boolean paramNillable,
+                                                         final ModelType replyType, final boolean describeReply) {
+        final ModelNode result = getSingleParamOnlyOperation(bundle, operationName, descriptionPrefix, paramName, paramType, paramNillable);
+        if (describeReply) {
+            String replyKey = descriptionPrefix == null ? operationName + ".reply" : descriptionPrefix + "." + operationName + ".reply";
+            result.get(REPLY_PROPERTIES, DESCRIPTION).set(bundle.getString(replyKey));
+        }
+        result.get(REPLY_PROPERTIES, TYPE).set(replyType);
+
+        return result;
+    }
+
+    public static ModelNode getNoArgSimpleListReplyOperation(final ResourceBundle bundle, final String operationName,
+                                                         final String descriptionPrefix, final ModelType listValueType,
+                                                         final boolean describeReply) {
+        ModelNode result = getNoArgSimpleReplyOperation(bundle, operationName, descriptionPrefix, ModelType.LIST, describeReply);
+        result.get(REPLY_PROPERTIES, VALUE_TYPE).set(listValueType);
+        return result;
+    }
+
+    public static ModelNode getSingleParamSimpleListReplyOperation(final ResourceBundle bundle, final String operationName,
+                                                         final String descriptionPrefix, final String paramName,
+                                                         final ModelType paramType, final boolean paramNillable,
+                                                         final ModelType listValueType, final boolean describeReply) {
+        ModelNode result = getSingleParamSimpleReplyOperation(bundle, operationName, descriptionPrefix, paramName,
+                paramType, paramNillable, ModelType.LIST, describeReply);
+        result.get(REPLY_PROPERTIES, VALUE_TYPE).set(listValueType);
+        return result;
     }
 
     private static ResourceBundle getResourceBundle(Locale locale) {

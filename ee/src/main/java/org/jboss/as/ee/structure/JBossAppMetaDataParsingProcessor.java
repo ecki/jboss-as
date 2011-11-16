@@ -22,10 +22,7 @@
 
 package org.jboss.as.ee.structure;
 
-import java.io.InputStream;
-
-import javax.xml.stream.XMLInputFactory;
-import javax.xml.stream.XMLStreamReader;
+import static org.jboss.as.ee.EeMessages.MESSAGES;
 
 import org.jboss.as.server.deployment.DeploymentPhaseContext;
 import org.jboss.as.server.deployment.DeploymentUnit;
@@ -39,6 +36,10 @@ import org.jboss.metadata.parser.jboss.JBossAppMetaDataParser;
 import org.jboss.metadata.parser.util.NoopXmlResolver;
 import org.jboss.vfs.VFSUtils;
 import org.jboss.vfs.VirtualFile;
+
+import javax.xml.stream.XMLInputFactory;
+import javax.xml.stream.XMLStreamReader;
+import java.io.InputStream;
 
 /**
  * Deployment processor responsible for parsing the jboss-app.xml file of an ear.
@@ -75,7 +76,7 @@ public class JBossAppMetaDataParsingProcessor implements DeploymentUnitProcessor
                 deploymentUnit.putAttachment(Attachments.JBOSS_APP_METADATA, appMetaData);
             }
         } catch (Exception e) {
-            throw new DeploymentUnitProcessingException("Failed to parse " + applicationXmlFile, e);
+            throw MESSAGES.failedToParse(e, applicationXmlFile);
         } finally {
             VFSUtils.safeClose(inputStream);
         }

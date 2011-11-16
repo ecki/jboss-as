@@ -31,13 +31,12 @@ import org.jboss.dmr.ModelNode;
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.InetAddress;
 import java.net.URL;
 import java.net.URLConnection;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.jboss.as.protocol.old.StreamUtils.safeClose;
+import static org.jboss.as.protocol.StreamUtils.safeClose;
 
 /**
  * @author Emanuel Muckenhuber
@@ -46,9 +45,9 @@ public class ExampleRunner {
 
     public static void main(String[] args) throws Exception {
         DeploymentUtils utils = null;
-        final ModelControllerClient client = ModelControllerClient.Factory.create(InetAddress.getByName("localhost"), 9999);
         try {
             utils = new DeploymentUtils();
+            ModelControllerClient client = utils.getClient();
             utils.addWarDeployment("war-example.war", true, SimpleServlet.class.getPackage());
             utils.deploy();
 
@@ -80,7 +79,6 @@ public class ExampleRunner {
         } finally {
             utils.undeploy();
             safeClose(utils);
-            safeClose(client);
         }
 
     }

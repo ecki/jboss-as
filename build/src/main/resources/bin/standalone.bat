@@ -27,10 +27,17 @@ if "x%STANDALONE_CONF%" == "x" (
    set STANDALONE_CONF=%DIRNAME%standalone.conf.bat
 )
 if exist "%STANDALONE_CONF%" (
+<<<<<<< HEAD
    echo Calling "%STANDALONE_CONF%".
    call "%STANDALONE_CONF%" %*
 ) else (
    echo Config file not found "%STANDALONE_CONF%".
+=======
+   echo Calling "%STANDALONE_CONF%"
+   call "%STANDALONE_CONF%" %*
+) else (
+   echo Config file not found "%STANDALONE_CONF%"
+>>>>>>> upstream/master
 )
 
 set DIRNAME=
@@ -66,6 +73,11 @@ rem Setup JBoss specific properties
 rem Setup the java endorsed dirs
 set JBOSS_ENDORSED_DIRS=%JBOSS_HOME%\lib\endorsed
 
+rem Set default module root paths
+if "x%MODULEPATH%" == "x" (
+  set  "MODULEPATH=%JBOSS_HOME%\modules"
+)
+
 echo ===============================================================================
 echo.
 echo   JBoss Bootstrap Environment
@@ -81,12 +93,21 @@ echo.
 
 :RESTART
 "%JAVA%" %JAVA_OPTS% ^
+<<<<<<< HEAD
  -Dorg.jboss.boot.log.file="%JBOSS_HOME%\standalone\log\boot.log" ^
  -Dlogging.configuration="file:%JBOSS_HOME%/standalone/configuration/logging.properties" ^
     -jar "%RUNJAR%" ^
     -mp "%JBOSS_HOME%\modules" ^
     -logmodule org.jboss.logmanager ^
     -jaxpmodule javax.xml.jaxp-provider ^
+=======
+ "-Dorg.jboss.boot.log.file=%JBOSS_HOME%\standalone\log\boot.log" ^
+ "-Dlogging.configuration=file:%JBOSS_HOME%/standalone/configuration/logging.properties" ^
+    -jar "%JBOSS_HOME%\jboss-modules.jar" ^
+    -mp "%MODULEPATH%" ^
+    -logmodule "org.jboss.logmanager" ^
+    -jaxpmodule "javax.xml.jaxp-provider" ^
+>>>>>>> upstream/master
      org.jboss.as.standalone ^
     -Djboss.home.dir="%JBOSS_HOME%" ^
      %*

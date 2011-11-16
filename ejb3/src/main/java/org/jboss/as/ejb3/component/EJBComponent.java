@@ -21,21 +21,11 @@
  */
 package org.jboss.as.ejb3.component;
 
-import org.jboss.as.ee.component.BasicComponent;
-import org.jboss.as.ee.component.ComponentView;
-import org.jboss.as.ee.component.ComponentViewInstance;
-import org.jboss.as.ejb3.security.EJBSecurityMetaData;
-import org.jboss.as.naming.context.NamespaceContextSelector;
-import org.jboss.as.security.service.SimpleSecurityManager;
-import org.jboss.as.server.CurrentServiceContainer;
-import org.jboss.ejb3.context.CurrentInvocationContext;
-import org.jboss.ejb3.context.spi.InvocationContext;
-import org.jboss.invocation.proxy.MethodIdentifier;
-import org.jboss.logging.Logger;
-import org.jboss.msc.service.ServiceController;
-import org.jboss.msc.service.ServiceName;
+import java.lang.reflect.Method;
+import java.security.Principal;
+import java.util.Collections;
+import java.util.Map;
 
-import javax.ejb.ApplicationException;
 import javax.ejb.EJBHome;
 import javax.ejb.EJBLocalHome;
 import javax.ejb.TimerService;
@@ -49,44 +39,54 @@ import javax.transaction.SystemException;
 import javax.transaction.TransactionManager;
 import javax.transaction.TransactionSynchronizationRegistry;
 import javax.transaction.UserTransaction;
-import java.lang.annotation.Annotation;
-import java.lang.reflect.Method;
-import java.security.Principal;
-import java.util.Collections;
-import java.util.Map;
+
+import org.jboss.as.ee.component.BasicComponent;
+import org.jboss.as.ee.component.ComponentView;
+import org.jboss.as.ejb3.context.CurrentInvocationContext;
+import org.jboss.as.ejb3.remote.EJBRemoteTransactionsRepository;
+import org.jboss.as.ejb3.security.EJBSecurityMetaData;
+import org.jboss.as.ejb3.timerservice.spi.TimedObjectInvoker;
+import org.jboss.as.ejb3.tx.ApplicationExceptionDetails;
+import org.jboss.as.naming.ManagedReference;
+import org.jboss.as.naming.context.NamespaceContextSelector;
+import org.jboss.as.security.service.SimpleSecurityManager;
+import org.jboss.as.server.CurrentServiceContainer;
+import org.jboss.ejb.client.EJBClient;
+import org.jboss.ejb.client.EJBHomeLocator;
+import org.jboss.invocation.InterceptorContext;
+import org.jboss.invocation.InterceptorFactory;
+import org.jboss.invocation.proxy.MethodIdentifier;
+import org.jboss.logging.Logger;
+import org.jboss.msc.service.ServiceController;
+import org.jboss.msc.service.ServiceName;
 
 /**
  * @author <a href="mailto:cdewolf@redhat.com">Carlo de Wolf</a>
  */
-public abstract class EJBComponent extends BasicComponent implements org.jboss.ejb3.context.spi.EJBComponent {
-    private static Logger log = Logger.getLogger(EJBComponent.class);
+public abstract class EJBComponent extends BasicComponent {
+    private static final Logger log = Logger.getLogger(EJBComponent.class);
 
-    private static final ApplicationException APPLICATION_EXCEPTION = new ApplicationException() {
-        @Override
-        public boolean inherited() {
-            return true;
-        }
-
-        @Override
-        public boolean rollback() {
-            return false;
-        }
-
-        @Override
-        public Class<? extends Annotation> annotationType() {
-            return ApplicationException.class;
-        }
-    };
+    private static final ApplicationExceptionDetails APPLICATION_EXCEPTION = new ApplicationExceptionDetails("java.lang.Exception", true, false);
 
     private final Map<MethodTransactionAttributeKey, TransactionAttributeType> txAttrs;
 
     private final EJBUtilities utilities;
     private final boolean isBeanManagedTransaction;
-    private static volatile boolean youHaveBeenWarnedEJBTHREE2120 = false;
-    private final Map<Class<?>, ApplicationException> applicationExceptions;
+    private final Map<Class<?>, ApplicationExceptionDetails> applicationExceptions;
     private final EJBSecurityMetaData securityMetaData;
     private final Map<String, ServiceName> viewServices;
+    private final ServiceName ejbLocalHome;
+    private final ServiceName ejbHome;
+
     private final TimerService timerService;
+    protected final Map<Method, InterceptorFactory> timeoutInterceptors;
+    private final Method timeoutMethod;
+    private final String applicationName;
+    private final String earApplicationName;
+    private final String moduleName;
+    private final String distinctName;
+    private final EJBRemoteTransactionsRepository ejbRemoteTransactionsRepository;
+
 
     /**
      * Construct a new instance.
@@ -97,12 +97,12 @@ public abstract class EJBComponent extends BasicComponent implements org.jboss.e
         super(ejbComponentCreateService);
 
 
-        this.applicationExceptions = Collections.unmodifiableMap(ejbComponentCreateService.getEjbJarConfiguration().getApplicationExceptions());
+        this.applicationExceptions = Collections.unmodifiableMap(ejbComponentCreateService.getApplicationExceptions().getApplicationExceptions());
 
         this.utilities = ejbComponentCreateService.getEJBUtilities();
 
         final Map<MethodTransactionAttributeKey, TransactionAttributeType> txAttrs = ejbComponentCreateService.getTxAttrs();
-        if(txAttrs == null || txAttrs.isEmpty()) {
+        if (txAttrs == null || txAttrs.isEmpty()) {
             this.txAttrs = Collections.emptyMap();
         } else {
             this.txAttrs = txAttrs;
@@ -113,23 +113,38 @@ public abstract class EJBComponent extends BasicComponent implements org.jboss.e
         this.securityMetaData = ejbComponentCreateService.getSecurityMetaData();
         this.viewServices = ejbComponentCreateService.getViewServices();
         this.timerService = ejbComponentCreateService.getTimerService();
+        this.timeoutInterceptors = ejbComponentCreateService.getTimeoutInterceptors();
+        this.timeoutMethod = ejbComponentCreateService.getTimeoutMethod();
+        this.ejbLocalHome = ejbComponentCreateService.getEjbLocalHome();
+        this.ejbHome = ejbComponentCreateService.getEjbHome();
+        this.applicationName = ejbComponentCreateService.getApplicationName();
+        this.earApplicationName = ejbComponentCreateService.getEarApplicationName();
+        this.distinctName = ejbComponentCreateService.getDistinctName();
+        this.moduleName = ejbComponentCreateService.getModuleName();
+
+        this.ejbRemoteTransactionsRepository = ejbComponentCreateService.getEJBRemoteTransactionsRepository();
     }
 
     protected <T> T createViewInstanceProxy(final Class<T> viewInterface, final Map<Object, Object> contextData) {
         if (viewInterface == null)
             throw new IllegalArgumentException("View interface is null");
         if (viewServices.containsKey(viewInterface.getName())) {
-            final ServiceController<?> serviceController = CurrentServiceContainer.getServiceContainer().getRequiredService(viewServices.get(viewInterface.getName()));
-            final ComponentView view = (ComponentView) serviceController.getValue();
-            final ComponentViewInstance instance = view.createInstance(contextData);
-            return viewInterface.cast(instance.createProxy());
+            final ServiceName serviceName = viewServices.get(viewInterface.getName());
+            return createViewInstanceProxy(viewInterface, contextData, serviceName);
         } else {
             throw new IllegalStateException("View of type " + viewInterface + " not found on bean " + this);
         }
     }
 
-    public ApplicationException getApplicationException(Class<?> exceptionClass, Method invokedMethod) {
-        ApplicationException applicationException = this.applicationExceptions.get(exceptionClass);
+    protected <T> T createViewInstanceProxy(final Class<T> viewInterface, final Map<Object, Object> contextData, final ServiceName serviceName) {
+        final ServiceController<?> serviceController = CurrentServiceContainer.getServiceContainer().getRequiredService(serviceName);
+        final ComponentView view = (ComponentView) serviceController.getValue();
+        final ManagedReference instance = view.createInstance(contextData);
+        return viewInterface.cast(instance.getInstance());
+    }
+
+    public ApplicationExceptionDetails getApplicationException(Class<?> exceptionClass, Method invokedMethod) {
+        ApplicationExceptionDetails applicationException = this.applicationExceptions.get(exceptionClass);
         if (applicationException != null) {
             return applicationException;
         }
@@ -141,7 +156,7 @@ public abstract class EJBComponent extends BasicComponent implements org.jboss.e
             // is an application exception only if the inherited attribute on the parent application exception
             // is set to true.
             if (applicationException != null) {
-                if (applicationException.inherited()) {
+                if (applicationException.isInherited()) {
                     return applicationException;
                 }
                 // Once we find a super class which is an application exception,
@@ -173,7 +188,7 @@ public abstract class EJBComponent extends BasicComponent implements org.jboss.e
     }
 
     protected TransactionAttributeType getCurrentTransactionAttribute() {
-        final InvocationContext currentInvocationContext = CurrentInvocationContext.get();
+        final InterceptorContext currentInvocationContext = CurrentInvocationContext.get();
         if (currentInvocationContext == null) {
             return null;
         }
@@ -186,17 +201,23 @@ public abstract class EJBComponent extends BasicComponent implements org.jboss.e
         return this.getTransactionAttributeType(invokedMethod);
     }
 
-    @Override
     public EJBHome getEJBHome() throws IllegalStateException {
-        throw new RuntimeException("NYI: org.jboss.as.ejb3.component.EJBComponent.getEJBHome");
+        if (ejbHome == null) {
+            throw new IllegalStateException("Bean " + getComponentName() + " does not have a Home interface");
+        }
+        final ServiceController<?> serviceController = CurrentServiceContainer.getServiceContainer().getRequiredService(ejbHome);
+        final ComponentView view = (ComponentView) serviceController.getValue();
+        final String locatorAppName = earApplicationName == null ? "" : earApplicationName;
+        return EJBClient.createProxy(new EJBHomeLocator<EJBHome>((Class<EJBHome>) view.getViewClass(), locatorAppName, moduleName, getComponentName(), distinctName));
     }
 
-    @Override
     public EJBLocalHome getEJBLocalHome() throws IllegalStateException {
-        throw new RuntimeException("NYI: org.jboss.as.ejb3.component.EJBComponent.getEJBLocalHome");
+        if (ejbLocalHome == null) {
+            throw new IllegalStateException("Bean " + getComponentName() + " does not have a Local Home interface");
+        }
+        return createViewInstanceProxy(EJBLocalHome.class, Collections.emptyMap(), ejbLocalHome);
     }
 
-    @Override
     public boolean getRollbackOnly() throws IllegalStateException {
         if (isBeanManagedTransaction()) {
             throw new IllegalStateException("EJB 3.1 FR 13.6.1 Only beans with container-managed transaction demarcation " +
@@ -236,7 +257,6 @@ public abstract class EJBComponent extends BasicComponent implements org.jboss.e
         return utilities.getSecurityManager();
     }
 
-    @Override
     public TimerService getTimerService() throws IllegalStateException {
         return timerService;
     }
@@ -247,7 +267,7 @@ public abstract class EJBComponent extends BasicComponent implements org.jboss.e
     }
 
     public TransactionAttributeType getTransactionAttributeType(MethodIntf methodIntf, Method method) {
-       TransactionAttributeType txAttr = txAttrs.get(new MethodTransactionAttributeKey(methodIntf, MethodIdentifier.getIdentifierForMethod(method)));
+        TransactionAttributeType txAttr = txAttrs.get(new MethodTransactionAttributeKey(methodIntf, MethodIdentifier.getIdentifierForMethod(method)));
         if (txAttr == null)
             return TransactionAttributeType.REQUIRED;
         return txAttr;
@@ -265,7 +285,6 @@ public abstract class EJBComponent extends BasicComponent implements org.jboss.e
         return -1; // un-configured
     }
 
-    @Override
     public UserTransaction getUserTransaction() throws IllegalStateException {
         if (!isBeanManagedTransaction())
             throw new IllegalStateException("EJB 3.1 FR 4.3.3 & 5.4.5 Only beans with bean-managed transaction demarcation can use this method.");
@@ -277,16 +296,9 @@ public abstract class EJBComponent extends BasicComponent implements org.jboss.e
     }
 
     public boolean isCallerInRole(final String roleName) throws IllegalStateException {
-        return utilities.getSecurityManager().isCallerInRole(roleName);
+        return utilities.getSecurityManager().isCallerInRole(securityMetaData.getSecurityRoles(), roleName);
     }
 
-    @Deprecated
-    @Override
-    public boolean isCallerInRole(final Principal callerPrincipal, final String roleName) throws IllegalStateException {
-        return isCallerInRole(roleName);
-    }
-
-    @Override
     public Object lookup(String name) throws IllegalArgumentException {
         if (name == null) {
             throw new IllegalArgumentException("jndi name cannot be null during lookup");
@@ -334,7 +346,6 @@ public abstract class EJBComponent extends BasicComponent implements org.jboss.e
         }
     }
 
-    @Override
     public void setRollbackOnly() throws IllegalStateException {
         if (isBeanManagedTransaction()) {
             throw new IllegalStateException("EJB 3.1 FR 13.6.1 Only beans with container-managed transaction demarcation " +
@@ -356,5 +367,39 @@ public abstract class EJBComponent extends BasicComponent implements org.jboss.e
 
     public EJBSecurityMetaData getSecurityMetaData() {
         return this.securityMetaData;
+    }
+
+    public TimedObjectInvoker getTimedObjectInvoker() {
+        return null;
+    }
+
+    public Method getTimeoutMethod() {
+        return timeoutMethod;
+    }
+
+    public String getApplicationName() {
+        return applicationName;
+    }
+
+    public String getEarApplicationName() {
+        return this.earApplicationName;
+    }
+
+    public String getDistinctName() {
+        return distinctName;
+    }
+
+    public String getModuleName() {
+        return moduleName;
+    }
+
+    /**
+     * Returns the {@link EJBRemoteTransactionsRepository} if there is atleast one remote view (either
+     * ejb3.x business remote, ejb2.x remote component or home view) is exposed. Else returns null.
+     *
+     * @return
+     */
+    public EJBRemoteTransactionsRepository getEjbRemoteTransactionsRepository() {
+        return this.ejbRemoteTransactionsRepository;
     }
 }

@@ -22,56 +22,38 @@
 
 package org.jboss.as.ee.component;
 
-import java.util.Collection;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+import java.util.List;
 
 /**
- * Stores a deployments {@link EEModuleClassDescription}.
+ * Allows a deployment to get old of class descriptions from all sub deployments it has access to.
  *
- * For sub deployments creation of the description is delegated to the parent, to ensure that
- * no more than 1 EEModuleClassDescription can be created per class.
+ * This maintains a list of all {@link EEModuleDescription}s that this sub deployment has access to,
+ * in the same order they appear in the dependencies list.
  *
  * @author Stuart Douglas
  */
 public final class EEApplicationClasses {
 
-    private final ConcurrentMap<String, EEModuleClassDescription> classesByName = new ConcurrentHashMap<String, EEModuleClassDescription>();
-    private final EEApplicationClasses parent;
+    //TODO: should we build a map of the available classes
+    private final List<EEModuleDescription> availableModules;
 
-    public EEApplicationClasses(final EEApplicationClasses parent) {
-        this.parent = parent;
+    public EEApplicationClasses(final List<EEModuleDescription> availableModules) {
+        this.availableModules = availableModules;
     }
 
-    public EEApplicationClasses() {
-        this.parent = null;
-    }
 
+    /**
+     * Look for a class description in all available modules.
+     * @param name The class to lookup
+     * @return
+     */
     public EEModuleClassDescription getClassByName(String name) {
-        return classesByName.get(name);
-    }
-
-    public EEModuleClassDescription getOrAddClassByName(String name) {
-        if (name == null) {
-            throw new IllegalArgumentException("Name cannot be null");
-        }
-
-        EEModuleClassDescription description = classesByName.get(name);
-
-        if (description == null && parent != null) {
-            description = parent.getOrAddClassByName(name);
-            classesByName.put(name, description);
-        } else {
-            description = new EEModuleClassDescription(name);
-            EEModuleClassDescription existing = classesByName.putIfAbsent(name, description);
-            if (existing != null) {
-                return existing;
+        for(EEModuleDescription module : availableModules) {
+            final EEModuleClassDescription desc = module.getClassDescription(name);
+            if(desc != null) {
+                return desc;
             }
         }
-        return description;
-    }
-
-    public Collection<EEModuleClassDescription> getClassDescriptions() {
-        return classesByName.values();
+        return null;
     }
 }

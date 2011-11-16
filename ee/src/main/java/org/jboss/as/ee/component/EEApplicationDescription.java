@@ -22,8 +22,6 @@
 
 package org.jboss.as.ee.component;
 
-import org.jboss.vfs.VirtualFile;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -31,6 +29,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
+
+import org.jboss.vfs.VirtualFile;
 
 /**
  * @author John Bailey
@@ -38,7 +39,6 @@ import java.util.Set;
 public class EEApplicationDescription {
     private final Map<String, List<ViewInformation>> componentsByViewName = new HashMap<String, List<ViewInformation>>();
     private final Map<String, List<Description>> componentsByName = new HashMap<String, List<Description>>();
-    private final Map<String, EEModuleClassConfiguration> classesByName = new HashMap<String, EEModuleClassConfiguration>();
 
     /**
      * Add a component to this application.
@@ -138,7 +138,10 @@ public class EEApplicationDescription {
         }
         if (componentName.contains("#")) {
             final String[] parts = componentName.split("#");
-            final String path = parts[0];
+            String path = parts[0];
+            if(!path.startsWith("../")) {
+                path = "../" + path;
+            }
             final VirtualFile virtualPath = deploymentRoot.getChild(path);
             final String name = parts[1];
             final Set<ViewDescription> ret = new HashSet<ViewDescription>();
@@ -168,15 +171,6 @@ public class EEApplicationDescription {
             return all;
         }
     }
-
-    public void addClass(EEModuleClassConfiguration eeModuleClassDescription) {
-        classesByName.put(eeModuleClassDescription.getModuleClass().getName(), eeModuleClassDescription);
-    }
-
-    public EEModuleClassConfiguration getClassConfiguration(String name) {
-        return classesByName.get(name);
-    }
-
 
     private static class ViewInformation {
         private final ViewDescription viewDescription;

@@ -40,9 +40,8 @@ import javax.jms.TextMessage;
 import javax.management.MBeanServerConnection;
 import javax.management.ObjectName;
 import java.io.IOException;
-import java.net.InetAddress;
 
-import static org.jboss.as.protocol.old.StreamUtils.safeClose;
+import static org.jboss.as.protocol.StreamUtils.safeClose;
 
 /**
  * Demo using the AS management API to create and destroy a JMS queue.
@@ -56,17 +55,19 @@ public class ExampleRunner {
     public static void main(String[] args) throws Exception {
         QueueConnection conn = null;
         QueueSession session = null;
-        ModelControllerClient client = ModelControllerClient.Factory.create(InetAddress.getByName("localhost"), 9999);
         //TODO Don't do this FakeJndi stuff once we have remote JNDI working
         DeploymentUtils utils = null;
+        ModelControllerClient client = null;
         boolean actionsApplied = false;
         try {
             utils = new DeploymentUtils("fakejndi.sar", FakeJndi.class.getPackage());
+            client = utils.getClient();
             utils.deploy();
 
             ModelNode op = new ModelNode();
             op.get("operation").set("add");
             op.get("address").add("subsystem", "messaging");
+            op.get("address").add("hornetq-server", "default");
             op.get("address").add("jms-queue", QUEUE_NAME);
             op.get("entries").add(QUEUE_NAME);
             applyUpdate(op, client);
@@ -103,7 +104,6 @@ public class ExampleRunner {
             }
 
             Thread.sleep(1000);
-
         } finally {
             try {
                 conn.stop();
@@ -121,16 +121,16 @@ public class ExampleRunner {
             if(utils != null) {
                 utils.undeploy();
             }
-            safeClose(utils);
             if(actionsApplied) {
                 // Remove the queue using the management API
                 ModelNode op = new ModelNode();
                 op.get("operation").set("remove");
                 op.get("address").add("subsystem", "messaging");
+                op.get("address").add("hornetq-server", "default");
                 op.get("address").add("jms-queue", QUEUE_NAME);
                 applyUpdate(op, client);
             }
-            safeClose(client);
+            safeClose(utils);
         }
     }
 

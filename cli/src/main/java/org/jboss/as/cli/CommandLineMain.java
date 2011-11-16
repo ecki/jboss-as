@@ -22,10 +22,12 @@
 package org.jboss.as.cli;
 
 import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileDescriptor;
 import java.io.FileInputStream;
 import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStreamWriter;
@@ -90,19 +92,19 @@ import org.jboss.as.cli.handlers.jms.JmsQueueAddHandler;
 import org.jboss.as.cli.handlers.jms.JmsQueueRemoveHandler;
 import org.jboss.as.cli.handlers.jms.JmsTopicAddHandler;
 import org.jboss.as.cli.handlers.jms.JmsTopicRemoveHandler;
-import org.jboss.as.cli.impl.DefaultParsedArguments;
 import org.jboss.as.cli.operation.OperationCandidatesProvider;
 import org.jboss.as.cli.operation.OperationFormatException;
 import org.jboss.as.cli.operation.OperationRequestAddress;
-import org.jboss.as.cli.operation.OperationRequestParser;
+import org.jboss.as.cli.operation.CommandLineParser;
+import org.jboss.as.cli.operation.ParsedCommandLine;
 import org.jboss.as.cli.operation.PrefixFormatter;
+import org.jboss.as.cli.operation.impl.DefaultCallbackHandler;
 import org.jboss.as.cli.operation.impl.DefaultOperationCandidatesProvider;
 import org.jboss.as.cli.operation.impl.DefaultOperationRequestAddress;
-import org.jboss.as.cli.operation.impl.DefaultOperationRequestBuilder;
 import org.jboss.as.cli.operation.impl.DefaultOperationRequestParser;
 import org.jboss.as.cli.operation.impl.DefaultPrefixFormatter;
 import org.jboss.as.controller.client.ModelControllerClient;
-import org.jboss.as.protocol.old.StreamUtils;
+import org.jboss.as.protocol.StreamUtils;
 import org.jboss.dmr.ModelNode;
 import org.jboss.sasl.JBossSaslProvider;
 
@@ -125,15 +127,6 @@ public class CommandLineMain {
         cmdRegistry.registerHandler(new UndeployHandler(), "undeploy");
         cmdRegistry.registerHandler(new PrintWorkingNodeHandler(), "pwd", "pwn");
 
-        cmdRegistry.registerHandler(new JmsQueueAddHandler(), "add-jms-queue");
-        cmdRegistry.registerHandler(new JmsQueueRemoveHandler(), "remove-jms-queue");
-        cmdRegistry.registerHandler(new JmsTopicAddHandler(), "add-jms-topic");
-        cmdRegistry.registerHandler(new JmsTopicRemoveHandler(), "remove-jms-topic");
-        cmdRegistry.registerHandler(new JmsCFAddHandler(), "add-jms-cf");
-        cmdRegistry.registerHandler(new JmsCFRemoveHandler(), "remove-jms-cf");
-        cmdRegistry.registerHandler(new CreateJmsResourceHandler(), false, "create-jms-resource");
-        cmdRegistry.registerHandler(new DeleteJmsResourceHandler(), false, "delete-jms-resource");
-
         cmdRegistry.registerHandler(new BatchHandler(), "batch");
         cmdRegistry.registerHandler(new BatchDiscardHandler(), "discard-batch");
         cmdRegistry.registerHandler(new BatchListHandler(), "list-batch");
@@ -146,6 +139,12 @@ public class CommandLineMain {
 
         cmdRegistry.registerHandler(new VersionHandler(), "version");
 
+        cmdRegistry.registerHandler(new CommandCommandHandler(cmdRegistry), "command");
+
+        // data-source
+        cmdRegistry.registerHandler(new GenericTypeOperationHandler("/subsystem=datasources/data-source", "jndi-name"), "data-source");
+        cmdRegistry.registerHandler(new GenericTypeOperationHandler("/subsystem=datasources/xa-data-source", "jndi-name"), "xa-data-source");
+        // supported but hidden from the tab-completion
         cmdRegistry.registerHandler(new DataSourceAddHandler(), false, "add-data-source");
         cmdRegistry.registerHandler(new DataSourceModifyHandler(), false, "modify-data-source");
         cmdRegistry.registerHandler(new DataSourceRemoveHandler(), false, "remove-data-source");
@@ -153,11 +152,20 @@ public class CommandLineMain {
         cmdRegistry.registerHandler(new XADataSourceRemoveHandler(), false, "remove-xa-data-source");
         cmdRegistry.registerHandler(new XADataSourceModifyHandler(), false, "modify-xa-data-source");
 
-        cmdRegistry.registerHandler(new CommandCommandHandler(cmdRegistry), "command");
-
-        // data-source
-        cmdRegistry.registerHandler(new GenericTypeOperationHandler("/subsystem=datasources/data-source", "jndi-name"), "data-source");
-        cmdRegistry.registerHandler(new GenericTypeOperationHandler("/subsystem=datasources/xa-data-source", "jndi-name"), "xa-data-source");
+        // JMS
+        cmdRegistry.registerHandler(new GenericTypeOperationHandler("/subsystem=messaging/hornetq-server=default/jms-queue", "queue-address"), "jms-queue");
+        cmdRegistry.registerHandler(new GenericTypeOperationHandler("/subsystem=messaging/hornetq-server=default/jms-topic", "topic-address"), "jms-topic");
+        cmdRegistry.registerHandler(new GenericTypeOperationHandler("/subsystem=messaging/hornetq-server=default/connection-factory", null), "connection-factory");
+        // supported but hidden from the tab-completion
+        cmdRegistry.registerHandler(new JmsQueueAddHandler(), false, "add-jms-queue");
+        cmdRegistry.registerHandler(new JmsQueueRemoveHandler(), false, "remove-jms-queue");
+        cmdRegistry.registerHandler(new JmsTopicAddHandler(), false, "add-jms-topic");
+        cmdRegistry.registerHandler(new JmsTopicRemoveHandler(), false, "remove-jms-topic");
+        cmdRegistry.registerHandler(new JmsCFAddHandler(), false, "add-jms-cf");
+        cmdRegistry.registerHandler(new JmsCFRemoveHandler(), false, "remove-jms-cf");
+        // these are used for the cts setup
+        cmdRegistry.registerHandler(new CreateJmsResourceHandler(), false, "create-jms-resource");
+        cmdRegistry.registerHandler(new DeleteJmsResourceHandler(), false, "delete-jms-resource");
     }
 
     public static void main(String[] args) throws Exception {
@@ -175,6 +183,8 @@ public class CommandLineMain {
             String defaultControllerHost = null;
             int defaultControllerPort = -1;
             boolean version = false;
+            String username = null;
+            char[] password = null;
             for(String arg : args) {
                 if(arg.startsWith("--controller=") || arg.startsWith("controller=")) {
                     final String value;
@@ -256,8 +266,13 @@ public class CommandLineMain {
                     }
                     final String value = arg.startsWith("--") ? arg.substring(10) : arg.substring(8);
                     commands = new String[]{value};
-                }
-                else {
+                } else if (arg.startsWith("--user=")) {
+                    username = arg.startsWith("--") ? arg.substring(7) : arg.substring(5);
+                } else if (arg.startsWith("--password=")) {
+                    password = (arg.startsWith("--") ? arg.substring(11) : arg.substring(9)).toCharArray();
+                } else if (arg.equals("--help") || arg.equals("-h")) {
+                    commands = new String[]{"help"};
+                } else {
                     // assume it's commands
                     if(file != null) {
                         argError = "Only one of '--file', '--commands' or '--command' can appear as the argument at a time.";
@@ -283,12 +298,12 @@ public class CommandLineMain {
             }
 
             if(file != null) {
-                processFile(file, defaultControllerHost, defaultControllerPort, connect);
+                processFile(file, defaultControllerHost, defaultControllerPort, connect, username, password);
                 return;
             }
 
             if(commands != null) {
-                processCommands(commands, defaultControllerHost, defaultControllerPort, connect);
+                processCommands(commands, defaultControllerHost, defaultControllerPort, connect, username, password);
                 return;
             }
 
@@ -304,6 +319,8 @@ public class CommandLineMain {
             }));
             console.addCompletor(cmdCtx.cmdCompleter);
 
+            cmdCtx.username = username;
+            cmdCtx.password = password;
             if(defaultControllerHost != null) {
                 cmdCtx.defaultControllerHost = defaultControllerHost;
             }
@@ -328,6 +345,8 @@ public class CommandLineMain {
                         processLine(cmdCtx, line.trim());
                     }
                 }
+            } catch(Throwable t) {
+                t.printStackTrace();
             } finally {
                 cmdCtx.disconnectController();
             }
@@ -337,17 +356,19 @@ public class CommandLineMain {
         System.exit(0);
     }
 
-    private static void processCommands(String[] commands, String defaultControllerHost, int defaultControllerPort, final boolean connect) {
+    private static void processCommands(String[] commands, String defaultControllerHost, int defaultControllerPort, final boolean connect, final String username, final char[] password) {
 
         final CommandContextImpl cmdCtx = new CommandContextImpl();
         SecurityActions.addShutdownHook(new Thread(new Runnable() {
             @Override
             public void run() {
-                cmdCtx.disconnectController(!connect);
+                cmdCtx.disconnectController();
             }
         }));
 
-        if(defaultControllerHost != null) {
+        cmdCtx.username = username;
+        cmdCtx.password = password;
+        if (defaultControllerHost != null) {
             cmdCtx.defaultControllerHost = defaultControllerHost;
         }
         if(defaultControllerPort != -1) {
@@ -355,32 +376,36 @@ public class CommandLineMain {
         }
 
         if(connect) {
-            cmdCtx.connectController(null, -1, false);
+            cmdCtx.connectController(null, -1);
         }
 
         try {
             for (int i = 0; i < commands.length && !cmdCtx.terminate; ++i) {
                 processLine(cmdCtx, commands[i]);
             }
+        } catch(Throwable t) {
+            t.printStackTrace();
         } finally {
             if (!cmdCtx.terminate) {
                 cmdCtx.terminateSession();
             }
-            cmdCtx.disconnectController(!connect);
+            cmdCtx.disconnectController();
         }
     }
 
-    private static void processFile(File file, String defaultControllerHost, int defaultControllerPort, final boolean connect) {
+    private static void processFile(File file, String defaultControllerHost, int defaultControllerPort, final boolean connect, final String username, final char[] password) {
 
         final CommandContextImpl cmdCtx = new CommandContextImpl();
         SecurityActions.addShutdownHook(new Thread(new Runnable() {
             @Override
             public void run() {
-                cmdCtx.disconnectController(!connect);
+                cmdCtx.disconnectController();
             }
         }));
 
-        if(defaultControllerHost != null) {
+        cmdCtx.username = username;
+        cmdCtx.password = password;
+        if (defaultControllerHost != null) {
             cmdCtx.defaultControllerHost = defaultControllerHost;
         }
         if(defaultControllerPort != -1) {
@@ -388,7 +413,7 @@ public class CommandLineMain {
         }
 
         if(connect) {
-            cmdCtx.connectController(null, -1, false);
+            cmdCtx.connectController(null, -1);
         }
 
         BufferedReader reader = null;
@@ -399,7 +424,7 @@ public class CommandLineMain {
                 processLine(cmdCtx, line.trim());
                 line = reader.readLine();
             }
-        } catch (Exception e) {
+        } catch (Throwable e) {
             cmdCtx.printLine("Failed to process file '" + file.getAbsolutePath() + "'");
             e.printStackTrace();
         } finally {
@@ -407,7 +432,7 @@ public class CommandLineMain {
             if (!cmdCtx.terminate) {
                 cmdCtx.terminateSession();
             }
-            cmdCtx.disconnectController(!connect);
+            cmdCtx.disconnectController();
         }
     }
 
@@ -419,41 +444,44 @@ public class CommandLineMain {
             return; // ignore comments
         }
         if(isOperation(line)) {
-            cmdCtx.setArgs(null, line, null);
+
+            ModelNode request;
+            try {
+                cmdCtx.resetArgs(line);
+                request = cmdCtx.parsedCmd.toOperationRequest();
+            } catch (CommandFormatException e) {
+                cmdCtx.printLine(e.getLocalizedMessage());
+                return;
+            }
+
             if(cmdCtx.isBatchMode()) {
-                DefaultOperationRequestBuilder builder = new DefaultOperationRequestBuilder(cmdCtx.getPrefix());
-                try {
-                    cmdCtx.getOperationRequestParser().parse(line, builder);
-                    ModelNode request = builder.buildRequest();
-                    StringBuilder op = new StringBuilder();
-                    op.append(cmdCtx.getPrefixFormatter().format(builder.getAddress()));
-                    op.append(line.substring(line.indexOf(':')));
-                    DefaultBatchedCommand batchedCmd = new DefaultBatchedCommand(op.toString(), request);
-                    Batch batch = cmdCtx.getBatchManager().getActiveBatch();
-                    batch.add(batchedCmd);
-                    cmdCtx.printLine("#" + batch.size() + " " + batchedCmd.getCommand());
-                } catch (CommandFormatException e) {
-                    cmdCtx.printLine(e.getLocalizedMessage());
-                }
+                StringBuilder op = new StringBuilder();
+                op.append(cmdCtx.getPrefixFormatter().format(cmdCtx.parsedCmd.getAddress()));
+                op.append(line.substring(line.indexOf(':')));
+                DefaultBatchedCommand batchedCmd = new DefaultBatchedCommand(op.toString(), request);
+                Batch batch = cmdCtx.getBatchManager().getActiveBatch();
+                batch.add(batchedCmd);
+                cmdCtx.printLine("#" + batch.size() + " " + batchedCmd.getCommand());
             } else {
-                cmdCtx.operationHandler.handle(cmdCtx);
+                cmdCtx.set("OP_REQ", request);
+                try {
+                    cmdCtx.operationHandler.handle(cmdCtx);
+                } finally {
+                    cmdCtx.set("OP_REQ", null);
+                }
             }
 
         } else {
-            String cmd = line;
-            String cmdArgs = null;
-            for (int i = 0; i < cmd.length(); ++i) {
-                if (Character.isWhitespace(cmd.charAt(i))) {
-                    cmdArgs = cmd.substring(i + 1).trim();
-                    cmd = cmd.substring(0, i);
-                    break;
-                }
+            try {
+                cmdCtx.resetArgs(line);
+            } catch (CommandFormatException e1) {
+                cmdCtx.printLine(e1.getLocalizedMessage());
+                return;
             }
 
-            CommandHandler handler = cmdRegistry.getCommandHandler(cmd.toLowerCase());
+            final String cmdName = cmdCtx.parsedCmd.getOperationName();
+            CommandHandler handler = cmdRegistry.getCommandHandler(cmdName.toLowerCase());
             if(handler != null) {
-                cmdCtx.setArgs(cmd, cmdArgs, handler);
-
                 if(cmdCtx.isBatchMode() && handler.isBatchMode()) {
                     if(!(handler instanceof OperationCommand)) {
                         cmdCtx.printLine("The command is not allowed in a batch.");
@@ -476,7 +504,11 @@ public class CommandLineMain {
                     }
                 }
 
-                cmdCtx.setArgs(null, null, null);
+                // TODO this doesn't make sense
+                try {
+                    cmdCtx.resetArgs(null);
+                } catch (CommandFormatException e) {
+                }
             } else {
                 cmdCtx.printLine("Unexpected command '" + line
                         + "'. Type 'help' for the list of supported commands.");
@@ -529,16 +561,16 @@ public class CommandLineMain {
 
     static class CommandContextImpl implements CommandContext {
 
-        private final jline.ConsoleReader console;
+        private jline.ConsoleReader console;
         private final CommandHistory history;
 
         /** whether the session should be terminated*/
         private boolean terminate;
 
-        /** current command */
-        private String cmd;
+        /** current command line */
+        private String cmdLine;
         /** parsed command arguments */
-        private DefaultParsedArguments parsedArgs = new DefaultParsedArguments();
+        private DefaultCallbackHandler parsedCmd = new DefaultCallbackHandler(true);
 
         /** domain or standalone mode*/
         private boolean domainMode;
@@ -552,10 +584,12 @@ public class CommandLineMain {
         private String controllerHost;
         /** the port of the controller */
         private int controllerPort = -1;
+        /** the command line specified username */
+        private String username;
+        /** the command line specified password */
+        private char[] password;
         /** various key/value pairs */
         private Map<String, Object> map = new HashMap<String, Object>();
-        /** operation request parser */
-        private final OperationRequestParser parser = new DefaultOperationRequestParser();
         /** operation request address prefix */
         private final OperationRequestAddress prefix = new DefaultOperationRequestAddress();
         /** the prefix formatter */
@@ -569,9 +603,12 @@ public class CommandLineMain {
         /** the default command completer */
         private final CommandCompleter cmdCompleter;
 
+        /** output target */
+        private BufferedWriter outputTarget;
+
         /**
-* Non-interactive mode
-*/
+         * Non-interactive mode
+         */
         private CommandContextImpl() {
             this.console = null;
             this.history = null;
@@ -581,8 +618,8 @@ public class CommandLineMain {
         }
 
         /**
-* Interactive mode
-*/
+         * Interactive mode
+         */
         private CommandContextImpl(jline.ConsoleReader console) {
             this.console = console;
 
@@ -596,7 +633,7 @@ public class CommandLineMain {
             }
 
             this.history = new HistoryImpl();
-            operationCandidatesProvider = new DefaultOperationCandidatesProvider(this);
+            operationCandidatesProvider = new DefaultOperationCandidatesProvider();
 
             operationHandler = new OperationRequestHandler();
 
@@ -605,7 +642,15 @@ public class CommandLineMain {
 
         @Override
         public String getArgumentsString() {
-            return parsedArgs.getArgumentsString();
+            if(cmdLine != null && parsedCmd.getOperationName() != null) {
+                int cmdNameLength = parsedCmd.getOperationName().length();
+                if(cmdLine.length() == cmdNameLength) {
+                    return null;
+                } else {
+                    return cmdLine.substring(cmdNameLength + 1);
+                }
+            }
+            return null;
         }
 
         @Override
@@ -615,6 +660,17 @@ public class CommandLineMain {
 
         @Override
         public void printLine(String message) {
+            if(outputTarget != null) {
+                try {
+                    outputTarget.append(message);
+                    outputTarget.newLine();
+                    outputTarget.flush();
+                } catch (IOException e) {
+                    System.err.println("Failed to print '" + message + "' to the output target: " + e.getLocalizedMessage());
+                }
+                return;
+            }
+
             if (console != null) {
                 try {
                     console.printString(message);
@@ -627,8 +683,43 @@ public class CommandLineMain {
             }
         }
 
+        private String readLine(String prompt, boolean password, boolean disableHistory) throws IOException {
+            if (console == null) {
+                console = initConsoleReader();
+            }
+
+            boolean useHistory = console.getUseHistory();
+            if (useHistory && disableHistory) {
+                console.setUseHistory(false);
+            }
+            try {
+                if (password) {
+                    return console.readLine(prompt, (char) 0x00);
+                } else {
+                    return console.readLine(prompt);
+                }
+
+            } finally {
+                if (disableHistory && useHistory) {
+                    console.setUseHistory(true);
+                }
+            }
+        }
+
         @Override
         public void printColumns(Collection<String> col) {
+            if(outputTarget != null) {
+                try {
+                    for(String item : col) {
+                        outputTarget.append(item);
+                        outputTarget.newLine();
+                    }
+                } catch (IOException e) {
+                    System.err.println("Failed to print columns '" + col + "' to the console: " + e.getLocalizedMessage());
+                }
+                return;
+            }
+
             if (console != null) {
                 try {
                     console.printColumns(col);
@@ -658,8 +749,8 @@ public class CommandLineMain {
         }
 
         @Override
-        public OperationRequestParser getOperationRequestParser() {
-            return parser;
+        public CommandLineParser getCommandLineParser() {
+            return DefaultOperationRequestParser.INSTANCE;
         }
 
         @Override
@@ -678,7 +769,8 @@ public class CommandLineMain {
             return operationCandidatesProvider;
         }
 
-        private void connectController(String host, int port, boolean loggingEnabled) {
+        @Override
+        public void connectController(String host, int port) {
             if(host == null) {
                 host = defaultControllerHost;
             }
@@ -701,11 +793,12 @@ public class CommandLineMain {
                 List<String> nodeTypes = Util.getNodeTypes(newClient, new DefaultOperationRequestAddress());
                 if (!nodeTypes.isEmpty()) {
                     domainMode = nodeTypes.contains("server-group");
-                    printLine("Connected to "
-                            + (domainMode ? "domain controller at " : "standalone controller at ")
-                            + host + ":" + port);
+//                    printLine("Connected to "
+//                            + (domainMode ? "domain controller at " : "standalone controller at ")
+//                            + host + ":" + port);
                 } else {
                     printLine("The controller is not available at " + host + ":" + port);
+                    disconnectController();
                 }
             } catch (UnknownHostException e) {
                 printLine("Failed to resolve host '" + host + "': " + e.getLocalizedMessage());
@@ -713,27 +806,18 @@ public class CommandLineMain {
         }
 
         @Override
-        public void connectController(String host, int port) {
-            connectController(host, port, true);
-        }
-
-        private void disconnectController(boolean loggingEnabled) {
+        public void disconnectController() {
             if(this.client != null) {
                 StreamUtils.safeClose(client);
-                if(loggingEnabled) {
-                    printLine("Closed connection to " + this.controllerHost + ':' + this.controllerPort);
-                }
+//                if(loggingEnabled) {
+//                    printLine("Closed connection to " + this.controllerHost + ':' + this.controllerPort);
+//                }
                 client = null;
                 this.controllerHost = null;
                 this.controllerPort = -1;
                 domainMode = false;
             }
             promptConnectPart = null;
-        }
-
-        @Override
-        public void disconnectController() {
-            disconnectController(true);
         }
 
         @Override
@@ -809,9 +893,12 @@ public class CommandLineMain {
             return defaultControllerPort;
         }
 
-        private void setArgs(String cmd, String args, CommandHandler handler) {
-            this.cmd = cmd;
-            parsedArgs.reset(args, handler);
+        private void resetArgs(String cmdLine) throws CommandFormatException {
+            if(cmdLine != null) {
+                parsedCmd.parse(prefix, cmdLine);
+                setOutputTarget(parsedCmd.getOutputTarget());
+            }
+            this.cmdLine = cmdLine;
         }
 
         @Override
@@ -820,15 +907,11 @@ public class CommandLineMain {
         }
 
         @Override
-        public String getCommand() {
-            return cmd;
-        }
-
-        @Override
         public BatchManager getBatchManager() {
             return batchManager;
         }
 
+        private final DefaultCallbackHandler tmpBatched = new DefaultCallbackHandler();
         @Override
         public BatchedCommand toBatchedCommand(String line) throws CommandFormatException {
 
@@ -836,48 +919,40 @@ public class CommandLineMain {
                 throw new IllegalArgumentException("Null command line.");
             }
 
-            final DefaultParsedArguments originalParsedArguments = this.parsedArgs;
+            final DefaultCallbackHandler originalParsedArguments = this.parsedCmd;
+            try {
+                this.parsedCmd = tmpBatched;
+                resetArgs(line);
+            } catch(CommandFormatException e) {
+                this.parsedCmd = originalParsedArguments;
+                throw e;
+            }
+
             if(isOperation(line)) {
                 try {
-                    this.parsedArgs = new DefaultParsedArguments();
-                    setArgs(null, line, null);
-                    DefaultOperationRequestBuilder builder = new DefaultOperationRequestBuilder(getPrefix());
-                    parser.parse(line, builder);
-                    ModelNode request = builder.buildRequest();
+                    ModelNode request = this.parsedCmd.toOperationRequest();
                     StringBuilder op = new StringBuilder();
-                    op.append(prefixFormatter.format(builder.getAddress()));
+                    op.append(prefixFormatter.format(parsedCmd.getAddress()));
                     op.append(line.substring(line.indexOf(':')));
                     return new DefaultBatchedCommand(op.toString(), request);
                 } finally {
-                    this.parsedArgs = originalParsedArguments;
+                    this.parsedCmd = originalParsedArguments;
                 }
             }
 
-            String cmd = line;
-            String cmdArgs = null;
-            for (int i = 0; i < cmd.length(); ++i) {
-                if (Character.isWhitespace(cmd.charAt(i))) {
-                    cmdArgs = cmd.substring(i + 1).trim();
-                    cmd = cmd.substring(0, i);
-                    break;
-                }
-            }
-
-            CommandHandler handler = cmdRegistry.getCommandHandler(cmd.toLowerCase());
+            CommandHandler handler = cmdRegistry.getCommandHandler(parsedCmd.getOperationName());
             if(handler == null) {
-                throw new OperationFormatException("No command handler for '" + cmd + "'.");
+                throw new OperationFormatException("No command handler for '" + parsedCmd.getOperationName() + "'.");
             }
             if(!(handler instanceof OperationCommand)) {
                 throw new OperationFormatException("The command is not allowed in a batch.");
             }
 
             try {
-                this.parsedArgs = new DefaultParsedArguments();
-                setArgs(cmd, cmdArgs, handler);
                 ModelNode request = ((OperationCommand)handler).buildRequest(this);
                 return new DefaultBatchedCommand(line, request);
             } finally {
-                this.parsedArgs = originalParsedArguments;
+                this.parsedCmd = originalParsedArguments;
             }
         }
 
@@ -887,13 +962,28 @@ public class CommandLineMain {
         }
 
         @Override
-        public ParsedArguments getParsedArguments() {
-            return parsedArgs;
+        public ParsedCommandLine getParsedCommandLine() {
+            return parsedCmd;
         }
 
         @Override
         public boolean isDomainMode() {
             return domainMode;
+        }
+
+        protected void setOutputTarget(String filePath) {
+            if(filePath == null) {
+                this.outputTarget = null;
+                return;
+            }
+            FileWriter writer;
+            try {
+                writer = new FileWriter(filePath, false);
+            } catch (IOException e) {
+                printLine(e.getLocalizedMessage());
+                return;
+            }
+            this.outputTarget = new BufferedWriter(writer);
         }
 
         private class AuthenticationCallbackHandler implements CallbackHandler {
@@ -902,15 +992,23 @@ public class CommandLineMain {
             // for this reason we cache the entered values to allow for re-use without pestering the end
             // user.
 
+            private String realm = null;
             private boolean realmShown = false;
 
-            private String userName = null;
-            private char[] password = null;
+            private String username;
+            private char[] password;
+
+            private AuthenticationCallbackHandler() {
+                // A local cache is used for scenarios where no values are specified on the command line
+                // and the user wishes to use the connect command to establish a new connection.
+                username = CommandContextImpl.this.username;
+                password = CommandContextImpl.this.password;
+            }
 
             public void handle(Callback[] callbacks) throws IOException, UnsupportedCallbackException {
                 // Special case for anonymous authentication to avoid prompting user for their name.
                 if (callbacks.length == 1 && callbacks[0] instanceof NameCallback) {
-                    ((NameCallback)callbacks[0]).setName("anonymous CLI user");
+                    ((NameCallback) callbacks[0]).setName("anonymous CLI user");
                     return;
                 }
 
@@ -918,23 +1016,22 @@ public class CommandLineMain {
                     if (current instanceof RealmCallback) {
                         RealmCallback rcb = (RealmCallback) current;
                         String defaultText = rcb.getDefaultText();
+                        realm = defaultText;
                         rcb.setText(defaultText); // For now just use the realm suggested.
-                        if (realmShown == false) {
-                            realmShown = true;
-                            printLine("Authenticating against security realm: " + defaultText);
-                        }
                     } else if (current instanceof RealmChoiceCallback) {
                         throw new UnsupportedCallbackException(current, "Realm choice not currently supported.");
                     } else if (current instanceof NameCallback) {
                         NameCallback ncb = (NameCallback) current;
-                        if (userName == null) {
-                            userName = console.readLine("Username:");
+                        if (username == null) {
+                            showRealm();
+                            username = readLine("Username: ", false, true);
                         }
-                        ncb.setName(userName);
+                        ncb.setName(username);
                     } else if (current instanceof PasswordCallback) {
                         PasswordCallback pcb = (PasswordCallback) current;
                         if (password == null) {
-                            String temp = console.readLine("Password:", '*');
+                            showRealm();
+                            String temp = readLine("Password: ", true, false);
                             if (temp != null) {
                                 password = temp.toCharArray();
                             }
@@ -944,6 +1041,13 @@ public class CommandLineMain {
                         printLine("Unexpected Callback " + current.getClass().getName());
                         throw new UnsupportedCallbackException(current);
                     }
+                }
+            }
+
+            private void showRealm() {
+                if (realmShown == false && realm != null) {
+                    realmShown = true;
+                    printLine("Authenticating against security realm: " + realm);
                 }
             }
 

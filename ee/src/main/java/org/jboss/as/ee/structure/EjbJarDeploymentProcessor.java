@@ -23,8 +23,6 @@ package org.jboss.as.ee.structure;
 
 import java.util.List;
 
-import javax.annotation.ManagedBean;
-
 import org.jboss.as.server.deployment.Attachments;
 import org.jboss.as.server.deployment.DeploymentPhaseContext;
 import org.jboss.as.server.deployment.DeploymentUnit;
@@ -35,6 +33,7 @@ import org.jboss.as.server.deployment.module.ModuleRootMarker;
 import org.jboss.as.server.deployment.module.ResourceRoot;
 import org.jboss.jandex.DotName;
 import org.jboss.jandex.Index;
+import org.jboss.metadata.ear.spec.EarMetaData;
 import org.jboss.vfs.VirtualFile;
 
 /**
@@ -56,6 +55,11 @@ public class EjbJarDeploymentProcessor implements DeploymentUnitProcessor {
     public void deploy(DeploymentPhaseContext phaseContext) throws DeploymentUnitProcessingException {
         final DeploymentUnit deploymentUnit = phaseContext.getDeploymentUnit();
         if (!DeploymentTypeMarker.isType(DeploymentType.EAR, deploymentUnit)) {
+            return;
+        }
+        final EarMetaData md =deploymentUnit.getAttachment(org.jboss.as.ee.structure.Attachments.EAR_METADATA);
+        if(md != null) {
+            //if we have an application.xml we don't scan
             return;
         }
         // TODO: deal with application clients, we need the manifest information

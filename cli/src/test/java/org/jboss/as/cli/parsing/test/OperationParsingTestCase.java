@@ -24,10 +24,12 @@ package org.jboss.as.cli.parsing.test;
 import java.util.Iterator;
 import java.util.Set;
 
+import org.jboss.as.cli.CommandFormatException;
+import org.jboss.as.cli.operation.CommandLineParser;
 import org.jboss.as.cli.operation.OperationFormatException;
 import org.jboss.as.cli.operation.OperationRequestAddress;
 import org.jboss.as.cli.operation.OperationRequestAddress.Node;
-import org.jboss.as.cli.operation.impl.DefaultOperationCallbackHandler;
+import org.jboss.as.cli.operation.impl.DefaultCallbackHandler;
 import org.jboss.as.cli.operation.impl.DefaultOperationRequestAddress;
 import org.jboss.as.cli.operation.impl.DefaultOperationRequestParser;
 import org.junit.Test;
@@ -40,11 +42,39 @@ import junit.framework.TestCase;
  */
 public class OperationParsingTestCase extends TestCase {
 
-    private DefaultOperationRequestParser parser = new DefaultOperationRequestParser();
+    private CommandLineParser parser = DefaultOperationRequestParser.INSTANCE;
+
+    @Test
+    public void testOperationNameEndsWithDash() throws Exception {
+        DefaultCallbackHandler handler = new DefaultCallbackHandler(false);
+
+        parse("/subsystem=threads/thread-factory=*:validate-", handler);
+
+        assertTrue(handler.hasAddress());
+        assertTrue(handler.hasOperationName());
+        assertFalse(handler.hasProperties());
+        assertFalse(handler.endsOnAddressOperationNameSeparator());
+        assertFalse(handler.endsOnPropertyListStart());
+        assertFalse(handler.endsOnPropertySeparator());
+        assertFalse(handler.endsOnPropertyValueSeparator());
+        assertFalse(handler.endsOnNodeSeparator());
+        assertFalse(handler.endsOnNodeTypeNameSeparator());
+        assertFalse(handler.isRequestComplete());
+
+        assertEquals("validate-", handler.getOperationName());
+
+        OperationRequestAddress address = handler.getAddress();
+        Iterator<Node> i = address.iterator();
+        assertTrue(i.hasNext());
+/*        Node node = i.next();
+        assertEquals("subsystem", node.getType());
+        assertEquals("logging", node.getName());
+        assertFalse(i.hasNext());
+*/    }
 
     @Test
     public void testOperationNameOnly() throws Exception {
-        DefaultOperationCallbackHandler handler = new DefaultOperationCallbackHandler();
+        DefaultCallbackHandler handler = new DefaultCallbackHandler();
 
         parse("/subsystem=logging:read-resource", handler);
 
@@ -75,7 +105,7 @@ public class OperationParsingTestCase extends TestCase {
 
         OperationRequestAddress prefix = new DefaultOperationRequestAddress();
         prefix.toNodeType("subsystem");
-        DefaultOperationCallbackHandler handler = new DefaultOperationCallbackHandler(prefix);
+        DefaultCallbackHandler handler = new DefaultCallbackHandler(prefix);
 
         parse("./logging:read-resource", handler);
 
@@ -103,9 +133,12 @@ public class OperationParsingTestCase extends TestCase {
 
     @Test
     public void testNoOperation() throws Exception {
-        DefaultOperationCallbackHandler handler = new DefaultOperationCallbackHandler();
+        DefaultCallbackHandler handler = new DefaultCallbackHandler();
 
-        parse("./subsystem=logging:", handler);
+        try {
+            parse("./subsystem=logging:", handler);
+        } catch(OperationFormatException e) {
+        }
 
         assertTrue(handler.hasAddress());
         assertFalse(handler.hasOperationName());
@@ -129,7 +162,7 @@ public class OperationParsingTestCase extends TestCase {
 
     @Test
     public void testOperationWithArguments() throws Exception {
-        DefaultOperationCallbackHandler handler = new DefaultOperationCallbackHandler();
+        DefaultCallbackHandler handler = new DefaultCallbackHandler();
 
         parse("/subsystem=logging:read-resource(recursive=true)", handler);
 
@@ -167,7 +200,7 @@ public class OperationParsingTestCase extends TestCase {
         final String propName = "steps";
         final String propValue = "[{\"operation\"=>\"add-system-property\",\"name\"=>\"test\",\"value\"=\"newValue\"},{\"operation\"=>\"add-system-property\",\"name\"=>\"test2\",\"value\"=>\"test2\"}]";
 
-        DefaultOperationCallbackHandler handler = new DefaultOperationCallbackHandler();
+        DefaultCallbackHandler handler = new DefaultCallbackHandler();
 
         parse(':' + op + '(' + propName + '=' + propValue + ')', handler);
 
@@ -192,7 +225,7 @@ public class OperationParsingTestCase extends TestCase {
 
     @Test
     public void testOperationWithArgumentsAndWhitespaces() throws Exception {
-        DefaultOperationCallbackHandler handler = new DefaultOperationCallbackHandler();
+        DefaultCallbackHandler handler = new DefaultCallbackHandler();
 
         parse("   / subsystem  =  logging  :  read-resource  ( recursive = true , another = \"   \" )   ", handler);
 
@@ -225,9 +258,7 @@ public class OperationParsingTestCase extends TestCase {
         assertEquals("\"   \"", handler.getPropertyValue("another"));
     }
 
-    protected void parse(String opReq, DefaultOperationCallbackHandler handler)
-            throws OperationFormatException {
+    protected void parse(String opReq, DefaultCallbackHandler handler) throws CommandFormatException {
         parser.parse(opReq, handler);
-        //ParsingUtil.parseOpRequest(opReq, handler);
     }
 }

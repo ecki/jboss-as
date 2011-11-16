@@ -65,7 +65,7 @@ public class SecurityDomainService implements Service<SecurityDomainContext> {
 
     private final JSSESecurityDomain jsseSecurityDomain;
 
-    private SecurityDomainContext securityDomainContext;
+    private volatile SecurityDomainContext securityDomainContext;
 
     private final String cacheType;
 
@@ -80,8 +80,7 @@ public class SecurityDomainService implements Service<SecurityDomainContext> {
     /** {@inheritDoc} */
     @Override
     public void start(StartContext context) throws StartException {
-        if (log.isDebugEnabled())
-            log.debug("Starting SecurityDomainService(" + name + ")");
+        log.debugf("Starting SecurityDomainService(" + name + ")");
         if (applicationPolicy != null) {
             final ApplicationPolicyRegistration applicationPolicyRegistration = (ApplicationPolicyRegistration) configurationValue
                     .getValue();

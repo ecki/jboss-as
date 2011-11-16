@@ -22,13 +22,21 @@
 
 package org.jboss.as.messaging;
 
+import static org.jboss.as.messaging.MessagingMessages.MESSAGES;
+
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Map;
 
 import org.jboss.as.controller.AttributeDefinition;
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
-import org.jboss.as.server.operations.ServerWriteAttributeOperationHandler;
+import org.jboss.as.controller.OperationStepHandler;
+import org.jboss.as.controller.PathAddress;
+import org.jboss.as.controller.operations.global.WriteAttributeHandlers;
+import org.jboss.as.controller.registry.AttributeAccess;
+import org.jboss.as.controller.registry.ManagementResourceRegistration;
+import org.jboss.as.controller.registry.Resource;
 import org.jboss.dmr.ModelNode;
 
 /**
@@ -36,7 +44,7 @@ import org.jboss.dmr.ModelNode;
  *
  * @author Brian Stansberry (c) 2011 Red Hat Inc.
  */
-public class DiscoveryGroupWriteAttributeHandler extends ServerWriteAttributeOperationHandler {
+public class DiscoveryGroupWriteAttributeHandler extends WriteAttributeHandlers.WriteAttributeOperationHandler {
 
     public static final DiscoveryGroupWriteAttributeHandler INSTANCE = new DiscoveryGroupWriteAttributeHandler();
 
@@ -47,22 +55,39 @@ public class DiscoveryGroupWriteAttributeHandler extends ServerWriteAttributeOpe
         }
     }
 
+    public void registerAttributes(final ManagementResourceRegistration registry) {
+        final EnumSet<AttributeAccess.Flag> flags = EnumSet.of(AttributeAccess.Flag.RESTART_ALL_SERVICES);
+        for (AttributeDefinition attr : CommonAttributes.DISCOVERY_GROUP_ATTRIBUTES) {
+            registry.registerReadWriteAttribute(attr.getName(), null, this, flags);
+        }
+    }
+
+    @Override
+    protected void modelChanged(final OperationContext context, final ModelNode operation, final String attributeName,
+                                final ModelNode newValue, final ModelNode currentValue) throws OperationFailedException {
+        context.addStep(new OperationStepHandler() {
+            @Override
+            public void execute(final OperationContext context, final ModelNode operation) throws OperationFailedException {
+                final AttributeDefinition attr = attributes.get(attributeName);
+                final Resource resource = context.readResource(PathAddress.EMPTY_ADDRESS);
+                if(attr.hasAlternative(resource.getModel())) {
+                    context.setRollbackOnly();
+                    throw new OperationFailedException(new ModelNode().set(MESSAGES.altAttributeAlreadyDefined(attributeName)));
+                }
+            }
+        }, OperationContext.Stage.VERIFY);
+
+        context.reloadRequired();
+
+        if (context.completeStep() != OperationContext.ResultAction.KEEP) {
+            context.revertReloadRequired();
+        }
+    }
+
     @Override
     protected void validateValue(String name, ModelNode value) throws OperationFailedException {
         AttributeDefinition attr = attributes.get(name);
         attr.getValidator().validateParameter(name, value);
-    }
-
-    @Override
-    protected void validateResolvedValue(String name, ModelNode value) throws OperationFailedException {
-        // no-op, as we are not going to apply this value until the server is reloaded, so allow the
-        // any system property to be set between now and then
-    }
-
-    @Override
-    protected boolean applyUpdateToRuntime(OperationContext context, ModelNode operation, String attributeName,
-                                           ModelNode newValue, ModelNode currentValue) throws OperationFailedException {
-        return true;
     }
 
 }

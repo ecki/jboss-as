@@ -22,11 +22,10 @@
 
 package org.jboss.as.naming.service;
 
+import static org.jboss.as.naming.NamingLogger.ROOT_LOGGER;
+
 import org.jboss.as.naming.ManagedReferenceFactory;
-import org.jboss.as.naming.ManagedReferenceObjectFactory;
-import org.jboss.as.naming.NamingStore;
-import org.jboss.as.naming.util.NameParser;
-import org.jboss.logging.Logger;
+import org.jboss.as.naming.ServiceBasedNamingStore;
 import org.jboss.msc.inject.Injector;
 import org.jboss.msc.service.Service;
 import org.jboss.msc.service.ServiceController;
@@ -34,10 +33,6 @@ import org.jboss.msc.service.StartContext;
 import org.jboss.msc.service.StartException;
 import org.jboss.msc.service.StopContext;
 import org.jboss.msc.value.InjectedValue;
-
-import javax.naming.Name;
-import javax.naming.NamingException;
-import javax.naming.Reference;
 
 /**
  * Service responsible for binding and unbinding a entry into a naming context.  This service can be used as a dependency for
@@ -47,9 +42,7 @@ import javax.naming.Reference;
  */
 public class BinderService implements Service<ManagedReferenceFactory> {
 
-    private static final Logger logger = Logger.getLogger(BinderService.class);
-
-    private final InjectedValue<NamingStore> namingStoreValue = new InjectedValue<NamingStore>();
+    private final InjectedValue<ServiceBasedNamingStore> namingStoreValue = new InjectedValue<ServiceBasedNamingStore>();
     private final String name;
     private final InjectedValue<ManagedReferenceFactory> managedReferenceFactory = new InjectedValue<ManagedReferenceFactory>();
     private final Object source;
@@ -95,17 +88,11 @@ public class BinderService implements Service<ManagedReferenceFactory> {
      * @throws StartException If the entity can not be bound
      */
     public synchronized void start(StartContext context) throws StartException {
-        final NamingStore namingStore = namingStoreValue.getValue();
-        try {
-            ServiceController<?> controller = context.getController();
-            this.controller = controller;
-            final Reference reference = ManagedReferenceObjectFactory.createReference(controller.getName());
-            final Name name = NameParser.INSTANCE.parse(this.name);
-            namingStore.bind(name, reference);
-            logger.tracef("Bound resource %s into naming store %s", name, namingStore);
-        } catch (NamingException e) {
-            throw new StartException("Failed to bind resource into naming store [" + namingStore + "] at location [" + name + "]", e);
-        }
+        final ServiceBasedNamingStore namingStore = namingStoreValue.getValue();
+        ServiceController<?> controller = context.getController();
+        this.controller = controller;
+        namingStore.add(controller.getName());
+        ROOT_LOGGER.tracef("Bound resource %s into naming store %s (service name %s)", name, namingStore, controller.getName());
     }
 
     /**
@@ -114,12 +101,8 @@ public class BinderService implements Service<ManagedReferenceFactory> {
      * @param context The stop context
      */
     public synchronized void stop(StopContext context) {
-        final NamingStore namingStore = namingStoreValue.getValue();
-        try {
-            namingStore.unbind(NameParser.INSTANCE.parse(name));
-        } catch (NamingException e) {
-            throw new IllegalStateException("Failed to unbind resource from naming store [" + namingStore + "] at location [" + name + "]", e);
-        }
+        final ServiceBasedNamingStore namingStore = namingStoreValue.getValue();
+        namingStore.remove(context.getController().getName());
     }
 
     /**
@@ -147,7 +130,12 @@ public class BinderService implements Service<ManagedReferenceFactory> {
      *
      * @return the injector
      */
-    public Injector<NamingStore> getNamingStoreInjector() {
+    public Injector<ServiceBasedNamingStore> getNamingStoreInjector() {
         return namingStoreValue;
+    }
+
+    @Override
+    public String toString() {
+        return "BinderService[name=" + name + ",source=" + source + "]";
     }
 }

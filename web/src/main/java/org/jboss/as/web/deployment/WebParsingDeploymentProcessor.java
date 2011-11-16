@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.io.InputStream;
 
 import javax.xml.stream.XMLInputFactory;
+import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 
 import org.jboss.as.ee.structure.DeploymentType;
@@ -46,14 +47,22 @@ public class WebParsingDeploymentProcessor implements DeploymentUnitProcessor {
 
     private static final String WEB_XML = "WEB-INF/web.xml";
 
+    @Override
     public void deploy(DeploymentPhaseContext phaseContext) throws DeploymentUnitProcessingException {
         final DeploymentUnit deploymentUnit = phaseContext.getDeploymentUnit();
         if (!DeploymentTypeMarker.isType(DeploymentType.WAR, deploymentUnit)) {
             return; // Skip non web deployments
         }
         final ResourceRoot deploymentRoot = deploymentUnit.getAttachment(Attachments.DEPLOYMENT_ROOT);
-        final VirtualFile webXml = deploymentRoot.getRoot().getChild(WEB_XML);
-        WarMetaData warMetaData = deploymentUnit.getAttachment(WarMetaData.ATTACHMENT_KEY);
+        final VirtualFile alternateDescriptor = deploymentRoot.getAttachment(org.jboss.as.ee.structure.Attachments.ALTERNATE_WEB_DEPLOYMENT_DESCRIPTOR);
+        // Locate the descriptor
+        final VirtualFile webXml;
+        if (alternateDescriptor != null) {
+            webXml = alternateDescriptor;
+        } else {
+            webXml = deploymentRoot.getRoot().getChild(WEB_XML);
+        }
+        final WarMetaData warMetaData = deploymentUnit.getAttachment(WarMetaData.ATTACHMENT_KEY);
         assert warMetaData != null;
         if (webXml.exists()) {
             InputStream is = null;
@@ -61,9 +70,13 @@ public class WebParsingDeploymentProcessor implements DeploymentUnitProcessor {
                 is = webXml.openStream();
                 final XMLInputFactory inputFactory = XMLInputFactory.newInstance();
                 inputFactory.setXMLResolver(NoopXmlResolver.create());
-                XMLStreamReader xmlReader = inputFactory.createXMLStreamReader(is);
+                final XMLStreamReader xmlReader = inputFactory.createXMLStreamReader(is);
+
                 warMetaData.setWebMetaData(WebMetaDataParser.parse(xmlReader));
-            } catch (Exception e) {
+
+            } catch (XMLStreamException e) {
+                throw new DeploymentUnitProcessingException("Failed to parse " + webXml + " at [" + e.getLocation().getLineNumber() + "," + e.getLocation().getColumnNumber() + "]");
+            } catch (IOException e) {
                 throw new DeploymentUnitProcessingException("Failed to parse " + webXml, e);
             } finally {
                 try {
@@ -77,6 +90,7 @@ public class WebParsingDeploymentProcessor implements DeploymentUnitProcessor {
         }
     }
 
+    @Override
     public void undeploy(final DeploymentUnit context) {
     }
 }

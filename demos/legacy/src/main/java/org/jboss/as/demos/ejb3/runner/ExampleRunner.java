@@ -21,7 +21,6 @@
  */
 package org.jboss.as.demos.ejb3.runner;
 
-import java.util.concurrent.Future;
 import org.jboss.as.demos.DeploymentUtils;
 import org.jboss.as.demos.ejb3.archive.AsyncLocal;
 import org.jboss.as.demos.ejb3.archive.SimpleSingletonLocal;
@@ -41,7 +40,7 @@ import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
 import java.util.concurrent.Callable;
 
-import static org.jboss.as.protocol.old.StreamUtils.safeClose;
+import static org.jboss.as.protocol.StreamUtils.safeClose;
 
 /**
  * @author <a href="mailto:cdewolf@redhat.com">Carlo de Wolf</a>

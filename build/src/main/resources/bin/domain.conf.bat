@@ -7,9 +7,15 @@ rem ############################################################################
 rem # $Id: $
 
 rem #
+<<<<<<< HEAD
 rem # This batch file is executed by domain.bat to initialize the environment 
 rem # variables that domain.bat uses. It is recommended to use this file to
 rem # configure these variables, rather than modifying domain.bat itself.
+=======
+rem # This batch file is executed by run.bat to initialize the environment
+rem # variables that run.bat uses. It is recommended to use this file to
+rem # configure these variables, rather than modifying run.bat itself.
+>>>>>>> upstream/master
 rem #
 
 if not "x%JAVA_OPTS%" == "x" goto JAVA_OPTS_SET
@@ -52,13 +58,30 @@ rem # Make Byteman classes visible in all module loaders
 rem # This is necessary to inject Byteman rules into AS7 deployments
 set JAVA_OPTS=%JAVA_OPTS% -Djboss.modules.system.pkgs=org.jboss.byteman
 
+<<<<<<< HEAD
 rem # Sample JPDA settings for remote socket debugging
 rem set JAVA_OPTS=%JAVA_OPTS% -Xrunjdwp:transport=dt_socket,address=8787,server=y,suspend=n
 
 rem # Sample JPDA settings for shared memory debugging 
 rem set JAVA_OPTS=%JAVA_OPTS% -Xrunjdwp:transport=dt_shmem,address=jboss,server=y,suspend=n
 
+=======
+>>>>>>> upstream/master
 rem # Use JBoss Modules lockless mode
 rem set JAVA_OPTS=$JAVA_OPTS -Djboss.modules.lockless=true
+
+rem The ProcessController process uses its own set of java options
+set "PROCESS_CONTROLLER_JAVA_OPTS=%JAVA_OPTS%"
+
+rem The HostController process uses its own set of java options
+set "HOST_CONTROLLER_JAVA_OPTS=%JAVA_OPTS%"
+
+rem # Sample JPDA settings for remote socket debugging
+rem set "PROCESS_CONTROLLER_JAVA_OPTS=%PROCESS_CONTROLLER_JAVA_OPTS% -Xrunjdwp:transport=dt_socket,address=8788,server=y,suspend=n"
+rem set "HOST_CONTROLLER_JAVA_OPTS=%HOST_CONTROLLER_JAVA_OPTS% -Xrunjdwp:transport=dt_socket,address=8787,server=y,suspend=n"
+
+rem # Sample JPDA settings for shared memory debugging
+rem set "PROCESS_CONTROLLER_JAVA_OPTS=%PROCESS_CONTROLLER_JAVA_OPTS% -Xrunjdwp:transport=dt_shmem,address=jboss,server=y,suspend=n"
+rem set "HOST_CONTROLLER_JAVA_OPTS=%HOST_CONTROLLER_JAVA_OPTS% -Xrunjdwp:transport=dt_shmem,address=jboss,server=y,suspend=n"
 
 :JAVA_OPTS_SET

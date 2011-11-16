@@ -22,9 +22,6 @@
 
 package org.jboss.as.naming;
 
-import javax.naming.InitialContext;
-import javax.naming.NamingException;
-
 import org.jboss.as.controller.ServiceVerificationHandler;
 import org.jboss.as.naming.service.NamingService;
 import org.jboss.msc.service.AbstractService;
@@ -33,6 +30,11 @@ import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.service.ServiceTarget;
 import org.jboss.msc.value.InjectedValue;
+
+import javax.naming.InitialContext;
+import javax.naming.NamingException;
+
+import static org.jboss.as.naming.NamingMessages.MESSAGES;
 
 /**
  * Service responsible for providing the {@link InitialContext} as OSGi service.
@@ -46,7 +48,7 @@ public class InitialContextFactoryService extends AbstractService<InitialContext
     // to find the service using context.getServiceReference(InitialContext.class.getName())
     public static final ServiceName SERVICE_NAME = ServiceName.of("jbosgi", "xservice", InitialContext.class.getName());
 
-    private InjectedValue<NamingStore> injectedNamingStore = new InjectedValue<NamingStore>();
+    private final InjectedValue<NamingStore> injectedNamingStore = new InjectedValue<NamingStore>();
 
     public static ServiceController<InitialContext> addService(final ServiceTarget target, final ServiceVerificationHandler verificationHandler) {
         InitialContextFactoryService service = new InitialContextFactoryService();
@@ -61,7 +63,7 @@ public class InitialContextFactoryService extends AbstractService<InitialContext
         try {
             return new InitialContext();
         } catch (NamingException ex) {
-            throw new IllegalStateException("Cannot obtain InitialContext", ex);
+            throw MESSAGES.cannotObtain(ex, "InitialContext");
         }
     }
 }

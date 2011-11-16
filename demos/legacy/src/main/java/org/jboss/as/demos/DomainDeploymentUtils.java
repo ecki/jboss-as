@@ -21,7 +21,7 @@
  */
 package org.jboss.as.demos;
 
-import static org.jboss.as.protocol.old.StreamUtils.safeClose;
+import static org.jboss.as.protocol.StreamUtils.safeClose;
 
 import javax.management.MBeanServerConnection;
 import javax.management.ObjectName;
@@ -70,7 +70,7 @@ public class DomainDeploymentUtils implements Closeable {
     private boolean injectedClient = true;
 
     public DomainDeploymentUtils() throws UnknownHostException {
-        this(ModelControllerClient.Factory.create(InetAddress.getByName("localhost"), 9999));
+        this(ModelControllerClient.Factory.create(InetAddress.getByName("localhost"), 9999, DemoAuthentication.getCallbackHandler()));
         this.injectedClient = false;
     }
 

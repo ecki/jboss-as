@@ -45,6 +45,9 @@
                 <include name="standalone/**"/>
             </fileset>
             <fileset dir="src/main/resources">
+                <include name="appclient/**"/>
+            </fileset>
+            <fileset dir="src/main/resources">
                 <include name="welcome-content/**"/>
             </fileset>
         </copy>
@@ -98,8 +101,6 @@
             <maven-resource group="com.h2database" artifact="h2"/>
         </module-def>
 
-        <module-def name="com.sun.jndi.ldap" />
-
         <module-def name="com.sun.jsf-impl">
             <maven-resource group="com.sun.faces" artifact="jsf-impl"/>
         </module-def>
@@ -107,8 +108,6 @@
         <module-def name="com.sun.jsf-impl" slot="1.2">
             <maven-resource group="javax.faces" artifact="jsf-impl"/>
         </module-def>
-
-        <module-def name="com.sun.security" />
 
         <module-def name="com.sun.xml.bind">
             <maven-resource group="com.sun.xml.bind" artifact="jaxb-impl"/>
@@ -156,7 +155,7 @@
         </module-def>
 
         <module-def name="javax.faces.api">
-            <maven-resource group="org.jboss.spec.javax.faces" artifact="jboss-jsf-api_2.0_spec"/>
+            <maven-resource group="org.jboss.spec.javax.faces" artifact="jboss-jsf-api_2.1_spec"/>
         </module-def>
 
         <module-def name="javax.faces.api" slot="1.2">
@@ -177,6 +176,10 @@
 
         <module-def name="javax.jws.api">
             <maven-resource group="javax.jws" artifact="jsr181-api"/>
+        </module-def>
+
+        <module-def name="javax.management.j2ee.api">
+            <maven-resource group="org.jboss.spec.javax.management.j2ee" artifact="jboss-j2eemgmt-api_1.1_spec"/>
         </module-def>
 
         <module-def name="javax.mail.api">
@@ -253,6 +256,10 @@
 
         <module-def name="jline">
             <maven-resource group="jline" artifact="jline"/>
+        </module-def>
+
+        <module-def name="juddi">
+            <maven-resource group="juddi" artifact="juddi"/>
         </module-def>
 
         <module-def name="net.sourceforge.cssparser">
@@ -347,12 +354,16 @@
             <maven-resource group="org.apache.neethi" artifact="neethi"/>
         </module-def>
 
-    	<module-def name="org.apache.santuario.xmlsec">
+        <module-def name="org.apache.santuario.xmlsec">
             <maven-resource group="org.apache.santuario" artifact="xmlsec"/>
         </module-def>
 
         <module-def name="org.apache.velocity">
             <maven-resource group="org.apache.velocity" artifact="velocity" />
+        </module-def>
+
+        <module-def name="org.apache.ws.scout">
+            <maven-resource group="org.apache.ws.scout" artifact="scout"/>
         </module-def>
 
         <module-def name="org.apache.xalan">
@@ -395,11 +406,14 @@
 
         <module-def name="org.hibernate">
             <maven-resource group="org.hibernate" artifact="hibernate-core" />
-            <maven-resource group="org.hibernate" artifact="hibernate-commons-annotations" />
+            <maven-resource group="org.hibernate.common" artifact="hibernate-commons-annotations" />
             <maven-resource group="org.hibernate" artifact="hibernate-entitymanager" />
             <maven-resource group="org.hibernate" artifact="hibernate-infinispan" />
         </module-def>
 
+        <module-def name="org.hibernate.envers">
+            <maven-resource group="org.hibernate" artifact="hibernate-envers"/>
+        </module-def>
         <module-def name="org.hibernate.validator">
             <maven-resource group="org.hibernate" artifact="hibernate-validator"/>
         </module-def>
@@ -425,7 +439,23 @@
             <maven-resource group="javassist" artifact="javassist"/>
         </module-def>
 
+        <module-def name="org.jaxen">
+            <maven-resource group="jaxen" artifact="jaxen"/>
+        </module-def>
+
+        <module-def name="org.jdom">
+            <maven-resource group="org.jdom" artifact="jdom"/>
+        </module-def>
+
         <module-def name="org.jboss.as.aggregate" />
+
+        <module-def name="org.jboss.as.appclient">
+            <maven-resource group="org.jboss.as" artifact="jboss-as-appclient"/>
+        </module-def>
+
+        <module-def name="org.jboss.as.console">
+            <maven-resource-with-classifier group="org.jboss.as" artifact="jboss-as-console" classifier="resources"/>
+        </module-def>
 
         <module-def name="org.jboss.as.cli">
             <maven-resource group="org.jboss.as" artifact="jboss-as-cli"/>
@@ -459,6 +489,10 @@
             <maven-resource group="org.jboss.as" artifact="jboss-as-clustering-web-spi"/>
         </module-def>
 
+        <module-def name="org.jboss.as.cmp">
+            <maven-resource group="org.jboss.as" artifact="jboss-as-cmp"/>
+        </module-def>
+
         <module-def name="org.jboss.as.connector">
             <maven-resource group="org.jboss.as" artifact="jboss-as-connector"/>
         </module-def>
@@ -479,8 +513,8 @@
             <maven-resource group="org.jboss.as" artifact="jboss-as-deployment-scanner"/>
         </module-def>
 
-        <module-def name="org.jboss.as.domain-http-api">
-            <maven-resource group="org.jboss.as" artifact="jboss-as-domain-http-api"/>
+        <module-def name="org.jboss.as.domain-http-interface">
+            <maven-resource group="org.jboss.as" artifact="jboss-as-domain-http-interface"/>
         </module-def>
 
         <module-def name="org.jboss.as.domain-controller">
@@ -493,6 +527,10 @@
 
         <module-def name="org.jboss.as.ee">
             <maven-resource group="org.jboss.as" artifact="jboss-as-ee"/>
+        </module-def>
+
+        <module-def name="org.jboss.as.ee.deployment">
+            <maven-resource group="org.jboss.as" artifact="jboss-as-ee-deployment"/>
         </module-def>
 
         <module-def name="org.jboss.as.ejb3">
@@ -511,8 +549,17 @@
             <maven-resource group="org.jboss.as" artifact="jboss-as-jacorb"/>
         </module-def>
 
+        <module-def name="org.jboss.as.jaxr">
+            <maven-resource group="org.jboss.as" artifact="jboss-as-jaxr"/>
+        </module-def>
+
         <module-def name="org.jboss.as.jaxrs">
             <maven-resource group="org.jboss.as" artifact="jboss-as-jaxrs"/>
+        </module-def>
+
+        <module-def name="org.jboss.as.jdr">
+            <maven-resource group="org.jboss.as" artifact="jboss-as-jdr"/>
+            <maven-resource group="org.jboss.as" artifact="jboss-as-sos"/>
         </module-def>
 
         <module-def name="org.jboss.as.jmx">
@@ -535,8 +582,16 @@
             <maven-resource group="org.jboss.as" artifact="jboss-as-jpa-spi"/>
         </module-def>
 
+        <module-def name="org.jboss.as.jpa.util">
+            <maven-resource group="org.jboss.as" artifact="jboss-as-jpa-util"/>
+        </module-def>
+
         <module-def name="org.jboss.as.logging">
             <maven-resource group="org.jboss.as" artifact="jboss-as-logging"/>
+        </module-def>
+
+        <module-def name="org.jboss.as.mail">
+            <maven-resource group="org.jboss.as" artifact="jboss-as-mail"/>
         </module-def>
 
         <module-def name="org.jboss.as.messaging">
@@ -548,6 +603,10 @@
             <maven-resource group="org.jboss.mod_cluster" artifact="mod_cluster"/>
         </module-def>
 
+        <module-def name="org.jboss.as.pojo">
+            <maven-resource group="org.jboss.as" artifact="jboss-as-pojo"/>
+        </module-def>
+
         <module-def name="org.jboss.as.naming">
             <maven-resource group="org.jboss.as" artifact="jboss-as-naming"/>
         </module-def>
@@ -556,8 +615,12 @@
             <maven-resource group="org.jboss.as" artifact="jboss-as-network"/>
         </module-def>
 
-     	  <module-def name="org.jboss.as.osgi">
+     	<module-def name="org.jboss.as.osgi">
             <maven-resource group="org.jboss.as" artifact="jboss-as-osgi-service"/>
+        </module-def>
+
+        <module-def name="org.jboss.as.platform-mbean">
+            <maven-resource group="org.jboss.as" artifact="jboss-as-platform-mbean"/>
         </module-def>
 
         <module-def name="org.jboss.as.process-controller">
@@ -602,7 +665,11 @@
         </module-def>
 
         <module-def name="org.jboss.as.webservices.server.integration">
-            <!-- this is just dependencies wrapper module - to support multiple JBossWS SOAP stacks -->
+            <!-- this is a dependencies only wrapper module - to support multiple JBossWS SOAP stacks -->
+        </module-def>
+
+        <module-def name="org.jboss.as.webservices.server.jaxrpc-integration">
+            <!-- this is a dependencies only module for JAXRPC functionalities provided by JBossWS Native stack -->
         </module-def>
 
         <module-def name="org.jboss.as.weld">
@@ -626,49 +693,24 @@
 
         <module-def name="org.jboss.com.sun.httpserver">
             <maven-resource group="org.jboss.com.sun.httpserver" artifact="httpserver"/>
-            <maven-resource-with-classifier group="org.jboss.as" artifact="jboss-as-console" classifier="resources"/>
         </module-def>
 
         <module-def name="org.jboss.dmr">
             <maven-resource group="org.jboss" artifact="jboss-dmr"/>
         </module-def>
 
-        <module-def name="org.jboss.ejb3">
-            <!-- all maven artifacts that live on the org.jboss.ejb3 release cycle -->
-            <maven-resource group="org.jboss.ejb3" artifact="jboss-ejb3-cache"/>
+        <module-def name="org.jboss.ejb-client">
+            <maven-resource group="org.jboss" artifact="jboss-ejb-client"/>
+        </module-def>
 
-            <maven-resource group="org.jboss.ejb3" artifact="jboss-ejb3-core-pool"/>
+        <module-def name="org.jboss.ejb3">
 
             <!-- TODO: this is not the final API -->
             <maven-resource group="org.jboss.ejb3" artifact="jboss-ejb3-ext-api"/>
-
-
-            <maven-resource group="org.jboss.ejb3.context" artifact="jboss-ejb3-context-base"/>
-            <maven-resource group="org.jboss.ejb3.context" artifact="jboss-ejb3-context-spi"/>
-
-            <maven-resource group="org.jboss.ejb3.effigy" artifact="jboss-ejb3-effigy-api"/>
-            <maven-resource group="org.jboss.ejb3.effigy" artifact="jboss-ejb3-effigy-common"/>
-            <maven-resource group="org.jboss.ejb3.effigy" artifact="jboss-ejb3-effigy-int2"/>
-
-            <maven-resource group="org.jboss.ejb3.concurrency" artifact="jboss-ejb3-concurrency-spi"/>
-            <maven-resource group="org.jboss.ejb3.concurrency" artifact="jboss-ejb3-concurrency-impl"/>
-
-            <maven-resource group="org.jboss.ejb3.tx2" artifact="jboss-ejb3-tx2-impl"/>
-            <maven-resource group="org.jboss.ejb3.tx2" artifact="jboss-ejb3-tx2-spi"/>
-        </module-def>
-
-        <module-def name="org.jboss.ejb3.timerservice">
-            <maven-resource group="org.jboss.ejb3.timerservice" artifact="ejb31-calendar-expr-parser"/>
-            <maven-resource group="org.jboss.ejb3.timerservice" artifact="jboss-ejb3-timerservice-api"/>
-            <maven-resource group="org.jboss.ejb3.timerservice" artifact="jboss-ejb3-timerservice-mk2"/>
         </module-def>
 
         <module-def name="org.jboss.integration.ext-content">
             <!-- Bundling external content into deployments -->
-        </module-def>
-
-        <module-def name="org.jboss.integration.jboss-jca-spi">
-            <maven-resource group="org.jboss.integration" artifact="jboss-jca-spi"/>
         </module-def>
 
         <module-def name="org.jboss.jboss-transaction-spi">
@@ -746,6 +788,7 @@
 
         <module-def name="org.jboss.metadata">
             <maven-resource group="org.jboss.metadata" artifact="jboss-metadata-common"/>
+            <maven-resource group="org.jboss.metadata" artifact="jboss-metadata-appclient"/>
             <maven-resource group="org.jboss.metadata" artifact="jboss-metadata-ejb"/>
             <maven-resource group="org.jboss.metadata" artifact="jboss-metadata-web"/>
             <maven-resource group="org.jboss.metadata" artifact="jboss-metadata-ear"/>
@@ -789,10 +832,6 @@
             <maven-resource group="org.jboss.remoting3" artifact="jboss-remoting"/>
         </module-def>
 
-        <module-def name="org.jboss.resteasy.async-http-servlet-30">
-            <maven-resource group="org.jboss.resteasy" artifact="async-http-servlet-3.0"/>
-        </module-def>
-
         <module-def name="org.jboss.resteasy.resteasy-atom-provider">
             <maven-resource group="org.jboss.resteasy" artifact="resteasy-atom-provider"  jandex="true"/>
         </module-def>
@@ -810,6 +849,7 @@
         </module-def>
 
         <module-def name="org.jboss.resteasy.resteasy-jaxrs">
+            <maven-resource group="org.jboss.resteasy" artifact="async-http-servlet-3.0"/>
             <maven-resource group="org.jboss.resteasy" artifact="resteasy-jaxrs" jandex="true"/>
         </module-def>
 
@@ -827,6 +867,10 @@
 
         <module-def name="org.jboss.security.negotiation">
             <maven-resource group="org.jboss.security" artifact="jboss-negotiation"/>
+        </module-def>
+
+        <module-def name="org.jboss.security.xacml">
+            <maven-resource group="org.jboss.security" artifact="jbossxacml"/>
         </module-def>
 
         <module-def name="org.jboss.shrinkwrap.core">
@@ -893,6 +937,18 @@
             <maven-resource group="org.jboss.ws.projects" artifact="jaxws-jboss-httpserver-httpspi"/>
         </module-def>
 
+        <module-def name="org.jboss.ws.native.jbossws-native-core">
+            <maven-resource group="org.jboss.ws.native" artifact="jbossws-native-core"/>
+        </module-def>
+
+        <module-def name="org.jboss.ws.native.jbossws-native-factories">
+            <maven-resource group="org.jboss.ws.native" artifact="jbossws-native-factories"/>
+        </module-def>
+
+        <module-def name="org.jboss.ws.native.jbossws-native-services">
+            <maven-resource group="org.jboss.ws.native" artifact="jbossws-native-services"/>
+        </module-def>
+
         <module-def name="org.jboss.ws.api">
             <maven-resource group="org.jboss.ws" artifact="jbossws-api"/>
         </module-def>
@@ -912,6 +968,10 @@
         </module-def>
 
         <module-def name="org.jboss.ws.tools.wsconsume">
+        </module-def>
+
+        <module-def name="org.jboss.xb">
+            <maven-resource group="org.jboss" artifact="jbossxb"/>
         </module-def>
 
         <module-def name="org.jboss.xnio">
@@ -945,7 +1005,18 @@
         <module-def name="org.picketbox">
             <maven-resource group="org.picketbox" artifact="picketbox"/>
             <maven-resource group="org.picketbox" artifact="picketbox-infinispan"/>
-        	<maven-resource group="org.picketbox" artifact="picketbox-commons"/>
+            <maven-resource group="org.picketbox" artifact="picketbox-commons"/>
+        </module-def>
+
+        <module-def name="org.picketlink">
+            <maven-resource group="org.picketlink" artifact="picketlink-fed"/>
+            <maven-resource group="org.picketlink" artifact="picketlink-bindings"/>
+            <maven-resource group="org.picketlink" artifact="picketlink-bindings-jboss"/>
+            <maven-resource group="org.picketlink" artifact="picketlink-trust-jbossws"/>
+        </module-def>
+
+        <module-def name="org.python.jython.standalone">
+            <maven-resource group="org.python" artifact="jython-standalone"/>
         </module-def>
 
         <module-def name="org.slf4j.jcl-over-slf4j">
@@ -974,6 +1045,10 @@
 
         <module-def name="javax.wsdl4j.api">
             <maven-resource group="wsdl4j" artifact="wsdl4j"/>
+        </module-def>
+
+        <module-def name="nu.xom">
+            <maven-resource group="xom" artifact="xom"/>
         </module-def>
 
         <module-def name="sun.jdk"/>
@@ -1022,7 +1097,7 @@
         </bundle-def>
 
         <bundle-def name="org.jboss.osgi.http">
-            <maven-bundle group="org.jboss.osgi.http" artifact="jboss-osgi-http"/>
+            <maven-bundle group="org.jboss.osgi.http" artifact="jbosgi-http"/>
         </bundle-def>
 
         <bundle-def name="org.jboss.osgi.jmx">
@@ -1048,12 +1123,10 @@
         <bundle-def name="org.osgi.compendium">
             <maven-bundle group="org.osgi" artifact="org.osgi.compendium"/>
         </bundle-def>
-        <!--
-        <include name="org.apache.felix.eventadmin.jar" />
-        <include name="org.apache.felix.log.jar" />
-        <include name="org.apache.felix.metatype.jar" />
-        <include name="org.apache.felix.webconsole.jar" />
-        -->
+
+        <bundle-def name="org.projectodd.stilts">
+            <maven-bundle group="org.projectodd.stilts" artifact="stilts-stomplet-server-bundle"/>
+        </bundle-def>
     </target>
 
     <target name="clean-target">

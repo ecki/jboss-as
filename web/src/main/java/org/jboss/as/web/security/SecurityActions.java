@@ -22,12 +22,14 @@
 
 package org.jboss.as.web.security;
 
-import java.security.AccessController;
-import java.security.PrivilegedAction;
-
+import org.jboss.security.RunAs;
+import org.jboss.security.RunAsIdentity;
 import org.jboss.security.SecurityContext;
 import org.jboss.security.SecurityContextAssociation;
 import org.jboss.security.SecurityContextFactory;
+
+import java.security.AccessController;
+import java.security.PrivilegedAction;
 
 /**
  * Privileged Actions
@@ -36,52 +38,6 @@ import org.jboss.security.SecurityContextFactory;
  * @since Jan 12, 2011
  */
 class SecurityActions {
-    /**
-     * Get the Thread Context Class Loader
-     *
-     * @return
-     */
-    static ClassLoader getContextClassLoader() {
-        return AccessController.doPrivileged(new PrivilegedAction<ClassLoader>() {
-
-            @Override
-            public ClassLoader run() {
-                return Thread.currentThread().getContextClassLoader();
-            }
-        });
-    }
-
-    /**
-     * Set the Thread Context {@code ClassLoader}
-     *
-     * @param cl An instance of {@code ClassLoader}
-     */
-    static void setContextClassLoader(final ClassLoader cl) {
-        AccessController.doPrivileged(new PrivilegedAction<Void>() {
-
-            @Override
-            public Void run() {
-                Thread.currentThread().setContextClassLoader(cl);
-                return null;
-            }
-        });
-    }
-
-    /**
-     * Get the Class {@code ClassLoader}
-     *
-     * @param clazz A class whose classloader is needed
-     * @return The Classloader of the clazz
-     */
-    static ClassLoader getClassLoader(final Class<?> clazz) {
-        return AccessController.doPrivileged(new PrivilegedAction<ClassLoader>() {
-
-            @Override
-            public ClassLoader run() {
-                return clazz.getClassLoader();
-            }
-        });
-    }
 
     /**
      * Create a JBoss Security Context with the given security domain name
@@ -117,5 +73,112 @@ class SecurityActions {
                 return null;
             }
         });
+    }
+
+    /**
+     * Get the current {@code SecurityContext}
+     *
+     * @return an instance of {@code SecurityContext}
+     */
+    static SecurityContext getSecurityContext() {
+        return AccessController.doPrivileged(new PrivilegedAction<SecurityContext>() {
+            public SecurityContext run() {
+                return SecurityContextAssociation.getSecurityContext();
+            }
+        });
+    }
+
+    /**
+     * Clears current {@code SecurityContext}
+     */
+    static void clearSecurityContext() {
+        AccessController.doPrivileged(new PrivilegedAction<Void>() {
+            public Void run() {
+                SecurityContextAssociation.clearSecurityContext();
+                return null;
+            }
+        });
+    }
+
+    /**
+     * Sets the run as identity
+     *
+     * @param principal the identity
+     */
+    static void pushRunAsIdentity(final RunAsIdentity principal) {
+        AccessController.doPrivileged(new PrivilegedAction<Void>() {
+
+            @Override
+            public Void run() {
+                SecurityContext sc = getSecurityContext();
+                if (sc == null)
+                    throw new IllegalStateException("SecurityContext is null");
+                sc.setOutgoingRunAs(principal);
+                return null;
+            }
+        });
+    }
+
+    /**
+     * Removes the run as identity
+     *
+     * @return the identity removed
+     */
+    static RunAs popRunAsIdentity() {
+        return AccessController.doPrivileged(new PrivilegedAction<RunAs>() {
+
+            @Override
+            public RunAs run() {
+                SecurityContext sc = getSecurityContext();
+                if (sc == null)
+                    throw new IllegalStateException("SecurityContext is null");
+                RunAs principal = sc.getOutgoingRunAs();
+                sc.setOutgoingRunAs(null);
+                return principal;
+            }
+        });
+    }
+
+    public static final String AUTH_EXCEPTION_KEY = "org.jboss.security.exception";
+
+    static void clearAuthException() {
+        if (System.getSecurityManager() != null) {
+            AccessController.doPrivileged(new PrivilegedAction<Void>() {
+
+                @Override
+                public Void run() {
+                    SecurityContext sc = getSecurityContext();
+                    if (sc != null)
+                        sc.getData().put(AUTH_EXCEPTION_KEY, null);
+                    return null;
+                }
+            });
+        } else {
+            SecurityContext sc = getSecurityContext();
+            if (sc != null)
+                sc.getData().put(AUTH_EXCEPTION_KEY, null);
+        }
+    }
+
+    static Throwable getAuthException() {
+        if (System.getSecurityManager() != null) {
+            return AccessController.doPrivileged(new PrivilegedAction<Throwable>() {
+
+                @Override
+                public Throwable run() {
+                    SecurityContext sc = getSecurityContext();
+                    Throwable exception = null;
+                    if (sc != null)
+                        exception = (Throwable) sc.getData().get(AUTH_EXCEPTION_KEY);
+                    return exception;
+                }
+            });
+        } else {
+            SecurityContext sc = getSecurityContext();
+            Throwable exception = null;
+            if (sc != null)
+                exception = (Throwable) sc.getData().get(AUTH_EXCEPTION_KEY);
+            return exception;
+        }
     }
 }

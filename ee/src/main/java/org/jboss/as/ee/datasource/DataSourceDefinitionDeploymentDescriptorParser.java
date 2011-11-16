@@ -22,12 +22,14 @@
 
 package org.jboss.as.ee.datasource;
 
-import org.jboss.as.ee.component.AbstractDeploymentDescriptorBindingsProcessor;
+import static org.jboss.as.ee.EeMessages.MESSAGES;
+
 import org.jboss.as.ee.component.BindingConfiguration;
 import org.jboss.as.ee.component.ComponentDescription;
 import org.jboss.as.ee.component.DeploymentDescriptorEnvironment;
 import org.jboss.as.ee.component.EEApplicationClasses;
 import org.jboss.as.ee.component.EEModuleDescription;
+import org.jboss.as.ee.component.deployers.AbstractDeploymentDescriptorBindingsProcessor;
 import org.jboss.as.server.deployment.DeploymentUnit;
 import org.jboss.as.server.deployment.DeploymentUnitProcessingException;
 import org.jboss.as.server.deployment.reflect.DeploymentReflectionIndex;
@@ -70,7 +72,7 @@ public class DataSourceDefinitionDeploymentDescriptorParser extends AbstractDepl
 
         String name = dataSource.getName();
         if (name == null || name.isEmpty()) {
-            throw new IllegalArgumentException("<data-source> elements must provide a name.");
+            throw MESSAGES.elementAttributeMissing("<data-source>", "name");
         }
         // if the name doesn't have a namespace then it defaults to java:comp/env
         if (!name.startsWith("java:")) {
@@ -79,7 +81,7 @@ public class DataSourceDefinitionDeploymentDescriptorParser extends AbstractDepl
 
         final String className = dataSource.getClassName();
         if (className == null || className.equals(Object.class.getName())) {
-            throw new IllegalArgumentException("<data-source> elements must provide a driver class name.");
+            throw MESSAGES.elementAttributeMissing("<data-source>", "className");
         }
 
         final String[] properties;

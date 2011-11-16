@@ -23,22 +23,14 @@
 package org.jboss.as.messaging.jms;
 
 import org.hornetq.jms.server.JMSServerManager;
-import org.jboss.as.naming.MockContext;
-import org.jboss.as.naming.NamingStore;
-import org.jboss.as.naming.ValueManagedReferenceFactory;
-import org.jboss.as.naming.deployment.ContextNames;
-import org.jboss.as.naming.service.BinderService;
-import org.jboss.logging.Logger;
 import org.jboss.msc.service.Service;
-import org.jboss.msc.service.ServiceController;
-import org.jboss.msc.service.ServiceTarget;
 import org.jboss.msc.service.StartContext;
 import org.jboss.msc.service.StartException;
 import org.jboss.msc.service.StopContext;
 import org.jboss.msc.value.InjectedValue;
-import org.jboss.msc.value.Values;
 
-import java.util.Map;
+import static org.jboss.as.messaging.MessagingLogger.MESSAGING_LOGGER;
+import static org.jboss.as.messaging.MessagingMessages.MESSAGES;
 
 /**
  * Service responsible for creating and destroying a {@code javax.jms.Queue}.
@@ -49,10 +41,10 @@ public class JMSQueueService implements Service<Void> {
 
     private final InjectedValue<JMSServerManager> jmsServer = new InjectedValue<JMSServerManager>();
 
-    private String queueName;
-    private String selectorString;
-    private boolean durable;
-    private String[] jndi;
+    private final String queueName;
+    private final String selectorString;
+    private final boolean durable;
+    private final String[] jndi;
 
     public JMSQueueService(final String queueName, String selectorString, boolean durable, String[] jndi) {
         this.queueName = queueName;
@@ -67,7 +59,7 @@ public class JMSQueueService implements Service<Void> {
         try {
             jmsManager.createQueue(false, queueName, selectorString, durable, jndi);
         } catch (Exception e) {
-            throw new StartException("failed to create queue", e);
+            throw new StartException(MESSAGES.failedToCreate("queue"), e);
         }
     }
 
@@ -75,16 +67,9 @@ public class JMSQueueService implements Service<Void> {
     public synchronized void stop(StopContext context) {
         final JMSServerManager jmsManager = jmsServer.getValue();
         try {
-            jmsManager.destroyQueue(queueName);
+            jmsManager.removeQueueFromJNDI(queueName);
         } catch (Exception e) {
-            Logger.getLogger("org.jboss.messaging").warnf(e ,"failed to destroy jms queue: %s", queueName);
-        }
-        // FIXME This shouldn't be here
-        for(final String jndiBinding : jndi) {
-            ServiceController<?> service = context.getController().getServiceContainer().getService(ContextNames.JAVA_CONTEXT_SERVICE_NAME.append(jndiBinding));
-            if (service != null) {
-                service.setMode(ServiceController.Mode.REMOVE);
-            }
+            MESSAGING_LOGGER.failedToDestroy(e, "queue", queueName);
         }
     }
 

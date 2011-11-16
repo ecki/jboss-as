@@ -22,35 +22,35 @@
 
 package org.jboss.as.remoting;
 
-import static org.jboss.as.remoting.CommonAttributes.AUTHENTICATION_PROVIDER;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
 import static org.jboss.as.remoting.CommonAttributes.FORWARD_SECRECY;
 import static org.jboss.as.remoting.CommonAttributes.INCLUDE_MECHANISMS;
 import static org.jboss.as.remoting.CommonAttributes.NO_ACTIVE;
 import static org.jboss.as.remoting.CommonAttributes.NO_ANONYMOUS;
 import static org.jboss.as.remoting.CommonAttributes.NO_DICTIONARY;
-import static org.jboss.as.remoting.CommonAttributes.NO_PLAINTEXT;
+import static org.jboss.as.remoting.CommonAttributes.NO_PLAIN_TEXT;
 import static org.jboss.as.remoting.CommonAttributes.PASS_CREDENTIALS;
 import static org.jboss.as.remoting.CommonAttributes.POLICY;
-import static org.jboss.as.remoting.CommonAttributes.PROPERTIES;
 import static org.jboss.as.remoting.CommonAttributes.QOP;
 import static org.jboss.as.remoting.CommonAttributes.SASL;
 import static org.jboss.as.remoting.CommonAttributes.SERVER_AUTH;
-import static org.jboss.as.remoting.CommonAttributes.SOCKET_BINDING;
 import static org.jboss.as.remoting.CommonAttributes.STRENGTH;
 
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 
 import org.jboss.as.controller.AbstractAddStepHandler;
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
+import org.jboss.as.controller.PathAddress;
 import org.jboss.as.controller.ServiceVerificationHandler;
-import org.jboss.as.controller.descriptions.DescriptionProvider;
+import org.jboss.as.network.SocketBinding;
 import org.jboss.dmr.ModelNode;
 import org.jboss.msc.service.ServiceController;
+import org.jboss.msc.service.ServiceName;
+import org.jboss.msc.service.ServiceTarget;
 import org.xnio.OptionMap;
 import org.xnio.Options;
 import org.xnio.Sequence;
@@ -62,29 +62,28 @@ import org.xnio.sasl.SaslStrength;
  *
  * @author <a href="mailto:david.lloyd@redhat.com">David M. Lloyd</a>
  * @author Emanuel Muckenhuber
+ * @author Kabir Khan
  */
-public class ConnectorAdd extends AbstractAddStepHandler implements DescriptionProvider {
+public class ConnectorAdd extends AbstractAddStepHandler {
 
     static final ConnectorAdd INSTANCE = new ConnectorAdd();
 
-    protected void populateModel(ModelNode operation, ModelNode model) {
-        model.get(SOCKET_BINDING).set(operation.require(SOCKET_BINDING));
-        if (operation.hasDefined(AUTHENTICATION_PROVIDER)) {
-            model.get(AUTHENTICATION_PROVIDER).set(operation.get(AUTHENTICATION_PROVIDER));
-        }
-        if (operation.hasDefined(SASL)) {
-            model.get(SASL).set(operation.get(SASL));
-        }
-        if (operation.hasDefined(PROPERTIES)) {
-            model.get(PROPERTIES).set(operation.get(PROPERTIES));
-        }
+    protected void populateModel(ModelNode operation, ModelNode model) throws OperationFailedException{
+        ConnectorResource.SOCKET_BINDING_ATTRIBUTE.validateAndSet(operation, model);
+        ConnectorResource.AUTHENTICATION_PROVIER_ATTRIBUTE.validateAndSet(operation, model);
     }
 
     protected void performRuntime(OperationContext context, ModelNode operation, ModelNode model, ServiceVerificationHandler verificationHandler, List<ServiceController<?>> newControllers) throws OperationFailedException {
-//        final PathAddress address = PathAddress.pathAddress(operation.get(OP_ADDR));
-//        final String name = address.getLastElement().getValue();
-//
-//        final ServiceTarget target = context.getServiceTarget();
+        //TODO SASL and properties
+        final PathAddress address = PathAddress.pathAddress(operation.get(OP_ADDR));
+        final String connectorName = address.getLastElement().getValue();
+
+        final ServiceTarget target = context.getServiceTarget();
+
+        ServiceName socketBindingName = SocketBinding.JBOSS_BINDING_NAME.append(ConnectorResource.SOCKET_BINDING_ATTRIBUTE.validateOperation(model).asString());
+        RemotingServices.installConnectorServicesForSocketBinding(target, RemotingServices.SUBSYSTEM_ENDPOINT, connectorName, socketBindingName, null, null, verificationHandler, newControllers);
+
+        //TODO AuthenticationHandler
 //
 //        final ConnectorService connectorService = new ConnectorService();
 //        connectorService.setOptionMap(createOptionMap(operation));
@@ -94,7 +93,7 @@ public class ConnectorAdd extends AbstractAddStepHandler implements DescriptionP
 //        try {
 //            newControllers.add(target.addService(connectorName, connectorService)
 //                    .addDependency(connectorName.append("auth-provider"), ServerAuthenticationProvider.class, connectorService.getAuthenticationProviderInjector())
-//                    .addDependency(RemotingServices.ENDPOINT, Endpoint.class, connectorService.getEndpointInjector())
+//                    .addDependency(RemotingServices.SUBSYSTEM_ENDPOINT, Endpoint.class, connectorService.getEndpointInjector())
 //                    .addListener(verificationHandler)
 //                    .setInitialMode(ServiceController.Mode.ACTIVE)
 //                    .install());
@@ -121,7 +120,7 @@ public class ConnectorAdd extends AbstractAddStepHandler implements DescriptionP
                 builder.set(Options.SASL_POLICY_NOACTIVE, policy.get(NO_ACTIVE).asBoolean());
                 builder.set(Options.SASL_POLICY_NOANONYMOUS, policy.get(NO_ANONYMOUS).asBoolean());
                 builder.set(Options.SASL_POLICY_NODICTIONARY, policy.get(NO_DICTIONARY).asBoolean());
-                builder.set(Options.SASL_POLICY_NOPLAINTEXT, policy.get(NO_PLAINTEXT).asBoolean());
+                builder.set(Options.SASL_POLICY_NOPLAINTEXT, policy.get(NO_PLAIN_TEXT).asBoolean());
                 builder.set(Options.SASL_POLICY_PASS_CREDENTIALS, policy.get(PASS_CREDENTIALS).asBoolean());
             }
         }
@@ -143,9 +142,4 @@ public class ConnectorAdd extends AbstractAddStepHandler implements DescriptionP
         }
         return set;
     }
-
-    public ModelNode getModelDescription(Locale locale) {
-        return RemotingSubsystemProviders.CONNECTOR_ADD.getModelDescription(locale);
-    }
-
 }

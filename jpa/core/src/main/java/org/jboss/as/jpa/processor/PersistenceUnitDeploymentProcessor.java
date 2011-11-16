@@ -22,29 +22,54 @@
 
 package org.jboss.as.jpa.processor;
 
+import static org.jboss.as.jpa.JpaLogger.JPA_LOGGER;
+import static org.jboss.as.jpa.JpaMessages.MESSAGES;
+
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import javax.persistence.ValidationMode;
+import javax.persistence.spi.PersistenceProvider;
+import javax.persistence.spi.PersistenceProviderResolverHolder;
+import javax.sql.DataSource;
+import javax.validation.ValidatorFactory;
+
 import org.jboss.as.connector.subsystems.datasources.AbstractDataSourceService;
+import org.jboss.as.controller.PathElement;
+import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
+import org.jboss.as.controller.registry.Resource;
 import org.jboss.as.ee.component.ComponentDescription;
 import org.jboss.as.ee.component.EEModuleDescription;
 import org.jboss.as.ee.structure.DeploymentType;
 import org.jboss.as.ee.structure.DeploymentTypeMarker;
-import org.jboss.as.jpa.classloader.TempClassLoader;
+import org.jboss.as.jpa.classloader.TempClassLoaderFactoryImpl;
 import org.jboss.as.jpa.config.Configuration;
 import org.jboss.as.jpa.config.PersistenceProviderDeploymentHolder;
 import org.jboss.as.jpa.config.PersistenceUnitMetadataHolder;
-import org.jboss.as.jpa.persistenceprovider.PersistenceProviderResolverImpl;
+import org.jboss.as.jpa.persistenceprovider.PersistenceProviderLoader;
 import org.jboss.as.jpa.service.JPAService;
-import org.jboss.as.jpa.service.PersistenceUnitService;
+import org.jboss.as.jpa.service.PersistenceUnitServiceImpl;
+import org.jboss.as.jpa.spi.ManagementAdaptor;
 import org.jboss.as.jpa.spi.PersistenceProviderAdaptor;
 import org.jboss.as.jpa.spi.PersistenceUnitMetadata;
-import org.jboss.as.jpa.transaction.JtaManagerImpl;
+import org.jboss.as.jpa.spi.PersistenceUnitService;
+import org.jboss.as.jpa.subsystem.PersistenceUnitRegistryImpl;
 import org.jboss.as.jpa.validator.SerializableValidatorFactory;
 import org.jboss.as.naming.ManagedReference;
 import org.jboss.as.naming.ManagedReferenceFactory;
-import org.jboss.as.naming.NamingStore;
+import org.jboss.as.naming.ServiceBasedNamingStore;
 import org.jboss.as.naming.ValueManagedReferenceFactory;
 import org.jboss.as.naming.deployment.ContextNames;
 import org.jboss.as.naming.service.BinderService;
 import org.jboss.as.server.deployment.Attachments;
+import org.jboss.as.server.deployment.DeploymentModelUtils;
 import org.jboss.as.server.deployment.DeploymentPhaseContext;
 import org.jboss.as.server.deployment.DeploymentUnit;
 import org.jboss.as.server.deployment.DeploymentUnitProcessingException;
@@ -53,13 +78,12 @@ import org.jboss.as.server.deployment.DeploymentUtils;
 import org.jboss.as.server.deployment.SubDeploymentMarker;
 import org.jboss.as.server.deployment.module.ResourceRoot;
 import org.jboss.as.web.deployment.WarMetaData;
-import org.jboss.logging.Logger;
+import org.jboss.dmr.ModelNode;
+import org.jboss.jandex.Index;
 import org.jboss.metadata.web.jboss.ValveMetaData;
 import org.jboss.modules.Module;
 import org.jboss.modules.ModuleClassLoader;
-import org.jboss.modules.ModuleIdentifier;
 import org.jboss.modules.ModuleLoadException;
-import org.jboss.modules.ModuleLoader;
 import org.jboss.msc.inject.CastingInjector;
 import org.jboss.msc.inject.InjectionException;
 import org.jboss.msc.inject.Injector;
@@ -70,18 +94,6 @@ import org.jboss.msc.service.ServiceRegistryException;
 import org.jboss.msc.service.ServiceTarget;
 import org.jboss.msc.value.ImmediateValue;
 
-import javax.persistence.PersistenceException;
-import javax.persistence.ValidationMode;
-import javax.persistence.spi.PersistenceProvider;
-import javax.persistence.spi.PersistenceProviderResolverHolder;
-import javax.sql.DataSource;
-import javax.validation.ValidatorFactory;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.List;
-import java.util.ServiceLoader;
-
 /**
  * Handle the installation of the Persistence Unit service
  *
@@ -89,9 +101,14 @@ import java.util.ServiceLoader;
  */
 public class PersistenceUnitDeploymentProcessor implements DeploymentUnitProcessor {
 
-    private static final Logger log = Logger.getLogger("org.jboss.jpa");
-
     public static final String JNDI_PROPERTY = "jboss.entity.manager.factory.jndi.name";
+
+    private final PersistenceUnitRegistryImpl persistenceUnitRegistry;
+
+    public PersistenceUnitDeploymentProcessor(final PersistenceUnitRegistryImpl persistenceUnitRegistry) {
+        this.persistenceUnitRegistry = persistenceUnitRegistry;
+    }
+
 
     @Override
     public void deploy(DeploymentPhaseContext phaseContext) throws DeploymentUnitProcessingException {
@@ -110,13 +127,13 @@ public class PersistenceUnitDeploymentProcessor implements DeploymentUnitProcess
             final ResourceRoot deploymentRoot = deploymentUnit.getAttachment(Attachments.DEPLOYMENT_ROOT);
             PersistenceUnitMetadataHolder holder;
             if (deploymentRoot != null &&
-                    (holder = deploymentRoot.getAttachment(PersistenceUnitMetadataHolder.PERSISTENCE_UNITS)) != null &&
-                    holder.getPersistenceUnits().size() > 0) {
+                (holder = deploymentRoot.getAttachment(PersistenceUnitMetadataHolder.PERSISTENCE_UNITS)) != null &&
+                holder.getPersistenceUnits().size() > 0) {
                 ArrayList<PersistenceUnitMetadataHolder> puList = new ArrayList<PersistenceUnitMetadataHolder>(1);
                 puList.add(holder);
-                log.trace("install persistence unit definition for jar " + deploymentRoot.getRootName());
+                JPA_LOGGER.tracef("install persistence unit definition for jar %s", deploymentRoot.getRootName());
                 // assemble and install the PU service
-                addPuService(phaseContext, deploymentRoot, puList);
+                addPuService(phaseContext, puList);
             }
         }
     }
@@ -130,8 +147,8 @@ public class PersistenceUnitDeploymentProcessor implements DeploymentUnitProcess
 
             // handle persistence.xml definition in the root of the war
             if (deploymentRoot != null &&
-                    (holder = deploymentRoot.getAttachment(PersistenceUnitMetadataHolder.PERSISTENCE_UNITS)) != null &&
-                    holder.getPersistenceUnits().size() > 0) {
+                (holder = deploymentRoot.getAttachment(PersistenceUnitMetadataHolder.PERSISTENCE_UNITS)) != null &&
+                holder.getPersistenceUnits().size() > 0) {
                 // assemble and install the PU service
                 puList.add(holder);
             }
@@ -142,7 +159,7 @@ public class PersistenceUnitDeploymentProcessor implements DeploymentUnitProcess
             for (ResourceRoot resourceRoot : resourceRoots) {
                 if (resourceRoot.getRoot().getLowerCaseName().endsWith(".jar")) {
                     if ((holder = resourceRoot.getAttachment(PersistenceUnitMetadataHolder.PERSISTENCE_UNITS)) != null
-                            && holder.getPersistenceUnits().size() > 0) {
+                        && holder.getPersistenceUnits().size() > 0) {
 
                         // assemble and install the PU service
                         puList.add(holder);
@@ -164,8 +181,8 @@ public class PersistenceUnitDeploymentProcessor implements DeploymentUnitProcess
                 valves.add(valve);
             }
 
-            log.trace("install persistence unit definitions for war " + deploymentRoot.getRootName());
-            addPuService(phaseContext, deploymentRoot, puList);
+            JPA_LOGGER.tracef("install persistence unit definitions for war %s", deploymentRoot.getRootName());
+            addPuService(phaseContext, puList);
         }
     }
 
@@ -180,14 +197,14 @@ public class PersistenceUnitDeploymentProcessor implements DeploymentUnitProcess
                     ArrayList<PersistenceUnitMetadataHolder> puList = new ArrayList<PersistenceUnitMetadataHolder>(1);
 
                     if (root != null &&
-                            (holder = root.getAttachment(PersistenceUnitMetadataHolder.PERSISTENCE_UNITS)) != null &&
-                            holder.getPersistenceUnits().size() > 0) {
+                        (holder = root.getAttachment(PersistenceUnitMetadataHolder.PERSISTENCE_UNITS)) != null &&
+                        holder.getPersistenceUnits().size() > 0) {
                         // assemble and install the PU service
                         puList.add(holder);
                     }
 
-                    log.trace("install persistence unit definitions for ear " + root.getRootName());
-                    addPuService(phaseContext, root, puList);
+                    JPA_LOGGER.tracef("install persistence unit definitions for ear %s", root.getRootName());
+                    addPuService(phaseContext, puList);
                 }
             }
         }
@@ -197,15 +214,13 @@ public class PersistenceUnitDeploymentProcessor implements DeploymentUnitProcess
      * Add one PU service per top level deployment that represents
      *
      * @param phaseContext
-     * @param resourceRoot
      * @param puList
      * @throws DeploymentUnitProcessingException
      *
      */
-    private void addPuService(DeploymentPhaseContext phaseContext, ResourceRoot resourceRoot,
-                              ArrayList<PersistenceUnitMetadataHolder> puList
+    private void addPuService(DeploymentPhaseContext phaseContext, ArrayList<PersistenceUnitMetadataHolder> puList
     )
-            throws DeploymentUnitProcessingException {
+        throws DeploymentUnitProcessingException {
 
         if (puList.size() > 0) {
             final DeploymentUnit deploymentUnit = phaseContext.getDeploymentUnit();
@@ -213,7 +228,7 @@ public class PersistenceUnitDeploymentProcessor implements DeploymentUnitProcess
             final EEModuleDescription eeModuleDescription = deploymentUnit.getAttachment(org.jboss.as.ee.component.Attachments.EE_MODULE_DESCRIPTION);
             final Collection<ComponentDescription> components = eeModuleDescription.getComponentDescriptions();
             if (module == null)
-                throw new DeploymentUnitProcessingException("Failed to get module attachment for " + phaseContext.getDeploymentUnit());
+                throw MESSAGES.failedToGetModuleAttachment(phaseContext.getDeploymentUnit());
 
             final ServiceTarget serviceTarget = phaseContext.getServiceTarget();
             final ModuleClassLoader classLoader = module.getClassLoader();
@@ -221,37 +236,47 @@ public class PersistenceUnitDeploymentProcessor implements DeploymentUnitProcess
             if (persistenceProviderDeploymentHolder == null && deploymentUnit.getParent() != null) {
                 persistenceProviderDeploymentHolder = deploymentUnit.getParent().getAttachment(JpaAttachments.DEPLOYED_PERSISTENCE_PROVIDER);
             }
+
+
+
             for (PersistenceUnitMetadataHolder holder : puList) {
+                setAnnotationIndexes(holder, deploymentUnit);
                 for (PersistenceUnitMetadata pu : holder.getPersistenceUnits()) {
                     pu.setClassLoader(classLoader);
-                    pu.setTempClassloader(new TempClassLoader(classLoader));
+                    pu.setTempClassLoaderFactory(new TempClassLoaderFactoryImpl(classLoader));
                     try {
                         final HashMap properties = new HashMap();
                         if (!ValidationMode.NONE.equals(pu.getValidationMode())) {
-                            ValidatorFactory validatorFactory = SerializableValidatorFactory.getINSTANCE();
+                            ValidatorFactory validatorFactory = SerializableValidatorFactory.validatorFactory();
                             properties.put("javax.persistence.validation.factory", validatorFactory);
                         }
                         final PersistenceProviderAdaptor adaptor = getPersistenceProviderAdaptor(pu, persistenceProviderDeploymentHolder);
 
-                        // ensure that the persistence provider module is loaded
-                        loadPersistenceProviderModule(pu, persistenceProviderDeploymentHolder);
 
-                        final PersistenceProvider provider;
+                        PersistenceProvider provider = null;
                         if (persistenceProviderDeploymentHolder != null &&
-                                persistenceProviderDeploymentHolder.getProvider() != null &&
-                                persistenceProviderDeploymentHolder.getProvider().getClass().getName().equals(pu.getPersistenceProviderClassName())) {
-                            provider = persistenceProviderDeploymentHolder.getProvider();
-                        } else {
-                            provider = lookupProvider(pu.getPersistenceProviderClassName());
+                            persistenceProviderDeploymentHolder.getProvider() != null) {
+
+                            List<PersistenceProvider> providerList = persistenceProviderDeploymentHolder.getProvider();
+                            for (PersistenceProvider persistenceProvider : providerList) {
+                                if (persistenceProvider.getClass().getName().equals(pu.getPersistenceProviderClassName())) {
+                                    provider = persistenceProvider;
+                                    break;
+                                }
+                            }
+                        }
+                        //  look provider up if we didn't use the providers packaged with the application
+                        if (provider == null) {
+                            provider = lookupProvider(pu);
                         }
 
-                        final PersistenceUnitService service = new PersistenceUnitService(pu, adaptor, provider);
+                        final PersistenceUnitServiceImpl service = new PersistenceUnitServiceImpl(pu, adaptor, provider);
 
                         // add persistence provider specific properties
                         adaptor.addProviderProperties(properties, pu);
 
 
-                        final ServiceName puServiceName = PersistenceUnitService.getPUServiceName(pu);
+                        final ServiceName puServiceName = PersistenceUnitServiceImpl.getPUServiceName(pu);
                         // add the PU service as a dependency to all EE components in this scope
                         this.addPUServiceDependencyToComponents(components, puServiceName);
 
@@ -262,18 +287,18 @@ public class PersistenceUnitDeploymentProcessor implements DeploymentUnitProcess
                         final String jtaDataSource = adjustJndi(pu.getJtaDataSourceName());
                         final String nonJtaDataSource = adjustJndi(pu.getNonJtaDataSourceName());
 
-                        if (jtaDataSource != null) {
+                        if (jtaDataSource != null && jtaDataSource.length() > 0) {
                             if (jtaDataSource.startsWith("java:")) {
-                                builder.addDependency(ContextNames.serviceNameOfContext(eeModuleDescription.getApplicationName(), eeModuleDescription.getModuleName(), eeModuleDescription.getModuleName(), jtaDataSource), ManagedReferenceFactory.class, new ManagedReferenceFactoryInjector(service.getJtaDataSourceInjector()));
+                                builder.addDependency(ContextNames.bindInfoForEnvEntry(eeModuleDescription.getApplicationName(), eeModuleDescription.getModuleName(), eeModuleDescription.getModuleName(), false, jtaDataSource).getBinderServiceName(), ManagedReferenceFactory.class, new ManagedReferenceFactoryInjector(service.getJtaDataSourceInjector()));
                                 useDefaultDataSource = false;
                             } else {
                                 builder.addDependency(AbstractDataSourceService.SERVICE_NAME_BASE.append(jtaDataSource), new CastingInjector<DataSource>(service.getJtaDataSourceInjector(), DataSource.class));
                                 useDefaultDataSource = false;
                             }
                         }
-                        if (nonJtaDataSource != null) {
+                        if (nonJtaDataSource != null && nonJtaDataSource.length() > 0) {
                             if (nonJtaDataSource.startsWith("java:")) {
-                                builder.addDependency(ContextNames.serviceNameOfContext(eeModuleDescription.getApplicationName(), eeModuleDescription.getModuleName(), eeModuleDescription.getModuleName(), nonJtaDataSource), ManagedReferenceFactory.class, new ManagedReferenceFactoryInjector(service.getNonJtaDataSourceInjector()));
+                                builder.addDependency(ContextNames.bindInfoForEnvEntry(eeModuleDescription.getApplicationName(), eeModuleDescription.getModuleName(), eeModuleDescription.getModuleName(), false, nonJtaDataSource).getBinderServiceName(), ManagedReferenceFactory.class, new ManagedReferenceFactoryInjector(service.getNonJtaDataSourceInjector()));
                                 useDefaultDataSource = false;
                             } else {
                                 builder.addDependency(AbstractDataSourceService.SERVICE_NAME_BASE.append(nonJtaDataSource), new CastingInjector<DataSource>(service.getNonJtaDataSourceInjector(), DataSource.class));
@@ -284,9 +309,9 @@ public class PersistenceUnitDeploymentProcessor implements DeploymentUnitProcess
                         if (useDefaultDataSource) {
                             final String defaultJtaDataSource = adjustJndi(JPAService.getDefaultDataSourceName());
                             if (defaultJtaDataSource != null &&
-                                    defaultJtaDataSource.length() > 0) {
+                                defaultJtaDataSource.length() > 0) {
                                 builder.addDependency(AbstractDataSourceService.SERVICE_NAME_BASE.append(defaultJtaDataSource), new CastingInjector<DataSource>(service.getJtaDataSourceInjector(), DataSource.class));
-                                log.trace(puServiceName + " is using the default data source '" + defaultJtaDataSource + "'");
+                                JPA_LOGGER.tracef("%s is using the default data source '%s'", puServiceName, defaultJtaDataSource);
                             }
                         }
 
@@ -297,46 +322,76 @@ public class PersistenceUnitDeploymentProcessor implements DeploymentUnitProcess
 
                         if (pu.getProperties().containsKey(JNDI_PROPERTY)) {
                             String jndiName = pu.getProperties().get(JNDI_PROPERTY).toString();
-                            final ServiceName bindingServiceName = ContextNames.serviceNameOfContext(eeModuleDescription.getApplicationName(), eeModuleDescription.getModuleName(), eeModuleDescription.getModuleName(), jndiName);
-                            final BinderService binderService = new BinderService(jndiName);
-                            serviceTarget.addService(bindingServiceName, binderService)
-                                    .addDependency(ContextNames.serviceNameOfNamingStore(eeModuleDescription.getApplicationName(), eeModuleDescription.getModuleName(), eeModuleDescription.getModuleName(), jndiName), NamingStore.class, binderService.getNamingStoreInjector())
-                                    .addDependency(puServiceName, PersistenceUnitService.class, new Injector<PersistenceUnitService>() {
-                                        @Override
-                                        public void inject(final PersistenceUnitService value) throws InjectionException {
-                                            binderService.getManagedObjectInjector().inject(new ValueManagedReferenceFactory(new ImmediateValue<Object>(value.getEntityManagerFactory())));
-                                        }
+                            final ContextNames.BindInfo bindingInfo = ContextNames.bindInfoFor(eeModuleDescription.getApplicationName(), eeModuleDescription.getModuleName(), eeModuleDescription.getModuleName(), jndiName);
+                            final BinderService binderService = new BinderService(bindingInfo.getBindName());
+                            serviceTarget.addService(bindingInfo.getBinderServiceName(), binderService)
+                                .addDependency(bindingInfo.getParentContextServiceName(), ServiceBasedNamingStore.class, binderService.getNamingStoreInjector())
+                                .addDependency(puServiceName, PersistenceUnitServiceImpl.class, new Injector<PersistenceUnitServiceImpl>() {
+                                    @Override
+                                    public void inject(final PersistenceUnitServiceImpl value) throws
+                                        InjectionException {
+                                        binderService.getManagedObjectInjector().inject(new ValueManagedReferenceFactory(new ImmediateValue<Object>(value.getEntityManagerFactory())));
+                                    }
 
-                                        @Override
-                                        public void uninject() {
-                                            binderService.getNamingStoreInjector().uninject();
-                                        }
-                                    }).install();
+                                    @Override
+                                    public void uninject() {
+                                        binderService.getNamingStoreInjector().uninject();
+                                    }
+                                }).install();
                         }
 
                         builder.setInitialMode(ServiceController.Mode.ACTIVE)
-                                .addInjection(service.getPropertiesInjector(), properties)
-                                .install();
+                            .addInjection(service.getPropertiesInjector(), properties)
+                            .addInjection(persistenceUnitRegistry.getInjector())
+                            .install();
 
-                        log.trace("added PersistenceUnitService for '" + puServiceName + "'.  PU is ready for injector action. ");
+                        JPA_LOGGER.tracef("added PersistenceUnitService for '%s'.  PU is ready for injector action.", puServiceName);
+                        addManagementConsole(deploymentUnit, pu, service, adaptor);
 
                     } catch (ServiceRegistryException e) {
-                        throw new DeploymentUnitProcessingException("Failed to add persistence unit service for " + pu.getPersistenceUnitName(), e);
+                        throw MESSAGES.failedToAddPersistenceUnit(e, pu.getPersistenceUnitName());
                     }
+
                 }
             }
         }
     }
 
-    private DeploymentUnit top(DeploymentUnit deploymentUnit) {
-        while (deploymentUnit.getParent() != null) {
-            deploymentUnit = deploymentUnit.getParent();
+    /**
+     * Setup the annotation index map
+     *
+     * @param puHolder
+     * @param deploymentUnit
+     */
+    private void setAnnotationIndexes(
+            final PersistenceUnitMetadataHolder puHolder,
+            DeploymentUnit deploymentUnit ) {
+
+        final Map<URL, Index> annotationIndexes = new HashMap<URL, Index>();
+
+        do {
+            for (ResourceRoot root : DeploymentUtils.allResourceRoots(deploymentUnit)) {
+                final Index index = root.getAttachment(Attachments.ANNOTATION_INDEX);
+                if (index != null) {
+                    try {
+                        JPA_LOGGER.tracef("adding '%s' to annotation index map", root.getRoot().toURL());
+                        annotationIndexes.put(root.getRoot().toURL(), index);
+                    } catch (MalformedURLException e) {
+                        throw new RuntimeException(e);
+                    }
+                }
+            }
+            deploymentUnit = deploymentUnit.getParent(); // get annotation indexes for top level also
         }
-        return deploymentUnit;
+        while (deploymentUnit != null);
+
+        for (PersistenceUnitMetadata pu : puHolder.getPersistenceUnits()) {
+            pu.setAnnotationIndex(annotationIndexes);   // hold onto the annotation index for Persistence Provider use during deployment
+        }
     }
 
     private String adjustJndi(String dataSourceName) {
-        if (dataSourceName != null && !dataSourceName.startsWith("java:")) {
+        if (dataSourceName != null && dataSourceName.length() > 0 && !dataSourceName.startsWith("java:")) {
             if (dataSourceName.startsWith("jboss/")) {
                 return "java:" + dataSourceName;
             }
@@ -357,149 +412,119 @@ public class PersistenceUnitDeploymentProcessor implements DeploymentUnitProcess
      *
      */
     private PersistenceProviderAdaptor getPersistenceProviderAdaptor(final PersistenceUnitMetadata pu, final PersistenceProviderDeploymentHolder persistenceProviderDeploymentHolder) throws
-            DeploymentUnitProcessingException {
+        DeploymentUnitProcessingException {
         String adaptorModule = pu.getProperties().getProperty(Configuration.ADAPTER_MODULE);
         PersistenceProviderAdaptor adaptor = null;
         if (persistenceProviderDeploymentHolder != null) {
             adaptor = persistenceProviderDeploymentHolder.getAdapter();
         }
         if (adaptor == null) {
-            adaptor = loadPersistenceAdapterModule(pu.getPersistenceProviderClassName(), adaptorModule);
+            try {
+                if (adaptorModule == null &&
+                    (pu.getPersistenceProviderClassName() == null ||
+                        pu.getPersistenceProviderClassName().equals(Configuration.PROVIDER_CLASS_DEFAULT))) {
+                    // if using default provider, load default adapter module
+                    adaptorModule = Configuration.ADAPTER_MODULE_DEFAULT;
+                }
+                // will load the persistence provider adaptor (integration classes).  if adaptorModule is null
+                // the noop adaptor is returned (can be used against any provider but the integration classes
+                // are handled externally via properties or code in the persistence provider).
+                adaptor = PersistenceProviderAdaptorLoader.loadPersistenceAdapterModule(adaptorModule);
+            } catch (ModuleLoadException e) {
+                throw new DeploymentUnitProcessingException("persistence provider adapter module load error "
+                    + adaptorModule, e);
+            }
+
         }
         if (adaptor == null) {
-            throw new DeploymentUnitProcessingException("Failed to get adaptor for persistence provider '" + pu.getPersistenceProviderClassName() + "'");
+            throw MESSAGES.failedToGetAdapter(pu.getPersistenceProviderClassName());
         }
         return adaptor;
     }
 
     /**
-     * Loads the persistence provider adapter into the PersistenceProviderAdapterRegistry for later access.
-     * TODO:  test the case where app contains the persistence provider adapter but also uses a system provided adapter.
-     *
-     * @param persistenceProviderClass may specify the persistence provider class name (can be null for default Configuration.PROVIDER_CLASS_DEFAULT).
-     * @param adapterModule            may specify the adapter module name (can be null to use default Configuration.ADAPTER_MODULE_DEFAULT)
-     * @return the persistence provider adaptor for the provider class
-     * @throws DeploymentUnitProcessingException
-     *
-     */
-    private PersistenceProviderAdaptor loadPersistenceAdapterModule(String persistenceProviderClass, String adapterModule) throws
-            DeploymentUnitProcessingException {
-        final ModuleLoader moduleLoader = Module.getBootModuleLoader();
-        PersistenceProviderAdaptor persistenceProviderAdaptor = null;
-
-        if (adapterModule == null) {
-            adapterModule = Configuration.ADAPTER_MODULE_DEFAULT;
-        }
-
-        if (persistenceProviderClass == null) {
-            persistenceProviderClass = Configuration.PROVIDER_CLASS_DEFAULT;
-        }
-
-        try {
-
-            Module module = moduleLoader.loadModule(ModuleIdentifier.fromString(adapterModule));
-            final ServiceLoader<PersistenceProviderAdaptor> serviceLoader =
-                    module.loadService(PersistenceProviderAdaptor.class);
-            if (serviceLoader != null) {
-                for (PersistenceProviderAdaptor adaptor : serviceLoader) {
-                    if (persistenceProviderAdaptor != null) {
-                        throw new DeploymentUnitProcessingException(
-                                "persistence provider adapter module has more than one adapters "
-                                        + adapterModule);
-                    }
-                    persistenceProviderAdaptor = adaptor;
-                    log.debugf("loaded persistence provider adapter %s", adapterModule);
-                }
-                if (persistenceProviderAdaptor != null) {
-                    persistenceProviderAdaptor.injectJtaManager(JtaManagerImpl.getInstance());
-                }
-            }
-        } catch (ModuleLoadException e) {
-            throw new DeploymentUnitProcessingException("persistence provider adapter module load error"
-                    + adapterModule + "(class " + persistenceProviderClass + ")", e);
-        }
-        return persistenceProviderAdaptor;
-    }
-
-    /**
-     * Handles loading the persistence provider module into PersistenceProviderResolverImpl for later access
-     *
-     * @param pu is the persistence unit
-     * @param persistenceProviderDeploymentHolder
-     *           holds the persistence provider if one is packaged with the app deployment
-     * @throws DeploymentUnitProcessingException
-     *
-     */
-    private void loadPersistenceProviderModule(final PersistenceUnitMetadata pu, final PersistenceProviderDeploymentHolder persistenceProviderDeploymentHolder) throws
-            DeploymentUnitProcessingException {
-
-        // only load the persistence provider module if we don't have a persistence provider packaged with the app deployment
-        if (persistenceProviderDeploymentHolder == null || persistenceProviderDeploymentHolder.getProvider() == null) {
-            String persistenceProviderModule = pu.getProperties().getProperty(Configuration.PROVIDER_MODULE);
-            String persistenceProviderClassName = pu.getPersistenceProviderClassName();
-
-            if (persistenceProviderClassName == null) {
-                persistenceProviderClassName = Configuration.PROVIDER_CLASS_DEFAULT;
-            }
-
-            // try to determine the provider module name (ignore if we can't, it might already be loaded)
-            if (persistenceProviderModule == null) {
-                if (persistenceProviderClassName.equals(Configuration.PROVIDER_CLASS_DEFAULT)) {
-                    persistenceProviderModule = Configuration.PROVIDER_MODULE_DEFAULT;
-                }
-            }
-
-            // if we haven't loaded the provider yet, load it
-            if (!PersistenceProviderResolverImpl.getInstance().getPersistenceProviders().
-                    contains(persistenceProviderClassName)) {
-                if (persistenceProviderModule != null) {
-                    final ModuleLoader moduleLoader = Module.getBootModuleLoader();
-                    Module module = null;
-                    try {
-                        module = moduleLoader.loadModule(ModuleIdentifier.fromString(persistenceProviderModule));
-                    } catch (ModuleLoadException e) {
-                        throw new DeploymentUnitProcessingException("persistence provider module load error "
-                                + persistenceProviderModule + " (class " + persistenceProviderClassName + ")", e);
-                    }
-                    final ServiceLoader<PersistenceProvider> serviceLoader =
-                            module.loadService(PersistenceProvider.class);
-                    if (serviceLoader != null) {
-                        PersistenceProvider persistenceProvider = null;
-                        for (PersistenceProvider provider : serviceLoader) {
-                            if (persistenceProvider != null) {
-                                throw new DeploymentUnitProcessingException(
-                                        "persistence provider module has more than one provider "
-                                                + persistenceProviderModule + "(class " + persistenceProviderClassName + ")");
-                            }
-                            persistenceProvider = provider;
-                        }
-
-                        PersistenceProviderResolverImpl.getInstance().addPersistenceProvider(persistenceProvider);
-                    }
-                }
-            }
-        }
-    }
-
-    /**
      * Look up the persistence provider
      *
-     * @param providerName
+     * @param pu
      * @return
      */
-    private PersistenceProvider lookupProvider(String providerName) {
-        List<PersistenceProvider> providers =
-                PersistenceProviderResolverHolder.getPersistenceProviderResolver().getPersistenceProviders();
-        for (PersistenceProvider provider : providers) {
-            if (provider.getClass().getName().equals(providerName)) {
-                return provider;
+    private PersistenceProvider lookupProvider(PersistenceUnitMetadata pu) throws DeploymentUnitProcessingException {
+
+        // ensure that the persistence provider module is loaded
+        String persistenceProviderModule = pu.getProperties().getProperty(Configuration.PROVIDER_MODULE);
+        String persistenceProviderClassName = pu.getPersistenceProviderClassName();
+
+        if (persistenceProviderClassName == null) {
+            persistenceProviderClassName = Configuration.PROVIDER_CLASS_DEFAULT;
+        }
+
+        // try to determine the provider module name (ignore if we can't, it might already be loaded)
+        if (persistenceProviderModule == null) {
+            persistenceProviderModule = Configuration.getProviderModuleNameFromProviderClassName(persistenceProviderClassName);
+        }
+
+        PersistenceProvider provider = getProviderByName(pu, persistenceProviderModule);
+
+        // if we haven't loaded the provider yet, load it
+        if (provider == null) {
+            if (persistenceProviderModule != null) {
+                try {
+                    PersistenceProviderLoader.loadProviderModuleByName(persistenceProviderModule);
+                    provider = getProviderByName(pu, persistenceProviderModule);
+                } catch (ModuleLoadException e) {
+                    throw MESSAGES.cannotLoadPersistenceProviderModule(e, persistenceProviderModule, persistenceProviderClassName);
+                }
             }
         }
-        StringBuilder sb = new StringBuilder();
+
+        if (provider == null)
+            throw MESSAGES.persistenceProviderNotFound(persistenceProviderClassName);
+        return provider;
+    }
+
+    private PersistenceProvider getProviderByName(PersistenceUnitMetadata pu, String persistenceProviderModule) {
+        String providerName = pu.getPersistenceProviderClassName();
+        List<PersistenceProvider> providers =
+            PersistenceProviderResolverHolder.getPersistenceProviderResolver().getPersistenceProviders();
         for (PersistenceProvider provider : providers) {
-            sb.append(provider.getClass().getName()).append(", ");
+            if (provider.getClass().getName().equals(providerName)) {
+                if (providerName.equals(Configuration.PROVIDER_CLASS_DEFAULT)) {
+                    // could be Hibernate 3 or Hibernate 4 (OGM will not match PROVIDER_CLASS_DEFAULT)
+                    if (persistenceProviderModule.equals(Configuration.PROVIDER_MODULE_HIBERNATE3)) {
+                        if (isHibernate3(provider)) {
+                            return provider;            // return Hibernate3 provider
+                        }
+                    } else if (!isHibernate3(provider)) { // looking for Hibernate4
+                        return provider;                // return Hibernate 4 provider
+                    }
+                } else {
+                    return provider;                    // return the provider that matched classname
+                }
+            }
         }
-        throw new PersistenceException("PersistenceProvider '" + providerName + "' not found in {" + sb.toString() + "}");
+        return null;
+    }
+
+
+    private boolean isHibernate3(PersistenceProvider provider) {
+        boolean result = false;
+        // invoke org.hibernate.Version.getVersionString()
+        try {
+            Class targetCls = provider.getClass().getClassLoader().loadClass("org.hibernate.Version");
+            Method m = targetCls.getMethod("getVersionString");
+            Object version = m.invoke(null, null);
+            JPA_LOGGER.tracef("lookup provider checking provider version (%s)", version);
+            if (version instanceof String &&
+                ((String) version).startsWith("3.")) {
+                result = true;
+            }
+        } catch (ClassNotFoundException ignore) {
+        } catch (NoSuchMethodException ignore) {
+        } catch (InvocationTargetException ignore) {
+        } catch (IllegalAccessException ignore) {
+        }
+
+        return result;
     }
 
 
@@ -543,8 +568,63 @@ public class PersistenceUnitDeploymentProcessor implements DeploymentUnitProcess
             return;
         }
         for (final ComponentDescription component : components) {
-            log.debug("Adding dependency on PU service " + puServiceName + " for component " + component.getComponentClassName());
+            JPA_LOGGER.debugf("Adding dependency on PU service %s for component %s", puServiceName, component.getComponentClassName());
             component.addDependency(puServiceName, ServiceBuilder.DependencyType.REQUIRED);
         }
     }
+
+    /**
+     * add to management console (if ManagementAdapter is supported for provider).
+     * <p/>
+     * full path to management data will be:
+     * <p/>
+     * /deployment=Deployment/subsystem=jpa/hibernate-persistence-unit=FullyAppQualifiedPath#PersistenceUnitName/cache=EntityClassName
+     * <p/>
+     * example of full path:
+     * <p/>
+     * /deployment=jpa_SecondLevelCacheTestCase.jar/subsystem=jpa/hibernate-persistence-unit=jpa_SecondLevelCacheTestCase.jar#mypc/
+     * cache=org.jboss.as.test.integration.jpa.hibernate.Employee
+     *
+     * @param deploymentUnit
+     * @param pu
+     * @param persistenceUnitService
+     * @param adaptor
+     */
+    private void addManagementConsole(final DeploymentUnit deploymentUnit, final PersistenceUnitMetadata pu,
+                                      final PersistenceUnitService persistenceUnitService, final PersistenceProviderAdaptor adaptor) {
+        ManagementAdaptor managementAdaptor = adaptor.getManagementAdaptor();
+        if (managementAdaptor != null) {
+            final String providerLabel = managementAdaptor.getIdentificationLabel();
+            final String scopedPersistenceUnitName = pu.getScopedPersistenceUnitName();
+
+            Resource providerResource = managementAdaptor.createPersistenceUnitResource(scopedPersistenceUnitName, providerLabel);
+            ModelNode perPuNode = providerResource.getModel();
+            perPuNode.get("scoped-unit-name").set(pu.getScopedPersistenceUnitName());
+            // TODO this is a temporary hack into internals until DeploymentUnit exposes a proper Resource-based API
+            final Resource deploymentResource = deploymentUnit.getAttachment(DeploymentModelUtils.DEPLOYMENT_RESOURCE);
+            Resource subsystemResource;
+            synchronized (deploymentResource) {
+                subsystemResource = getOrCreateResource(deploymentResource, PathElement.pathElement(ModelDescriptionConstants.SUBSYSTEM, "jpa"));
+            }
+            synchronized (subsystemResource) {
+                subsystemResource.registerChild(PathElement.pathElement(providerLabel, scopedPersistenceUnitName), providerResource);
+            }
+        }
+    }
+
+    /**
+     * TODO this is a temporary hack into internals until DeploymentUnit exposes a proper Resource-based API
+     */
+    private static Resource getOrCreateResource(final Resource parent, final PathElement element) {
+        synchronized (parent) {
+            if (parent.hasChild(element)) {
+                return parent.requireChild(element);
+            } else {
+                final Resource resource = Resource.Factory.create();
+                parent.registerChild(element, resource);
+                return resource;
+            }
+        }
+    }
+
 }

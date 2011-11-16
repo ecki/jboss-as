@@ -22,6 +22,13 @@
 
 package org.jboss.as.domain.management.security;
 
+import org.jboss.as.domain.management.CallbackHandlerFactory;
+import org.jboss.msc.service.Service;
+import org.jboss.msc.service.StartContext;
+import org.jboss.msc.service.StartException;
+import org.jboss.msc.service.StopContext;
+import org.jboss.util.Base64;
+
 import javax.security.auth.callback.Callback;
 import javax.security.auth.callback.CallbackHandler;
 import javax.security.auth.callback.NameCallback;
@@ -29,15 +36,9 @@ import javax.security.auth.callback.PasswordCallback;
 import javax.security.auth.callback.UnsupportedCallbackException;
 import javax.security.sasl.RealmCallback;
 import javax.security.sasl.RealmChoiceCallback;
-
 import java.io.IOException;
 
-import org.jboss.as.domain.management.CallbackHandlerFactory;
-import org.jboss.msc.service.Service;
-import org.jboss.msc.service.StartContext;
-import org.jboss.msc.service.StartException;
-import org.jboss.msc.service.StopContext;
-import org.jboss.util.Base64;
+import static org.jboss.as.domain.management.DomainManagementMessages.MESSAGES;
 
 
 /**
@@ -51,7 +52,7 @@ public class SecretIdentityService implements Service<CallbackHandlerFactory> {
 
     private final char[] password;
 
-    private CallbackHandlerFactory factory;
+    private volatile CallbackHandlerFactory factory;
 
     public SecretIdentityService(final String base64Password) {
         byte[] value = Base64.decode(base64Password);
@@ -91,7 +92,7 @@ public class SecretIdentityService implements Service<CallbackHandlerFactory> {
                     String defaultText = rcb.getDefaultText();
                     rcb.setText(defaultText); // For now just use the realm suggested.
                 } else if (current instanceof RealmChoiceCallback) {
-                    throw new UnsupportedCallbackException(current, "Realm choice not currently supported.");
+                    throw MESSAGES.realmNotSupported(current);
                 } else if (current instanceof NameCallback) {
                     NameCallback ncb = (NameCallback) current;
                     ncb.setName(userName);

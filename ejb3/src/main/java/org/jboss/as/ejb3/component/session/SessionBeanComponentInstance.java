@@ -21,56 +21,44 @@
  */
 package org.jboss.as.ejb3.component.session;
 
-import org.jboss.as.ee.component.BasicComponent;
-import org.jboss.as.ee.component.BasicComponentInstance;
-import org.jboss.as.naming.ManagedReference;
-import org.jboss.ejb3.context.base.BaseSessionContext;
-import org.jboss.ejb3.context.spi.SessionContext;
-import org.jboss.invocation.Interceptor;
-
-import java.io.Serializable;
 import java.lang.reflect.Method;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.jboss.as.ee.component.BasicComponent;
+import org.jboss.as.ejb3.component.EjbComponentInstance;
+import org.jboss.as.ejb3.context.SessionContextImpl;
+import org.jboss.as.naming.ManagedReference;
+import org.jboss.ejb.client.SessionID;
+import org.jboss.invocation.Interceptor;
+
 /**
  * @author <a href="mailto:cdewolf@redhat.com">Carlo de Wolf</a>
  */
-public abstract class SessionBeanComponentInstance extends BasicComponentInstance {
-    private volatile SessionBeanComponentInstanceContext sessionContext;
+public abstract class SessionBeanComponentInstance extends EjbComponentInstance {
+    private volatile SessionContextImpl sessionContext;
 
     /**
      * Construct a new instance.
      *
      * @param component the component
      */
-    protected SessionBeanComponentInstance(final BasicComponent component, final AtomicReference<ManagedReference> instanceReference, final Interceptor preDestroyInterceptor, final Map<Method, Interceptor> methodInterceptors) {
-        super(component, instanceReference, preDestroyInterceptor, methodInterceptors);
+    protected SessionBeanComponentInstance(final BasicComponent component, final AtomicReference<ManagedReference> instanceReference, final Interceptor preDestroyInterceptor, final Map<Method, Interceptor> methodInterceptors, final Map<Method, Interceptor> timeoutInterceptors) {
+        super(component, instanceReference, preDestroyInterceptor, methodInterceptors, timeoutInterceptors);
     }
 
-    protected class SessionBeanComponentInstanceContext extends BaseSessionContext {
-        protected SessionBeanComponentInstanceContext() {
-            super((SessionBeanComponent) SessionBeanComponentInstance.this.getComponent(), SessionBeanComponentInstance.this.getInstance());
-        }
-
-        protected SessionBeanComponentInstance getComponentInstance() {
-            return SessionBeanComponentInstance.this;
-        }
-
-        protected Serializable getId() {
-            return SessionBeanComponentInstance.this.getId();
-        }
+    @Override
+    public SessionBeanComponent getComponent() {
+        return (SessionBeanComponent) super.getComponent();
     }
 
+    protected abstract SessionID getId();
 
-    protected abstract Serializable getId();
-
-    protected SessionContext getSessionContext() {
+    public SessionContextImpl getEjbContext() {
         if (sessionContext == null) {
             synchronized (this) {
                 if (sessionContext == null) {
-
-                    this.sessionContext = new SessionBeanComponentInstanceContext();
+                    this.sessionContext = new SessionContextImpl(this);
                 }
             }
         }

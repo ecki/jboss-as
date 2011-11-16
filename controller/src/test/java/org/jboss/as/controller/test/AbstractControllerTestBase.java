@@ -22,8 +22,13 @@
 
 package org.jboss.as.controller.test;
 
+import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+
 import org.jboss.as.controller.AbstractControllerService;
 import org.jboss.as.controller.ControlledProcessState;
+import org.jboss.as.controller.ExpressionResolver;
 import org.jboss.as.controller.ModelController;
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.PathAddress;
@@ -43,10 +48,6 @@ import org.jboss.msc.service.StartContext;
 import org.jboss.msc.service.StartException;
 import org.junit.After;
 import org.junit.Before;
-
-import java.util.Set;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 
 /**
  * @author Emanuel Muckenhuber
@@ -101,7 +102,7 @@ public abstract class AbstractControllerTestBase {
         private final CountDownLatch latch = new CountDownLatch(1);
 
         ModelControllerService(final ServiceContainer serviceContainer, final ControlledProcessState processState) {
-            super(OperationContext.Type.SERVER, new NullConfigurationPersister(), processState, getRootDescriptionProvider(), null);
+            super(OperationContext.Type.SERVER, new NullConfigurationPersister(), processState, getRootDescriptionProvider(), null, ExpressionResolver.DEFAULT);
         }
 
         @Override
@@ -133,16 +134,16 @@ public abstract class AbstractControllerTestBase {
         final ManagementResourceRegistration registration = context.getResourceRegistrationForUpdate();
         final Set<String> children = registration.getChildNames(base);
         final ModelNode current = new ModelNode();
-
+        final Resource resource = base.size() == 0 ? context.readResourceForUpdate(PathAddress.EMPTY_ADDRESS) : context.createResource(base);
         if(node.getType() == ModelType.OBJECT) {
             for(final String key : node.keys()) {
                 if(! children.contains(key)) {
                     current.get(key).set(node.get(key));
                 }
             }
-            context.createResource(base).getModel().set(current);
+            resource.getModel().set(current);
         } else {
-            context.createResource(base).getModel().set(node);
+            resource.getModel().set(node);
             return;
         }
         if(children != null && ! children.isEmpty()) {

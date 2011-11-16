@@ -24,6 +24,7 @@ package org.jboss.as.arquillian.service;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 import org.jboss.arquillian.testenricher.msc.ServiceContainerAssociation;
 import org.jboss.arquillian.testenricher.msc.ServiceTargetAssociation;
@@ -32,9 +33,6 @@ import org.jboss.as.osgi.deployment.OSGiDeploymentAttachment;
 import org.jboss.as.server.deployment.AttachmentKey;
 import org.jboss.as.server.deployment.Attachments;
 import org.jboss.as.server.deployment.DeploymentUnit;
-import org.jboss.jandex.AnnotationInstance;
-import org.jboss.jandex.AnnotationTarget;
-import org.jboss.jandex.ClassInfo;
 import org.jboss.modules.Module;
 import org.jboss.msc.service.Service;
 import org.jboss.msc.service.ServiceBuilder;
@@ -48,6 +46,7 @@ import org.jboss.msc.service.StartException;
 import org.jboss.msc.service.StopContext;
 import org.jboss.msc.value.InjectedValue;
 import org.jboss.osgi.deployment.deployer.Deployment;
+import org.jboss.osgi.framework.BundleManagerService;
 import org.jboss.osgi.framework.Services;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleContext;
@@ -66,7 +65,7 @@ class ArquillianConfig implements Service<ArquillianConfig> {
     private final ServiceName serviceName;
     private final List<String> testClasses = new ArrayList<String>();
 
-    // The optional dependency on OSGi. This should perhaps be generic.
+    private final InjectedValue<BundleManagerService> injectedBundleManager = new InjectedValue<BundleManagerService>();
     private final InjectedValue<BundleContext> injectedBundleContext = new InjectedValue<BundleContext>();
     private ServiceContainer serviceContainer;
     private ServiceTarget serviceTarget;
@@ -75,18 +74,11 @@ class ArquillianConfig implements Service<ArquillianConfig> {
         return ServiceName.JBOSS.append("arquillian", "config", depUnit.getName());
     }
 
-    ArquillianConfig(ArquillianService arqService, DeploymentUnit depUnit, List<AnnotationInstance> runWithList) {
+    ArquillianConfig(ArquillianService arqService, DeploymentUnit depUnit, Set<String> testClasses) {
         this.arqService = arqService;
         this.depUnit = depUnit;
         this.serviceName = getServiceName(depUnit);
-        for (AnnotationInstance instance : runWithList) {
-            final AnnotationTarget target = instance.target();
-            if (target instanceof ClassInfo) {
-                final ClassInfo classInfo = (ClassInfo) target;
-                final String testClassName = classInfo.name().toString();
-                testClasses.add(testClassName);
-            }
-        }
+        this.testClasses.addAll(testClasses);
     }
 
     ServiceBuilder<ArquillianConfig> buildService(ServiceTarget serviceTarget, ServiceController<?> depController) {
@@ -96,6 +88,7 @@ class ArquillianConfig implements Service<ArquillianConfig> {
     }
 
     void addFrameworkDependency(ServiceBuilder<ArquillianConfig> builder) {
+        builder.addDependency(Services.BUNDLE_MANAGER, BundleManagerService.class, injectedBundleManager);
         builder.addDependency(Services.SYSTEM_CONTEXT, BundleContext.class, injectedBundleContext);
         builder.addDependency(Services.FRAMEWORK_ACTIVATOR);
     }
@@ -145,20 +138,25 @@ class ArquillianConfig implements Service<ArquillianConfig> {
     }
 
     @Override
-    public void start(StartContext context) throws StartException {
+    public synchronized void start(StartContext context) throws StartException {
         serviceContainer = context.getController().getServiceContainer();
         serviceTarget = context.getChildTarget();
         arqService.registerArquillianConfig(this);
+
+        BundleManagerService bundleManager = injectedBundleManager.getOptionalValue();
+        if (bundleManager != null) {
+            arqService.registerArquillianServiceWithOSGi(bundleManager);
+        }
     }
 
     @Override
-    public void stop(StopContext context) {
+    public synchronized void stop(StopContext context) {
         context.getController().setMode(Mode.REMOVE);
         arqService.unregisterArquillianConfig(this);
     }
 
     @Override
-    public ArquillianConfig getValue() {
+    public synchronized ArquillianConfig getValue() {
         return this;
     }
 

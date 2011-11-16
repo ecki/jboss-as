@@ -21,29 +21,35 @@
  */
 package org.jboss.as.ejb3.component.messagedriven;
 
-import org.jboss.as.ee.component.BasicComponentInstance;
-import org.jboss.as.ejb3.component.EJBComponent;
-import org.jboss.as.ejb3.component.pool.PooledComponent;
-import org.jboss.as.ejb3.inflow.JBossMessageEndpointFactory;
-import org.jboss.as.ejb3.inflow.MessageEndpointService;
-import org.jboss.as.naming.ManagedReference;
-import org.jboss.ejb3.context.spi.MessageDrivenBeanComponent;
-import org.jboss.ejb3.pool.Pool;
-import org.jboss.ejb3.pool.StatelessObjectFactory;
-import org.jboss.ejb3.pool.strictmax.StrictMaxPool;
-import org.jboss.invocation.Interceptor;
-import org.jboss.invocation.InterceptorFactoryContext;
-import org.jboss.msc.service.StopContext;
+import java.lang.reflect.Method;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import javax.resource.ResourceException;
 import javax.resource.spi.ActivationSpec;
 import javax.resource.spi.ResourceAdapter;
 import javax.resource.spi.endpoint.MessageEndpointFactory;
 import javax.transaction.TransactionManager;
-import java.lang.reflect.Method;
-import java.util.Map;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
+
+import org.jboss.as.ee.component.BasicComponentInstance;
+import org.jboss.as.ejb3.component.EJBComponent;
+import org.jboss.as.ejb3.component.pool.PoolConfig;
+import org.jboss.as.ejb3.component.pool.PooledComponent;
+import org.jboss.as.ejb3.inflow.JBossMessageEndpointFactory;
+import org.jboss.as.ejb3.inflow.MessageEndpointService;
+import org.jboss.as.ejb3.pool.Pool;
+import org.jboss.as.ejb3.pool.StatelessObjectFactory;
+import org.jboss.as.ejb3.timerservice.PooledTimedObjectInvokerImpl;
+import org.jboss.as.ejb3.timerservice.spi.TimedObjectInvoker;
+import org.jboss.as.naming.ManagedReference;
+import org.jboss.invocation.Interceptor;
+import org.jboss.invocation.InterceptorFactory;
+import org.jboss.invocation.InterceptorFactoryContext;
+import org.jboss.logging.Logger;
+import org.jboss.msc.service.StopContext;
 
 import static java.util.Collections.emptyMap;
 import static javax.ejb.TransactionAttributeType.REQUIRED;
@@ -52,13 +58,16 @@ import static org.jboss.as.ejb3.component.MethodIntf.BEAN;
 /**
  * @author <a href="mailto:cdewolf@redhat.com">Carlo de Wolf</a>
  */
-public class MessageDrivenComponent extends EJBComponent implements MessageDrivenBeanComponent, PooledComponent<MessageDrivenComponentInstance> {
+public class MessageDrivenComponent extends EJBComponent implements PooledComponent<MessageDrivenComponentInstance> {
+    private static final Logger logger = Logger.getLogger(MessageDrivenComponent.class);
+
     private final Pool<MessageDrivenComponentInstance> pool;
 
     private final ActivationSpec activationSpec;
     private final MessageEndpointFactory endpointFactory;
     private final Class<?> messageListenerInterface;
     private ResourceAdapter resourceAdapter;
+    private final TimedObjectInvoker timedObjectInvoker;
 
     /**
      * Construct a new instance.
@@ -76,11 +85,17 @@ public class MessageDrivenComponent extends EJBComponent implements MessageDrive
 
             @Override
             public void destroy(MessageDrivenComponentInstance obj) {
-                throw new RuntimeException("NYI");
-                //destroyInstance(obj);
+                obj.destroy();
             }
         };
-        this.pool = new StrictMaxPool<MessageDrivenComponentInstance>(factory, 20, 5, TimeUnit.MINUTES);
+        final PoolConfig poolConfig = ejbComponentCreateService.getPoolConfig();
+        if (poolConfig == null) {
+            logger.debug("Pooling is disabled for MDB " + ejbComponentCreateService.getComponentName());
+            this.pool = null;
+        } else {
+            logger.debug("Using pool config " + poolConfig + " to create pool for MDB " + ejbComponentCreateService.getComponentName());
+            this.pool = poolConfig.createPool(factory);
+        }
 
         this.activationSpec = activationSpec;
         this.messageListenerInterface = messageListenerInterface;
@@ -114,35 +129,28 @@ public class MessageDrivenComponent extends EJBComponent implements MessageDrive
             }
         };
         this.endpointFactory = new JBossMessageEndpointFactory(getComponentClass().getClassLoader(), service);
+        final String deploymentName;
+        if(ejbComponentCreateService.getDistinctName() == null || ejbComponentCreateService.getDistinctName().length() == 0) {
+            deploymentName = ejbComponentCreateService.getApplicationName() + "." + ejbComponentCreateService.getModuleName();
+        } else {
+            deploymentName = ejbComponentCreateService.getApplicationName() + "." + ejbComponentCreateService.getModuleName() + "." + ejbComponentCreateService.getDistinctName();
+        }
+        this.timedObjectInvoker = new PooledTimedObjectInvokerImpl(this, deploymentName);
     }
 
     @Override
     protected BasicComponentInstance instantiateComponentInstance(AtomicReference<ManagedReference> instanceReference, Interceptor preDestroyInterceptor, Map<Method, Interceptor> methodInterceptors, final InterceptorFactoryContext interceptorContext) {
-        return new MessageDrivenComponentInstance(this, instanceReference, preDestroyInterceptor, methodInterceptors);
+        final Map<Method, Interceptor> timeouts;
+        if (timeoutInterceptors != null) {
+            timeouts = new HashMap<Method, Interceptor>();
+            for (Map.Entry<Method, InterceptorFactory> entry : timeoutInterceptors.entrySet()) {
+                timeouts.put(entry.getKey(), entry.getValue().create(interceptorContext));
+            }
+        } else {
+            timeouts = Collections.emptyMap();
+        }
+        return new MessageDrivenComponentInstance(this, instanceReference, preDestroyInterceptor, methodInterceptors, timeouts);
     }
-
-//    @Override
-//    public Interceptor createClientInterceptor(Class<?> view) {
-//        return createClientInterceptor(view, null);
-//    }
-//
-//    @Override
-//    public Interceptor createClientInterceptor(Class<?> view, Serializable sessionId) {
-//        return new Interceptor() {
-//            @Override
-//            public Object processInvocation(InterceptorContext context) throws Exception {
-//                // TODO: FIXME: Component shouldn't be attached in a interceptor context that
-//                // runs on remote clients.
-//                context.putPrivateData(Component.class, MessageDrivenComponent.this);
-//                try {
-//                    return context.proceed();
-//                }
-//                finally {
-//                    context.putPrivateData(Component.class, null);
-//                }
-//            }
-//        };
-//    }
 
     @Override
     public Pool<MessageDrivenComponentInstance> getPool() {
@@ -172,5 +180,10 @@ public class MessageDrivenComponent extends EJBComponent implements MessageDrive
         resourceAdapter.endpointDeactivation(endpointFactory, activationSpec);
 
         super.stop(stopContext);
+    }
+
+    @Override
+    public TimedObjectInvoker getTimedObjectInvoker() {
+        return timedObjectInvoker;
     }
 }

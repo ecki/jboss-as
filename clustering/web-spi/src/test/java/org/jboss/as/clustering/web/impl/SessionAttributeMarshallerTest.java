@@ -38,7 +38,7 @@ import static org.junit.Assert.*;
  *
  */
 public class SessionAttributeMarshallerTest {
-    private final SessionAttributeMarshaller marshaller = new SessionAttributeMarshallerImpl(new MarshallingContext(Marshalling.getMarshallerFactory("river"), new MarshallingConfiguration()));
+    private final SessionAttributeMarshaller marshaller = new SessionAttributeMarshallerImpl(new MarshallingContext(Marshalling.getMarshallerFactory("river", Marshalling.class.getClassLoader()), new MarshallingConfiguration()));
 
     @Test
     public void test() throws IOException, ClassNotFoundException {

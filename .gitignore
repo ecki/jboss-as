@@ -13,6 +13,10 @@ target
 *.ipr
 *.iws
 .idea
+# ignore NetBeans files
+nbactions.xml
+nb-configuration.xml
+#
 maven-ant-tasks.jar
 test-output
 transaction.log
@@ -30,3 +34,8 @@ pom.xml.versionsBackup
 server.log
 # ignore java crashes
 hs_err_pid*.log
+# H2 databases produced by tests
+*.h2.db
+# JBoss transaction generated files
+PutObjectStoreDirHere
+

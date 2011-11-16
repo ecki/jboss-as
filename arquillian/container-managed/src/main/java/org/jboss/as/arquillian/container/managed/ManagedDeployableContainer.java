@@ -17,23 +17,18 @@
 package org.jboss.as.arquillian.container.managed;
 
 import org.jboss.arquillian.container.spi.client.container.LifecycleException;
-import org.jboss.arquillian.container.spi.context.annotation.ContainerScoped;
-import org.jboss.arquillian.core.api.InstanceProducer;
-import org.jboss.arquillian.core.api.annotation.Inject;
 import org.jboss.as.arquillian.container.CommonDeployableContainer;
-import org.jboss.as.arquillian.container.MBeanServerConnectionProvider;
 import org.jboss.sasl.JBossSaslProvider;
+import org.jboss.sasl.util.UsernamePasswordHashUtil;
 
-import javax.management.MBeanServerConnection;
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.net.InetAddress;
+import java.io.PrintWriter;
 import java.net.Socket;
-import java.net.URI;
-import java.net.UnknownHostException;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.security.Provider;
@@ -42,6 +37,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
 import java.util.logging.Logger;
+
+import static org.jboss.as.arquillian.container.Authentication.USERNAME;
+import static org.jboss.as.arquillian.container.Authentication.PASSWORD;
 
 /**
  * JBossAsManagedContainer
@@ -53,25 +51,34 @@ public final class ManagedDeployableContainer extends CommonDeployableContainer<
 
     private final Logger log = Logger.getLogger(ManagedDeployableContainer.class.getName());
     private final Provider saslProvider = new JBossSaslProvider();
-    private MBeanServerConnectionProvider provider;
     private Thread shutdownThread;
     private Process process;
-
-    @Inject
-    @ContainerScoped
-    private InstanceProducer<MBeanServerConnection> mbeanServerInst;
 
     @Override
     public Class<ManagedContainerConfiguration> getConfigurationClass() {
         return ManagedContainerConfiguration.class;
     }
 
+    private static boolean processHasDied(final Process process) {
+        try {
+            process.exitValue();
+            return true;
+        } catch (IllegalThreadStateException e) {
+            // good
+            return false;
+        }
+    }
+
     @Override
     protected void startInternal() throws LifecycleException {
         ManagedContainerConfiguration config = getContainerConfiguration();
 
-        if (!config.isAllowConnectingToRunningServer()) {
-            verifyNoRunningServer();
+        if(isServerRunning()) {
+            if(config.isAllowConnectingToRunningServer()) {
+                return;
+            } else {
+                failDueToRunning();
+            }
         }
 
         try {
@@ -86,12 +93,25 @@ public final class ManagedDeployableContainer extends CommonDeployableContainer<
             });
 
             final String jbossHomeDir = config.getJbossHome();
-            final String modulePath = config.getModulePath();
+            final String modulePath;
+            if(config.getModulePath() != null && !config.getModulePath().isEmpty()) {
+                modulePath = config.getModulePath();
+            } else {
+               modulePath = jbossHomeDir + File.separatorChar + "modules";
+            }
             final String additionalJavaOpts = config.getJavaVmArguments();
 
-            File modulesJar = new File(jbossHomeDir + "/jboss-modules.jar");
-            if (modulesJar.exists() == false)
+            File modulesJar = new File(jbossHomeDir + File.separatorChar + "jboss-modules.jar");
+            if (!modulesJar.exists())
                 throw new IllegalStateException("Cannot find: " + modulesJar);
+
+            // No point backing up the file in a test scenario, just write what we need.
+            File usersFile = new File(jbossHomeDir + "/standalone/configuration/mgmt-users.properties");
+            FileOutputStream fos = new FileOutputStream(usersFile);
+            PrintWriter pw = new PrintWriter(fos);
+            pw.println(USERNAME + "=" + new UsernamePasswordHashUtil().generateHashedHexURP(USERNAME, "ManagementRealm", PASSWORD.toCharArray()));
+            pw.close();
+            fos.close();
 
             List<String> cmd = new ArrayList<String>();
             cmd.add("java");
@@ -140,20 +160,22 @@ public final class ManagedDeployableContainer extends CommonDeployableContainer<
             long startupTimeout = getContainerConfiguration().getStartupTimeoutInSeconds();
             long timeout = startupTimeout * 1000;
             boolean serverAvailable = false;
+            long sleep = 1000;
             while (timeout > 0 && serverAvailable == false) {
                 serverAvailable = getManagementClient().isServerInRunningState();
                 if (!serverAvailable) {
-                    Thread.sleep(100);
-                    timeout -= 100;
+                    if (processHasDied(proc))
+                        break;
+                    Thread.sleep(sleep);
+                    timeout -= sleep;
+                    sleep = Math.max(sleep/2, 100);
                 }
             }
             if (!serverAvailable) {
                 destroyProcess();
-                throw new TimeoutException(String.format("Managed server was not started within [%d] ms", getContainerConfiguration().getStartupTimeout()));
+                throw new TimeoutException(String.format("Managed server was not started within [%d] s", getContainerConfiguration().getStartupTimeoutInSeconds()));
             }
 
-            provider = getMBeanServerConnectionProvider();
-            mbeanServerInst.set(getMBeanServerConnection(5000));
         } catch (Exception e) {
             throw new LifecycleException("Could not start container", e);
         }
@@ -176,19 +198,14 @@ public final class ManagedDeployableContainer extends CommonDeployableContainer<
         }
     }
 
-    @Override
-    protected MBeanServerConnection getMBeanServerConnection() {
-        return provider.getConnection();
-    }
-
-    private void verifyNoRunningServer() throws LifecycleException {
+    private boolean isServerRunning() {
         Socket socket = null;
         try {
             socket = new Socket(
                     getContainerConfiguration().getManagementAddress(),
                     getContainerConfiguration().getManagementPort());
         } catch (Exception ignored) { // nothing is running on defined ports
-            return;
+            return false;
         } finally {
             if (socket != null) {
                 try {
@@ -198,6 +215,10 @@ public final class ManagedDeployableContainer extends CommonDeployableContainer<
                 }
             }
         }
+        return true;
+    }
+
+    private void failDueToRunning() throws LifecycleException {
         throw new LifecycleException(
                 "The server is already running! " +
                         "Managed containers does not support connecting to running server instances due to the " +
@@ -219,17 +240,6 @@ public final class ManagedDeployableContainer extends CommonDeployableContainer<
         }
     }
 
-    private MBeanServerConnectionProvider getMBeanServerConnectionProvider() {
-        URI jmxSubSystem = getManagementClient().getSubSystemURI("jmx");
-        InetAddress address = null;
-        try {
-            address = InetAddress.getByName(jmxSubSystem.getHost());
-        } catch (UnknownHostException e) {
-            throw new RuntimeException("Could not get jmx subsystems InetAddress: " + jmxSubSystem.getHost(), e);
-        }
-        return new MBeanServerConnectionProvider(address, jmxSubSystem.getPort());
-    }
-
     /**
      * Runnable that consumes the output of the process. If nothing consumes the output the AS will hang on some platforms
      *
@@ -241,15 +251,8 @@ public final class ManagedDeployableContainer extends CommonDeployableContainer<
         public void run() {
             final InputStream stream = process.getInputStream();
             final BufferedReader reader = new BufferedReader(new InputStreamReader(stream));
-            final boolean writeOutput = AccessController.doPrivileged(new PrivilegedAction<Boolean>() {
+            final boolean writeOutput = getContainerConfiguration().isOutputToConsole();
 
-                @Override
-                public Boolean run() {
-                    // By default, redirect to stdout unless disabled by this property
-                    String val = System.getProperty("org.jboss.as.writeconsole");
-                    return val == null || !"false".equals(val);
-                }
-            });
             String line = null;
             try {
                 while ((line = reader.readLine()) != null) {

@@ -50,7 +50,7 @@ public final class EndpointPublishService implements Service<Context> {
 
     private static final Logger log = Logger.getLogger(EndpointPublishService.class);
     private final ServiceName name;
-    private Context wsctx;
+    private volatile Context wsctx;
 
     private final ClassLoader loader;
     private final String context;

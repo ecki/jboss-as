@@ -33,64 +33,7 @@ import static org.jboss.as.controller.parsing.ParseUtils.requireNoContent;
 import static org.jboss.as.controller.parsing.ParseUtils.requireNoNamespaceAttribute;
 import static org.jboss.as.controller.parsing.ParseUtils.unexpectedAttribute;
 import static org.jboss.as.controller.parsing.ParseUtils.unexpectedElement;
-import static org.jboss.as.web.Constants.ACCESS_LOG;
-import static org.jboss.as.web.Constants.ALIAS;
-import static org.jboss.as.web.Constants.CA_CERTIFICATE_FILE;
-import static org.jboss.as.web.Constants.CA_REVOCATION_URL;
-import static org.jboss.as.web.Constants.CERTIFICATE_FILE;
-import static org.jboss.as.web.Constants.CERTIFICATE_KEY_FILE;
-import static org.jboss.as.web.Constants.CIPHER_SUITE;
-import static org.jboss.as.web.Constants.CONNECTOR;
-import static org.jboss.as.web.Constants.CONDITION;
-import static org.jboss.as.web.Constants.CONTAINER_CONFIG;
-import static org.jboss.as.web.Constants.DEFAULT_WEB_MODULE;
-import static org.jboss.as.web.Constants.DIRECTORY;
-import static org.jboss.as.web.Constants.DISABLED;
-import static org.jboss.as.web.Constants.ENABLED;
-import static org.jboss.as.web.Constants.ENABLE_LOOKUPS;
-import static org.jboss.as.web.Constants.ENABLE_WELCOME_ROOT;
-import static org.jboss.as.web.Constants.EXECUTOR;
-import static org.jboss.as.web.Constants.EXTENDED;
-import static org.jboss.as.web.Constants.FILE_ENCONDING;
-import static org.jboss.as.web.Constants.FLAGS;
-import static org.jboss.as.web.Constants.JSP_CONFIGURATION;
-import static org.jboss.as.web.Constants.KEY_ALIAS;
-import static org.jboss.as.web.Constants.LISTINGS;
-import static org.jboss.as.web.Constants.MAX_CONNECTIONS;
-import static org.jboss.as.web.Constants.MAX_DEPTH;
-import static org.jboss.as.web.Constants.MAX_POST_SIZE;
-import static org.jboss.as.web.Constants.MAX_SAVE_POST_SIZE;
-import static org.jboss.as.web.Constants.MIME_MAPPING;
-import static org.jboss.as.web.Constants.NAME;
-import static org.jboss.as.web.Constants.PASSWORD;
-import static org.jboss.as.web.Constants.PATH;
-import static org.jboss.as.web.Constants.PATTERN;
-import static org.jboss.as.web.Constants.PREFIX;
-import static org.jboss.as.web.Constants.PROTOCOL;
-import static org.jboss.as.web.Constants.PROXY_NAME;
-import static org.jboss.as.web.Constants.PROXY_PORT;
-import static org.jboss.as.web.Constants.READ_ONLY;
-import static org.jboss.as.web.Constants.REDIRECT_PORT;
-import static org.jboss.as.web.Constants.RELATIVE_TO;
-import static org.jboss.as.web.Constants.RESOLVE_HOSTS;
-import static org.jboss.as.web.Constants.REWRITE;
-import static org.jboss.as.web.Constants.ROTATE;
-import static org.jboss.as.web.Constants.SCHEME;
-import static org.jboss.as.web.Constants.SECRET;
-import static org.jboss.as.web.Constants.SECURE;
-import static org.jboss.as.web.Constants.SENDFILE;
-import static org.jboss.as.web.Constants.SESSION_CACHE_SIZE;
-import static org.jboss.as.web.Constants.SESSION_TIMEOUT;
-import static org.jboss.as.web.Constants.SOCKET_BINDING;
-import static org.jboss.as.web.Constants.SSL;
-import static org.jboss.as.web.Constants.STATIC_RESOURCES;
-import static org.jboss.as.web.Constants.SUBSTITUTION;
-import static org.jboss.as.web.Constants.TEST;
-import static org.jboss.as.web.Constants.VERIFY_CLIENT;
-import static org.jboss.as.web.Constants.VERIFY_DEPTH;
-import static org.jboss.as.web.Constants.VIRTUAL_SERVER;
-import static org.jboss.as.web.Constants.WEBDAV;
-import static org.jboss.as.web.Constants.WELCOME_FILE;
+import static org.jboss.as.web.Constants.*;
 
 import java.util.Collections;
 import java.util.List;
@@ -127,8 +70,10 @@ class WebSubsystemParser implements XMLStreamConstants, XMLElementReader<List<Mo
         context.startSubsystemElement(Namespace.CURRENT.getUriString(), false);
 
         ModelNode node = context.getModelNode();
+
         writeAttribute(writer, Attribute.NATIVE.getLocalName(), node);
         writeAttribute(writer, Attribute.DEFAULT_VIRTUAL_SERVER.getLocalName(), node);
+        writeAttribute(writer, Attribute.INSTANCE_ID.getLocalName(), node);
         if(node.hasDefined(CONTAINER_CONFIG)) {
             writeContainerConfig(writer, node.get(CONTAINER_CONFIG));
         }
@@ -150,9 +95,10 @@ class WebSubsystemParser implements XMLStreamConstants, XMLElementReader<List<Mo
                 writeAttribute(writer, Attribute.MAX_SAVE_POST_SIZE.getLocalName(), config);
                 writeAttribute(writer, Attribute.MAX_CONNECTIONS.getLocalName(), config);
                 writeAttribute(writer, Attribute.REDIRECT_PORT.getLocalName(), config);
-                if (config.hasDefined(SSL)) {
+
+                if (config.get(SSL).isDefined() && config.get(SSL).has("configuration")) {
+                    ModelNode sslConfig = config.get(SSL).get("configuration");
                     writer.writeStartElement(Element.SSL.getLocalName());
-                    final ModelNode sslConfig = config.get(SSL);
                     writeAttribute(writer, Attribute.NAME.getLocalName(), sslConfig);
                     writeAttribute(writer, Attribute.KEY_ALIAS.getLocalName(), sslConfig);
                     writeAttribute(writer, Attribute.PASSWORD.getLocalName(), sslConfig);
@@ -166,6 +112,9 @@ class WebSubsystemParser implements XMLStreamConstants, XMLElementReader<List<Mo
                     writeAttribute(writer, Attribute.CA_REVOCATION_URL.getLocalName(), sslConfig);
                     writeAttribute(writer, Attribute.SESSION_CACHE_SIZE.getLocalName(), sslConfig);
                     writeAttribute(writer, Attribute.SESSION_TIMEOUT.getLocalName(), sslConfig);
+                    writeAttribute(writer, Attribute.CA_CERTIFICATE_PASSWORD.getLocalName(), sslConfig);
+                    writeAttribute(writer, Attribute.TRUSTSTORE_TYPE.getLocalName(), sslConfig);
+                    writeAttribute(writer, Attribute.KEYSTORE_TYPE.getLocalName(), sslConfig);
                     writer.writeEndElement();
                 }
                 if (config.hasDefined(VIRTUAL_SERVER)) {
@@ -174,6 +123,7 @@ class WebSubsystemParser implements XMLStreamConstants, XMLElementReader<List<Mo
                         writer.writeAttribute(NAME, virtualServer.asString());
                     }
                 }
+
                 writer.writeEndElement();
             }
         }
@@ -192,26 +142,49 @@ class WebSubsystemParser implements XMLStreamConstants, XMLElementReader<List<Mo
                         writer.writeAttribute(NAME, alias.asString());
                     }
                 }
-                if(config.hasDefined(ACCESS_LOG)) {
+
+                if (config.get(ACCESS_LOG).isDefined() && config.get(ACCESS_LOG).has("configuration")) {
+                    ModelNode accessLog = config.get(ACCESS_LOG).get("configuration");
                     writer.writeStartElement(Element.ACCESS_LOG.getLocalName());
-                    final ModelNode accessLog = config.get(ACCESS_LOG);
-                    if(accessLog.has(DIRECTORY)) {
-                        writer.writeEmptyElement(DIRECTORY);
-                        writeAttribute(writer, Attribute.PATH.getLocalName(), accessLog);
-                        writeAttribute(writer, Attribute.RELATIVE_TO.getLocalName(), accessLog);
+                    writeAttribute(writer, Attribute.PATTERN.getLocalName(), accessLog);
+                    writeAttribute(writer, Attribute.RESOLVE_HOSTS.getLocalName(), accessLog);
+                    writeAttribute(writer, Attribute.EXTENDED.getLocalName(), accessLog);
+                    writeAttribute(writer, Attribute.PREFIX.getLocalName(), accessLog);
+                    writeAttribute(writer, Attribute.ROTATE.getLocalName(), accessLog);
+
+                    if(accessLog.has(DIRECTORY) && accessLog.get(DIRECTORY).has("configuration")) {
+                        ModelNode directory = accessLog.get(DIRECTORY).get("configuration");
+                        String name = Element.DIRECTORY.getLocalName();
+                        boolean startwritten = false;
+                        startwritten = writeAttribute(writer, Attribute.PATH.getLocalName(), directory, startwritten, name);
+                        startwritten = writeAttribute(writer, Attribute.RELATIVE_TO.getLocalName(), directory, startwritten, name);
+                        if (startwritten)
+                            writer.writeEndElement();
                     }
-                    writeAttribute(writer, Attribute.PATTERN.getLocalName(), config);
-                    writeAttribute(writer, Attribute.RESOLVE_HOSTS.getLocalName(), config);
-                    writeAttribute(writer, Attribute.EXTENDED.getLocalName(), config);
-                    writeAttribute(writer, Attribute.PREFIX.getLocalName(), config);
-                    writeAttribute(writer, Attribute.ROTATE.getLocalName(), config);
                     writer.writeEndElement();
                 }
+
                 if (config.hasDefined(REWRITE)) {
-                    for (final ModelNode rewrite : config.get(REWRITE).asList()) {
+                    for (final ModelNode rewritenode : config.get(REWRITE).asList()) {
+                        String name = getAddedRule(rewritenode);
+                        ModelNode rewrite;
+                        if (rewritenode.hasDefined(name))
+                            rewrite = rewritenode.get(name);
+                        else
+                            rewrite = rewritenode;
                         writer.writeStartElement(REWRITE);
+                        writeAttribute(writer, Attribute.PATTERN.getLocalName(), rewrite);
+                        writeAttribute(writer, Attribute.SUBSTITUTION.getLocalName(), rewrite);
+                        writeAttribute(writer, Attribute.FLAGS.getLocalName(), rewrite);
+
                         if (rewrite.hasDefined(CONDITION)) {
-                            for (final ModelNode condition : rewrite.get(CONDITION).asList()) {
+                            for (final ModelNode conditionnode : rewrite.get(CONDITION).asList()) {
+                                String condname = getAddedConditionName(conditionnode);
+                                ModelNode condition;
+                                if (conditionnode.hasDefined(condname))
+                                    condition = conditionnode.get(condname);
+                                else
+                                    condition = conditionnode;
                                 writer.writeStartElement(CONDITION);
                                 writeAttribute(writer, Attribute.TEST.getLocalName(), condition);
                                 writeAttribute(writer, Attribute.PATTERN.getLocalName(), condition);
@@ -219,16 +192,42 @@ class WebSubsystemParser implements XMLStreamConstants, XMLElementReader<List<Mo
                                 writer.writeEndElement();
                             }
                         }
-                        writeAttribute(writer, Attribute.PATTERN.getLocalName(), rewrite);
-                        writeAttribute(writer, Attribute.SUBSTITUTION.getLocalName(), rewrite);
-                        writeAttribute(writer, Attribute.FLAGS.getLocalName(), rewrite);
                         writer.writeEndElement();
                     }
                 }
+
+                if(config.hasDefined(SSO) && config.get(SSO).has("configuration")) {
+                    final ModelNode sso;
+                    sso = config.get(SSO).get("configuration");
+                    writer.writeStartElement(SSO);
+                    writeAttribute(writer, Attribute.CACHE_CONTAINER.getLocalName(), sso);
+                    writeAttribute(writer, Attribute.CACHE_NAME.getLocalName(), sso);
+                    writeAttribute(writer, Attribute.DOMAIN.getLocalName(), sso);
+                    writeAttribute(writer, Attribute.REAUTHENTICATE.getLocalName(), sso);
+                    writer.writeEndElement();
+                }
+
+                // End of the VIRTUAL_SERVER
                 writer.writeEndElement();
             }
         }
         writer.writeEndElement();
+    }
+
+    private String getAddedConditionName(ModelNode conditionnode) {
+        for(final String attribute : conditionnode.keys()) {
+            if (attribute.startsWith("condition-"))
+                return attribute;
+        }
+        return "condition-0";
+    }
+
+    private String getAddedRule(ModelNode rewritenode) {
+        for(final String attribute : rewritenode.keys()) {
+            if (attribute.startsWith("rule-"))
+                return attribute;
+        }
+        return "rule-0";
     }
 
     private void writeContainerConfig(XMLExtendedStreamWriter writer, ModelNode config) throws XMLStreamException {
@@ -237,25 +236,30 @@ class WebSubsystemParser implements XMLStreamConstants, XMLElementReader<List<Mo
             containerConfigStartWritten = writeStaticResources(writer, config.get(STATIC_RESOURCES));
         }
         if(config.hasDefined(JSP_CONFIGURATION)) {
-            containerConfigStartWritten = containerConfigStartWritten || writeJSPConfiguration(writer, config.get(JSP_CONFIGURATION), containerConfigStartWritten);
+            containerConfigStartWritten = writeJSPConfiguration(writer, config.get(JSP_CONFIGURATION), containerConfigStartWritten) || containerConfigStartWritten ;
         }
-        if(config.hasDefined(MIME_MAPPING)) {
+        ModelNode container = config;
+        if(config.hasDefined(CONTAINER)) {
+            // this has been added to get the stuff manageable
+            container = config.get(CONTAINER);
+        }
+        if(container.hasDefined(MIME_MAPPING)) {
             if (!containerConfigStartWritten) {
                 writer.writeStartElement(Element.CONTAINER_CONFIG.getLocalName());
                 containerConfigStartWritten = true;
             }
-            for(final Property entry : config.get(MIME_MAPPING).asPropertyList()) {
+            for(final Property entry : container.get(MIME_MAPPING).asPropertyList()) {
                 writer.writeEmptyElement(Element.MIME_MAPPING.getLocalName());
                 writer.writeAttribute(Attribute.NAME.getLocalName(), entry.getName());
                 writer.writeAttribute(Attribute.VALUE.getLocalName(), entry.getValue().asString());
             }
         }
-        if(config.hasDefined(WELCOME_FILE)) {
+        if(container.hasDefined(WELCOME_FILE)) {
             if (!containerConfigStartWritten) {
                 writer.writeStartElement(Element.CONTAINER_CONFIG.getLocalName());
                 containerConfigStartWritten = true;
             }
-            for(final ModelNode file : config.get(WELCOME_FILE).asList()) {
+            for(final ModelNode file : container.get(WELCOME_FILE).asList()) {
                 writer.writeStartElement(Element.WELCOME_FILE.getLocalName());
                 writer.writeCharacters(file.asString());
                 writer.writeEndElement();
@@ -269,13 +273,13 @@ class WebSubsystemParser implements XMLStreamConstants, XMLElementReader<List<Mo
     private boolean writeStaticResources(XMLExtendedStreamWriter writer, ModelNode config) throws XMLStreamException {
 
         boolean startWritten = writeStaticResourceAttribute(writer, Attribute.LISTINGS.getLocalName(), config, false);
-        startWritten = startWritten || writeStaticResourceAttribute(writer, Attribute.SENDFILE.getLocalName(), config, startWritten);
-        startWritten = startWritten || writeStaticResourceAttribute(writer, Attribute.FILE_ENCONDING.getLocalName(), config, startWritten);
-        startWritten = startWritten || writeStaticResourceAttribute(writer, Attribute.READ_ONLY.getLocalName(), config, startWritten);
-        startWritten = startWritten || writeStaticResourceAttribute(writer, Attribute.WEBDAV.getLocalName(), config, startWritten);
-        startWritten = startWritten || writeStaticResourceAttribute(writer, Attribute.SECRET.getLocalName(), config, startWritten);
-        startWritten = startWritten || writeStaticResourceAttribute(writer, Attribute.MAX_DEPTH.getLocalName(), config, startWritten);
-        startWritten = startWritten || writeStaticResourceAttribute(writer, Attribute.DISABLED.getLocalName(), config, startWritten);
+        startWritten = writeStaticResourceAttribute(writer, Attribute.SENDFILE.getLocalName(), config, startWritten) || startWritten;
+        startWritten = writeStaticResourceAttribute(writer, Attribute.FILE_ENCONDING.getLocalName(), config, startWritten) || startWritten;
+        startWritten = writeStaticResourceAttribute(writer, Attribute.READ_ONLY.getLocalName(), config, startWritten) || startWritten;
+        startWritten = writeStaticResourceAttribute(writer, Attribute.WEBDAV.getLocalName(), config, startWritten) || startWritten;
+        startWritten = writeStaticResourceAttribute(writer, Attribute.SECRET.getLocalName(), config, startWritten) || startWritten;
+        startWritten = writeStaticResourceAttribute(writer, Attribute.MAX_DEPTH.getLocalName(), config, startWritten) || startWritten;
+        startWritten = writeStaticResourceAttribute(writer, Attribute.DISABLED.getLocalName(), config, startWritten) || startWritten;
 
         if (startWritten) {
             writer.writeEndElement();
@@ -298,24 +302,24 @@ class WebSubsystemParser implements XMLStreamConstants, XMLElementReader<List<Mo
     private boolean writeJSPConfiguration(XMLExtendedStreamWriter writer, ModelNode jsp, boolean containerConfigStartWritten) throws XMLStreamException {
 
         boolean startWritten = writeJspConfigAttribute(writer, Attribute.DEVELOPMENT.getLocalName(), jsp, false, containerConfigStartWritten);
-        startWritten = startWritten || writeJspConfigAttribute(writer, Attribute.KEEP_GENERATED.getLocalName(), jsp, startWritten, containerConfigStartWritten);
-        startWritten = startWritten || writeJspConfigAttribute(writer, Attribute.TRIM_SPACES.getLocalName(), jsp, startWritten, containerConfigStartWritten);
-        startWritten = startWritten || writeJspConfigAttribute(writer, Attribute.TAG_POOLING.getLocalName(), jsp, startWritten, containerConfigStartWritten);
-        startWritten = startWritten || writeJspConfigAttribute(writer, Attribute.MAPPED_FILE.getLocalName(), jsp, startWritten, containerConfigStartWritten);
-        startWritten = startWritten || writeJspConfigAttribute(writer, Attribute.CHECK_INTERVAL.getLocalName(), jsp, startWritten, containerConfigStartWritten);
-        startWritten = startWritten || writeJspConfigAttribute(writer, Attribute.MODIFIFICATION_TEST_INTERVAL.getLocalName(), jsp, startWritten, containerConfigStartWritten);
-        startWritten = startWritten || writeJspConfigAttribute(writer, Attribute.RECOMPILE_ON_FAIL.getLocalName(), jsp, startWritten, containerConfigStartWritten);
-        startWritten = startWritten || writeJspConfigAttribute(writer, Attribute.SMAP.getLocalName(), jsp, startWritten, containerConfigStartWritten);
-        startWritten = startWritten || writeJspConfigAttribute(writer, Attribute.DUMP_SMAP.getLocalName(), jsp, startWritten, containerConfigStartWritten);
-        startWritten = startWritten || writeJspConfigAttribute(writer, Attribute.GENERATE_STRINGS_AS_CHAR_ARRAYS.getLocalName(), jsp, startWritten, containerConfigStartWritten);
-        startWritten = startWritten || writeJspConfigAttribute(writer, Attribute.ERROR_ON_USE_BEAN_INVALID_CLASS_ATTRIBUTE.getLocalName(), jsp, startWritten, containerConfigStartWritten);
-        startWritten = startWritten || writeJspConfigAttribute(writer, Attribute.SCRATCH_DIR.getLocalName(), jsp, startWritten, containerConfigStartWritten);
-        startWritten = startWritten || writeJspConfigAttribute(writer, Attribute.SOURCE_VM.getLocalName(), jsp, startWritten, containerConfigStartWritten);
-        startWritten = startWritten || writeJspConfigAttribute(writer, Attribute.TARGET_VM.getLocalName(), jsp, startWritten, containerConfigStartWritten);
-        startWritten = startWritten || writeJspConfigAttribute(writer, Attribute.JAVA_ENCODING.getLocalName(), jsp, startWritten, containerConfigStartWritten);
-        startWritten = startWritten || writeJspConfigAttribute(writer, Attribute.X_POWERED_BY.getLocalName(), jsp, startWritten, containerConfigStartWritten);
-        startWritten = startWritten || writeJspConfigAttribute(writer, Attribute.DISPLAY_SOURCE_FRAGMENT.getLocalName(), jsp, startWritten, containerConfigStartWritten);
-        startWritten = startWritten || writeJspConfigAttribute(writer, Attribute.DISABLED.getLocalName(), jsp, startWritten, containerConfigStartWritten);
+        startWritten = writeJspConfigAttribute(writer, Attribute.KEEP_GENERATED.getLocalName(), jsp, startWritten, containerConfigStartWritten) || startWritten;
+        startWritten = writeJspConfigAttribute(writer, Attribute.TRIM_SPACES.getLocalName(), jsp, startWritten, containerConfigStartWritten) || startWritten;
+        startWritten = writeJspConfigAttribute(writer, Attribute.TAG_POOLING.getLocalName(), jsp, startWritten, containerConfigStartWritten) || startWritten;
+        startWritten = writeJspConfigAttribute(writer, Attribute.MAPPED_FILE.getLocalName(), jsp, startWritten, containerConfigStartWritten) || startWritten;
+        startWritten = writeJspConfigAttribute(writer, Attribute.CHECK_INTERVAL.getLocalName(), jsp, startWritten, containerConfigStartWritten) || startWritten;
+        startWritten = writeJspConfigAttribute(writer, Attribute.MODIFIFICATION_TEST_INTERVAL.getLocalName(), jsp, startWritten, containerConfigStartWritten) || startWritten;
+        startWritten = writeJspConfigAttribute(writer, Attribute.RECOMPILE_ON_FAIL.getLocalName(), jsp, startWritten, containerConfigStartWritten) || startWritten;
+        startWritten = writeJspConfigAttribute(writer, Attribute.SMAP.getLocalName(), jsp, startWritten, containerConfigStartWritten) || startWritten;
+        startWritten = writeJspConfigAttribute(writer, Attribute.DUMP_SMAP.getLocalName(), jsp, startWritten, containerConfigStartWritten) || startWritten;
+        startWritten = writeJspConfigAttribute(writer, Attribute.GENERATE_STRINGS_AS_CHAR_ARRAYS.getLocalName(), jsp, startWritten, containerConfigStartWritten) || startWritten;
+        startWritten = writeJspConfigAttribute(writer, Attribute.ERROR_ON_USE_BEAN_INVALID_CLASS_ATTRIBUTE.getLocalName(), jsp, startWritten, containerConfigStartWritten) || startWritten;
+        startWritten = writeJspConfigAttribute(writer, Attribute.SCRATCH_DIR.getLocalName(), jsp, startWritten, containerConfigStartWritten) || startWritten;
+        startWritten = writeJspConfigAttribute(writer, Attribute.SOURCE_VM.getLocalName(), jsp, startWritten, containerConfigStartWritten) || startWritten;
+        startWritten = writeJspConfigAttribute(writer, Attribute.TARGET_VM.getLocalName(), jsp, startWritten, containerConfigStartWritten) || startWritten;
+        startWritten = writeJspConfigAttribute(writer, Attribute.JAVA_ENCODING.getLocalName(), jsp, startWritten, containerConfigStartWritten) || startWritten;
+        startWritten = writeJspConfigAttribute(writer, Attribute.X_POWERED_BY.getLocalName(), jsp, startWritten, containerConfigStartWritten) || startWritten;
+        startWritten = writeJspConfigAttribute(writer, Attribute.DISPLAY_SOURCE_FRAGMENT.getLocalName(), jsp, startWritten, containerConfigStartWritten) || startWritten;
+        startWritten = writeJspConfigAttribute(writer, Attribute.DISABLED.getLocalName(), jsp, startWritten, containerConfigStartWritten) || startWritten;
 
         if (startWritten) {
             writer.writeEndElement();
@@ -357,6 +361,7 @@ class WebSubsystemParser implements XMLStreamConstants, XMLElementReader<List<Mo
             switch (attribute) {
             case NATIVE:
             case DEFAULT_VIRTUAL_SERVER:
+            case INSTANCE_ID:
                 subsystem.get(attribute.getLocalName()).set(value);
                 break;
             default:
@@ -368,7 +373,8 @@ class WebSubsystemParser implements XMLStreamConstants, XMLElementReader<List<Mo
         // elements
         while (reader.hasNext() && reader.nextTag() != END_ELEMENT) {
             switch (Namespace.forUri(reader.getNamespaceURI())) {
-                case WEB_1_0: {
+                case WEB_1_0:
+                case WEB_1_1:{
                     final Element element = Element.forName(reader.getLocalName());
                     switch (element) {
                         case CONTAINER_CONFIG: {
@@ -418,6 +424,7 @@ class WebSubsystemParser implements XMLStreamConstants, XMLElementReader<List<Mo
             case MIME_MAPPING: {
                 final String[] array = requireAttributes(reader, Attribute.NAME.getLocalName(), Attribute.VALUE.getLocalName());
                 config.get(MIME_MAPPING).get(array[0]).set(array[1]);
+                requireNoContent(reader);
                 break;
             }
             case WELCOME_FILE: {
@@ -570,10 +577,55 @@ class WebSubsystemParser implements XMLStreamConstants, XMLElementReader<List<Mo
                 }
                 break;
             }
+            case WEB_1_1: {
+                final Element element = Element.forName(reader.getLocalName());
+                switch (element) {
+                case ALIAS:
+                    host.get(ALIAS).add(readStringAttributeElement(reader, Attribute.NAME.getLocalName()));
+                    break;
+                case ACCESS_LOG:
+                    final ModelNode log = parseHostAccessLog(reader);
+                    host.get(ACCESS_LOG).set(log);
+                    break;
+                case REWRITE:
+                    final ModelNode rewrite = parseHostRewrite(reader);
+                    host.get(REWRITE).add(rewrite);
+                    break;
+                case SSO:
+                    final ModelNode sso = parseSso(reader);
+                    host.get(SSO).set(sso);
+                    break;
+                default:
+                    throw unexpectedElement(reader);
+                }
+                break;
+            }
             default:
                 throw unexpectedElement(reader);
             }
         }
+    }
+
+    static ModelNode parseSso(XMLExtendedStreamReader reader) throws XMLStreamException {
+        final ModelNode sso = new ModelNode();
+        final int count = reader.getAttributeCount();
+        for (int i = 0; i < count; i++) {
+            requireNoNamespaceAttribute(reader, i);
+            final String value = reader.getAttributeValue(i);
+            final Attribute attribute = Attribute.forName(reader.getAttributeLocalName(i));
+            switch (attribute) {
+            case CACHE_CONTAINER:
+            case CACHE_NAME:
+            case DOMAIN:
+            case REAUTHENTICATE:
+                sso.get(attribute.getLocalName()).set(value);
+                break;
+            default:
+                throw unexpectedAttribute(reader, i);
+            }
+        }
+        requireNoContent(reader);
+        return sso;
     }
 
     static ModelNode parseHostRewrite(XMLExtendedStreamReader reader) throws XMLStreamException {
@@ -592,7 +644,7 @@ class WebSubsystemParser implements XMLStreamConstants, XMLElementReader<List<Mo
                 rewrite.get(SUBSTITUTION).set(value);
                 break;
             case FLAGS:
-                rewrite.get(REWRITE).set(value);
+                rewrite.get(FLAGS).set(value);
                 break;
             default:
                 throw unexpectedAttribute(reader, i);
@@ -600,7 +652,8 @@ class WebSubsystemParser implements XMLStreamConstants, XMLElementReader<List<Mo
         }
         while (reader.hasNext() && reader.nextTag() != END_ELEMENT) {
             switch (Namespace.forUri(reader.getNamespaceURI())) {
-            case WEB_1_0: {
+            case WEB_1_0:
+            case WEB_1_1: {
                 final Element element = Element.forName(reader.getLocalName());
                 switch (element) {
                 case CONDITION:
@@ -625,6 +678,7 @@ class WebSubsystemParser implements XMLStreamConstants, XMLElementReader<List<Mo
                             throw unexpectedAttribute(reader, i);
                         }
                     }
+                    requireNoContent(reader);
                     rewrite.get(CONDITION).add(condition);
                     break;
                 default:
@@ -669,12 +723,12 @@ class WebSubsystemParser implements XMLStreamConstants, XMLElementReader<List<Mo
         }
         while (reader.hasNext() && reader.nextTag() != END_ELEMENT) {
             switch (Namespace.forUri(reader.getNamespaceURI())) {
-            case WEB_1_0: {
+            case WEB_1_0:
+            case WEB_1_1: {
                 final Element element = Element.forName(reader.getLocalName());
                 switch (element) {
                 case DIRECTORY:
                     final ModelNode directory = new ModelNode();
-                    log.get(DIRECTORY).set(directory);
                     final int count2 = reader.getAttributeCount();
                     for (int i = 0; i < count2; i++) {
                         requireNoNamespaceAttribute(reader, i);
@@ -691,6 +745,8 @@ class WebSubsystemParser implements XMLStreamConstants, XMLElementReader<List<Mo
                             throw unexpectedAttribute(reader, i);
                         }
                     }
+                    requireNoContent(reader);
+                    log.get(DIRECTORY).set(directory);
                     break;
                 default:
                     throw unexpectedElement(reader);
@@ -782,7 +838,8 @@ class WebSubsystemParser implements XMLStreamConstants, XMLElementReader<List<Mo
         connector.get(OP_ADDR).set(address).add(CONNECTOR, name);
         while (reader.hasNext() && reader.nextTag() != END_ELEMENT) {
             switch (Namespace.forUri(reader.getNamespaceURI())) {
-            case WEB_1_0: {
+            case WEB_1_0:
+            case WEB_1_1: {
                 final Element element = Element.forName(reader.getLocalName());
                 switch (element) {
                 case SSL:
@@ -865,6 +922,15 @@ class WebSubsystemParser implements XMLStreamConstants, XMLElementReader<List<Mo
             case SESSION_TIMEOUT:
                 ssl.get(SESSION_TIMEOUT).set(value);
                 break;
+            case CA_CERTIFICATE_PASSWORD:
+                ssl.get(CA_CERTIFICATE_PASSWORD).set(value);
+                break;
+            case KEYSTORE_TYPE:
+                ssl.get(KEYSTORE_TYPE).set(value);
+                break;
+            case TRUSTSTORE_TYPE:
+                ssl.get(TRUSTSTORE_TYPE).set(value);
+                break;
            default:
                 throw unexpectedAttribute(reader, i);
             }
@@ -878,4 +944,16 @@ class WebSubsystemParser implements XMLStreamConstants, XMLElementReader<List<Mo
             writer.writeAttribute(name, node.get(name).asString());
         }
     }
+    private boolean writeAttribute(XMLExtendedStreamWriter writer, String name, ModelNode node, boolean startwritten, String origin) throws XMLStreamException {
+        if(node.hasDefined(name)) {
+            if (!startwritten) {
+                startwritten = true;
+                writer.writeStartElement(origin);
+            }
+            writer.writeAttribute(name, node.get(name).asString());
+        }
+        return startwritten;
+    }
+
+
 }

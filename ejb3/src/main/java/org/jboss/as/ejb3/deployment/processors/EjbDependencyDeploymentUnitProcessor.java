@@ -22,6 +22,8 @@
 
 package org.jboss.as.ejb3.deployment.processors;
 
+import org.jboss.as.ee.structure.DeploymentType;
+import org.jboss.as.ee.structure.DeploymentTypeMarker;
 import org.jboss.as.server.deployment.Attachments;
 import org.jboss.as.server.deployment.DeploymentPhaseContext;
 import org.jboss.as.server.deployment.DeploymentUnit;
@@ -46,12 +48,14 @@ public class EjbDependencyDeploymentUnitProcessor implements DeploymentUnitProce
     /**
      * Module id for Java EE module
      */
-    private static ModuleIdentifier JAVAEE_MODULE_IDENTIFIER = ModuleIdentifier.create("javaee.api");
+    private static final ModuleIdentifier JAVAEE_MODULE_IDENTIFIER = ModuleIdentifier.create("javaee.api");
 
     /**
      * Needed for timer handle persistence
+     * TODO: restrict visibility
      */
-    private static ModuleIdentifier EJB3_TIMERS = ModuleIdentifier.create("org.jboss.ejb3.timerservice");
+    private static final ModuleIdentifier EJB3_TIMERS = ModuleIdentifier.create("org.jboss.as.ejb3");
+    private static final ModuleIdentifier EJB_CLIENT = ModuleIdentifier.create("org.jboss.ejb-client");
 
 
     /**
@@ -69,14 +73,19 @@ public class EjbDependencyDeploymentUnitProcessor implements DeploymentUnitProce
         // get hold of the deployment unit
         DeploymentUnit deploymentUnit = phaseContext.getDeploymentUnit();
 
+        final ModuleLoader moduleLoader = Module.getBootModuleLoader();
+        final ModuleSpecification moduleSpecification = deploymentUnit.getAttachment(Attachments.MODULE_SPECIFICATION);
+
+        //we always give them the EJB client
+        moduleSpecification.addSystemDependency(new ModuleDependency(moduleLoader, EJB_CLIENT, false, false, false));
+
         // fetch the EjbJarMetaData
-        if (!isEjbDeployment(deploymentUnit)) {
+        //TODO: remove the app client bit after the next EJB release
+        if (!isEjbDeployment(deploymentUnit) && !DeploymentTypeMarker.isType(DeploymentType.APPLICATION_CLIENT, deploymentUnit)) {
             // nothing to do
             return;
         }
 
-        final ModuleLoader moduleLoader = Module.getBootModuleLoader();
-        final ModuleSpecification moduleSpecification = deploymentUnit.getAttachment(Attachments.MODULE_SPECIFICATION);
 
         // FIXME: still not the best way to do it
         //this must be the first dep listed in the module
@@ -85,7 +94,6 @@ public class EjbDependencyDeploymentUnitProcessor implements DeploymentUnitProce
 
         moduleSpecification.addSystemDependency(new ModuleDependency(moduleLoader, JAVAEE_MODULE_IDENTIFIER, false, false, false));
         moduleSpecification.addSystemDependency(new ModuleDependency(moduleLoader, EJB3_TIMERS, false, false, false));
-
     }
 
     @Override

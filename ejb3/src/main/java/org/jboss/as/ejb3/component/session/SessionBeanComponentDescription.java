@@ -23,6 +23,21 @@
 package org.jboss.as.ejb3.component.session;
 
 
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+
+import javax.ejb.AccessTimeout;
+import javax.ejb.ConcurrencyManagementType;
+import javax.ejb.LockType;
+import javax.ejb.SessionBean;
+import javax.ejb.TransactionManagementType;
+
 import org.jboss.as.ee.component.ComponentConfiguration;
 import org.jboss.as.ee.component.ComponentConfigurator;
 import org.jboss.as.ee.component.ComponentDescription;
@@ -30,37 +45,20 @@ import org.jboss.as.ee.component.ViewConfiguration;
 import org.jboss.as.ee.component.ViewConfigurator;
 import org.jboss.as.ee.component.ViewDescription;
 import org.jboss.as.ee.component.interceptors.InterceptorOrder;
+import org.jboss.as.ejb3.component.interceptors.CurrentInvocationContextInterceptor;
 import org.jboss.as.ejb3.component.EJBComponentDescription;
 import org.jboss.as.ejb3.component.EJBViewDescription;
 import org.jboss.as.ejb3.component.MethodIntf;
+import org.jboss.as.ejb3.concurrency.AccessTimeoutDetails;
 import org.jboss.as.ejb3.deployment.EjbJarDescription;
-import org.jboss.as.ejb3.timerservice.AutoTimer;
-import org.jboss.as.ejb3.tx.CMTTxInterceptorFactory;
+import org.jboss.as.ejb3.tx.CMTTxInterceptor;
 import org.jboss.as.server.deployment.DeploymentPhaseContext;
 import org.jboss.as.server.deployment.DeploymentUnitProcessingException;
 import org.jboss.invocation.ImmediateInterceptorFactory;
 import org.jboss.invocation.proxy.MethodIdentifier;
 import org.jboss.logging.Logger;
+import org.jboss.metadata.ejb.spec.SessionBeanMetaData;
 import org.jboss.msc.service.ServiceName;
-
-import javax.ejb.AccessTimeout;
-import javax.ejb.ConcurrencyManagementType;
-import javax.ejb.LockType;
-import javax.ejb.SessionBean;
-import javax.ejb.TransactionManagementType;
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.IdentityHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * @author Jaikiran Pai
@@ -83,22 +81,22 @@ public abstract class SessionBeanComponentDescription extends EJBComponentDescri
     /**
      * Map of class name to default {@link LockType} for this bean.
      */
-    private Map<String, LockType> beanLevelLockType = new HashMap<String, LockType>();
+    private final Map<String, LockType> beanLevelLockType = new HashMap<String, LockType>();
 
     /**
-     * Map of class name to default {@link AccessTimeout} for this component.
+     * Map of class name to default {@link AccessTimeoutDetails} for this component.
      */
-    private Map<String, AccessTimeout> beanLevelAccessTimeout = new HashMap<String, AccessTimeout>();
+    private final Map<String, AccessTimeoutDetails> beanLevelAccessTimeout = new HashMap<String, AccessTimeoutDetails>();
 
     /**
      * The {@link LockType} applicable for a specific bean methods.
      */
-    private Map<MethodIdentifier, LockType> methodLockTypes = new ConcurrentHashMap<MethodIdentifier, LockType>();
+    private final Map<MethodIdentifier, LockType> methodLockTypes = new HashMap<MethodIdentifier, LockType>();
 
     /**
      * The {@link AccessTimeout} applicable for a specific bean methods.
      */
-    private Map<MethodIdentifier, AccessTimeout> methodAccessTimeouts = new ConcurrentHashMap<MethodIdentifier, AccessTimeout>();
+    private final Map<MethodIdentifier, AccessTimeoutDetails> methodAccessTimeouts = new HashMap<MethodIdentifier, AccessTimeoutDetails>();
 
     /**
      * Methods on the component marked as @Asynchronous
@@ -106,35 +104,15 @@ public abstract class SessionBeanComponentDescription extends EJBComponentDescri
     private final Set<MethodIdentifier> asynchronousMethods = new HashSet<MethodIdentifier>();
 
     /**
-     * Views the component marked as @Asynchronous
+     * Classes the component marked as @Asynchronous
      */
-    private final Set<String> asynchronousViews = new HashSet<String>();
+    private final Set<String> asynchronousClasses = new HashSet<String>();
 
     /**
      * mapped-name of the session bean
      */
     private String mappedName;
 
-    /**
-     * method identifier of the timeout method
-     */
-    private MethodIdentifier timeoutMethodIdentifier;
-
-    /**
-     * @Schedule method identifiers
-     */
-    private final Map<MethodIdentifier, List<AutoTimer>> scheduleMethodIdentifiers = new HashMap<MethodIdentifier, List<AutoTimer>>();
-
-
-    /**
-     * @Schedule methods
-     */
-    private final Map<Method, List<AutoTimer>> scheduleMethods = new IdentityHashMap<Method, List<AutoTimer>>();
-
-    /**
-     * The actual timeout method
-     */
-    private Method timeoutMethod;
 
     public enum SessionBeanType {
         STATELESS,
@@ -152,9 +130,6 @@ public abstract class SessionBeanComponentDescription extends EJBComponentDescri
     public SessionBeanComponentDescription(final String componentName, final String componentClassName,
                                            final EjbJarDescription ejbJarDescription, final ServiceName deploymentUnitServiceName) {
         super(componentName, componentClassName, ejbJarDescription, deploymentUnitServiceName);
-        // TODO: AS7-447
-        //addDependency(SessionBeanComponent.ASYNC_EXECUTOR_SERVICE_NAME, ServiceBuilder.DependencyType.REQUIRED);
-        // setSessionContext() method invocation interceptor
         this.addSetSessionContextMethodInvocationInterceptor();
     }
 
@@ -173,6 +148,7 @@ public abstract class SessionBeanComponentDescription extends EJBComponentDescri
             registerView(viewClassName, MethodIntf.LOCAL);
         }
     }
+
 
     public void addLocalBusinessInterfaceViews(final String... classNames) {
         addLocalBusinessInterfaceViews(Arrays.asList(classNames));
@@ -196,6 +172,10 @@ public abstract class SessionBeanComponentDescription extends EJBComponentDescri
 
     public EJBViewDescription addWebserviceEndpointView() {
         return registerView(getEJBClassName(), MethodIntf.SERVICE_ENDPOINT);
+    }
+
+    public EJBViewDescription addWebserviceEndpointView(final String wsEndpointViewName) {
+        return registerView(wsEndpointViewName, MethodIntf.SERVICE_ENDPOINT);
     }
 
     public void addRemoteBusinessInterfaceViews(final Collection<String> classNames) {
@@ -269,7 +249,7 @@ public abstract class SessionBeanComponentDescription extends EJBComponentDescri
      *
      * @return
      */
-    public Map<String, AccessTimeout> getBeanLevelAccessTimeout() {
+    public Map<String, AccessTimeoutDetails> getBeanLevelAccessTimeout() {
         return this.beanLevelAccessTimeout;
     }
 
@@ -278,7 +258,7 @@ public abstract class SessionBeanComponentDescription extends EJBComponentDescri
      *
      * @param accessTimeout The access timeout applicable for the class
      */
-    public void setBeanLevelAccessTimeout(String className, AccessTimeout accessTimeout) {
+    public void setBeanLevelAccessTimeout(String className, AccessTimeoutDetails accessTimeout) {
         this.beanLevelAccessTimeout.put(className, accessTimeout);
     }
 
@@ -288,11 +268,11 @@ public abstract class SessionBeanComponentDescription extends EJBComponentDescri
      * @param accessTimeout The applicable access timeout for the method
      * @param method        The method
      */
-    public void setAccessTimeout(AccessTimeout accessTimeout, MethodIdentifier method) {
+    public void setAccessTimeout(AccessTimeoutDetails accessTimeout, MethodIdentifier method) {
         this.methodAccessTimeouts.put(method, accessTimeout);
     }
 
-    public Map<MethodIdentifier, AccessTimeout> getMethodApplicableAccessTimeouts() {
+    public Map<MethodIdentifier, AccessTimeoutDetails> getMethodApplicableAccessTimeouts() {
         return this.methodAccessTimeouts;
     }
 
@@ -308,30 +288,8 @@ public abstract class SessionBeanComponentDescription extends EJBComponentDescri
         return this.concurrencyManagementType;
     }
 
-    /**
-     * Marks the bean for bean managed concurrency.
-     *
-     * @throws IllegalStateException If the bean has already been marked for a different concurrency management type
-     */
-    public void beanManagedConcurrency() {
-        if (this.concurrencyManagementType != null && this.concurrencyManagementType != ConcurrencyManagementType.BEAN) {
-            throw new IllegalStateException(this.getEJBName() + " bean has been marked for " + this.concurrencyManagementType + " cannot change it now!");
-        }
-        this.concurrencyManagementType = ConcurrencyManagementType.BEAN;
-    }
-
-
-    /**
-     * Marks this bean for container managed concurrency.
-     *
-     * @throws IllegalStateException If the bean has already been marked for a different concurrency management type
-     */
-    public void containerManagedConcurrency() {
-        if (this.concurrencyManagementType != null && this.concurrencyManagementType != ConcurrencyManagementType.CONTAINER) {
-            throw new IllegalStateException(this.getEJBName() + " bean has been marked for " + this.concurrencyManagementType + " cannot change it now!");
-        }
-        this.concurrencyManagementType = ConcurrencyManagementType.CONTAINER;
-
+    public void setConcurrencyManagementType(final ConcurrencyManagementType concurrencyManagementType) {
+        this.concurrencyManagementType = concurrencyManagementType;
     }
 
     /**
@@ -362,12 +320,26 @@ public abstract class SessionBeanComponentDescription extends EJBComponentDescri
     }
 
     /**
-     * Set an entire view's asynchronous nature.  All business methods for the view will be asynchronous.
+     * @return The identifier of all async methods
+     */
+    public Set<MethodIdentifier> getAsynchronousMethods() {
+        return asynchronousMethods;
+    }
+
+    /**
+     * Add a bean class or superclass that has been marked asynchronous
      *
      * @param viewName The view name
      */
-    public void addAsynchronousView(final String viewName) {
-        asynchronousViews.add(viewName);
+    public void addAsynchronousClass(final String viewName) {
+        asynchronousClasses.add(viewName);
+    }
+
+    /**
+     * @return The class name of all asynchronous classes
+     */
+    public Set<String> getAsynchronousClasses() {
+        return asynchronousClasses;
     }
 
     /**
@@ -378,14 +350,20 @@ public abstract class SessionBeanComponentDescription extends EJBComponentDescri
     public abstract SessionBeanType getSessionBeanType();
 
     @Override
-    protected void setupViewInterceptors(ViewDescription view) {
+    protected void setupViewInterceptors(EJBViewDescription view) {
         // let super do it's job first
         super.setupViewInterceptors(view);
 
         // tx management interceptor(s)
         addTxManagementInterceptorForView(view);
 
+        if(view.isEjb2xView()) {
+            view.getConfigurators().add(getSessionBeanObjectViewConfigurator());
+        }
+
     }
+
+    protected abstract ViewConfigurator getSessionBeanObjectViewConfigurator();
 
     /**
      * Sets up the transaction management interceptor for all methods of the passed view.
@@ -400,7 +378,7 @@ public abstract class SessionBeanComponentDescription extends EJBComponentDescri
                 EJBComponentDescription ejbComponentDescription = (EJBComponentDescription) componentConfiguration.getComponentDescription();
                 // Add CMT interceptor factory
                 if (TransactionManagementType.CONTAINER.equals(ejbComponentDescription.getTransactionManagementType())) {
-                    configuration.addViewInterceptor(CMTTxInterceptorFactory.INSTANCE, InterceptorOrder.View.CMT_TRANSACTION_INTERCEPTOR);
+                    configuration.addViewInterceptor(CMTTxInterceptor.FACTORY, InterceptorOrder.View.CMT_TRANSACTION_INTERCEPTOR);
                 }
             }
         });
@@ -412,8 +390,8 @@ public abstract class SessionBeanComponentDescription extends EJBComponentDescri
         this.getConfigurators().add(new ComponentConfigurator() {
             @Override
             public void configure(DeploymentPhaseContext context, ComponentDescription description, ComponentConfiguration configuration) throws DeploymentUnitProcessingException {
-                configuration.addPostConstructInterceptor(SessionInvocationContextInterceptor.LIFECYCLE_FACTORY, InterceptorOrder.ComponentPostConstruct.EJB_SESSION_CONTEXT_INTERCEPTOR);
-                configuration.addPreDestroyInterceptor(SessionInvocationContextInterceptor.LIFECYCLE_FACTORY, InterceptorOrder.ComponentPreDestroy.EJB_SESSION_CONTEXT_INTERCEPTOR);
+                configuration.addPostConstructInterceptor(CurrentInvocationContextInterceptor.FACTORY, InterceptorOrder.ComponentPostConstruct.EJB_SESSION_CONTEXT_INTERCEPTOR);
+                configuration.addPreDestroyInterceptor(CurrentInvocationContextInterceptor.FACTORY, InterceptorOrder.ComponentPreDestroy.EJB_SESSION_CONTEXT_INTERCEPTOR);
             }
         });
     }
@@ -437,7 +415,7 @@ public abstract class SessionBeanComponentDescription extends EJBComponentDescri
         view.getConfigurators().add(new ViewConfigurator() {
             @Override
             public void configure(DeploymentPhaseContext context, ComponentConfiguration componentConfiguration, ViewDescription description, ViewConfiguration configuration) throws DeploymentUnitProcessingException {
-                configuration.addViewInterceptor(SessionInvocationContextInterceptor.FACTORY, InterceptorOrder.View.INVOCATION_CONTEXT_INTERCEPTOR);
+                configuration.addViewInterceptor(CurrentInvocationContextInterceptor.FACTORY, InterceptorOrder.View.INVOCATION_CONTEXT_INTERCEPTOR);
             }
         });
 
@@ -458,46 +436,9 @@ public abstract class SessionBeanComponentDescription extends EJBComponentDescri
         return getSessionBeanType() == SessionBeanType.STATELESS;
     }
 
-
-    public MethodIdentifier getTimeoutMethodIdentifier() {
-        return timeoutMethodIdentifier;
-    }
-
-    public void setTimeoutMethodIdentifier(final MethodIdentifier timeoutMethodIdentifier) {
-        this.timeoutMethodIdentifier = timeoutMethodIdentifier;
-    }
-
-    public Method getTimeoutMethod() {
-        return timeoutMethod;
-    }
-
-    public void setTimeoutMethod(final Method timeoutMethod) {
-        this.timeoutMethod = timeoutMethod;
-    }
-
-    public Map<MethodIdentifier, List<AutoTimer>> getScheduleMethodIdentifiers() {
-        return Collections.unmodifiableMap(scheduleMethodIdentifiers);
-    }
-
-    public void addScheduleMethodIdentifier(final MethodIdentifier identifier, final AutoTimer timer) {
-        List<AutoTimer> schedules = scheduleMethodIdentifiers.get(identifier);
-        if(schedules == null) {
-            scheduleMethodIdentifiers.put(identifier, schedules = new ArrayList<AutoTimer>(1));
-        }
-        schedules.add(timer);
-    }
-
-
-    public Map<Method, List<AutoTimer>> getScheduleMethods() {
-        return Collections.unmodifiableMap(scheduleMethods);
-    }
-
-    public void addScheduleMethod(final Method method, final AutoTimer timer) {
-        List<AutoTimer> schedules = scheduleMethods.get(method);
-        if(schedules == null) {
-            scheduleMethods.put(method, schedules = new ArrayList<AutoTimer>(1));
-        }
-        schedules.add(timer);
+    @Override
+    public SessionBeanMetaData getDescriptorData() {
+        return (SessionBeanMetaData) super.getDescriptorData();
     }
 
 }

@@ -25,7 +25,7 @@ package org.jboss.as.messaging;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADD;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.TYPE;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.VALUE;
 import static org.jboss.as.controller.parsing.ParseUtils.missingRequired;
 import static org.jboss.as.controller.parsing.ParseUtils.parsePossibleExpression;
 import static org.jboss.as.controller.parsing.ParseUtils.readStringAttributeElement;
@@ -34,17 +34,19 @@ import static org.jboss.as.controller.parsing.ParseUtils.requireNoContent;
 import static org.jboss.as.controller.parsing.ParseUtils.requireNoNamespaceAttribute;
 import static org.jboss.as.controller.parsing.ParseUtils.requireSingleAttribute;
 import static org.jboss.as.controller.parsing.ParseUtils.unexpectedAttribute;
+import static org.jboss.as.controller.parsing.ParseUtils.unexpectedElement;
+import static org.jboss.as.controller.parsing.ParseUtils.unexpectedEndElement;
 import static org.jboss.as.messaging.CommonAttributes.ACCEPTOR;
 import static org.jboss.as.messaging.CommonAttributes.ADDRESS_SETTING;
 import static org.jboss.as.messaging.CommonAttributes.BINDINGS_DIRECTORY;
 import static org.jboss.as.messaging.CommonAttributes.BROADCAST_GROUP;
 import static org.jboss.as.messaging.CommonAttributes.CONNECTION_FACTORY;
 import static org.jboss.as.messaging.CommonAttributes.CONNECTOR;
-import static org.jboss.as.messaging.CommonAttributes.CONSUME_NAME;
-import static org.jboss.as.messaging.CommonAttributes.CREATEDURABLEQUEUE_NAME;
-import static org.jboss.as.messaging.CommonAttributes.CREATE_NON_DURABLE_QUEUE_NAME;
-import static org.jboss.as.messaging.CommonAttributes.DELETEDURABLEQUEUE_NAME;
-import static org.jboss.as.messaging.CommonAttributes.DELETE_NON_DURABLE_QUEUE_NAME;
+import static org.jboss.as.messaging.CommonAttributes.CONSUME_XML_NAME;
+import static org.jboss.as.messaging.CommonAttributes.CREATEDURABLEQUEUE_XML_NAME;
+import static org.jboss.as.messaging.CommonAttributes.CREATE_NON_DURABLE_QUEUE_XML_NAME;
+import static org.jboss.as.messaging.CommonAttributes.DELETEDURABLEQUEUE_XML_NAME;
+import static org.jboss.as.messaging.CommonAttributes.DELETE_NON_DURABLE_QUEUE_XML_NAME;
 import static org.jboss.as.messaging.CommonAttributes.DISCOVERY_GROUP;
 import static org.jboss.as.messaging.CommonAttributes.DISCOVERY_GROUP_NAME;
 import static org.jboss.as.messaging.CommonAttributes.DISCOVERY_GROUP_REF;
@@ -55,47 +57,56 @@ import static org.jboss.as.messaging.CommonAttributes.FACTORY_CLASS;
 import static org.jboss.as.messaging.CommonAttributes.FILTER;
 import static org.jboss.as.messaging.CommonAttributes.GROUPING_HANDLER;
 import static org.jboss.as.messaging.CommonAttributes.INBOUND_CONFIG;
+import static org.jboss.as.messaging.CommonAttributes.IN_VM_ACCEPTOR;
+import static org.jboss.as.messaging.CommonAttributes.IN_VM_CONNECTOR;
 import static org.jboss.as.messaging.CommonAttributes.JMS_CONNECTION_FACTORIES;
 import static org.jboss.as.messaging.CommonAttributes.JMS_DESTINATIONS;
 import static org.jboss.as.messaging.CommonAttributes.JMS_QUEUE;
 import static org.jboss.as.messaging.CommonAttributes.JMS_TOPIC;
-import static org.jboss.as.messaging.CommonAttributes.JOURNAL_DIRECTORY;
-import static org.jboss.as.messaging.CommonAttributes.LARGE_MESSAGES_DIRECTORY;
 import static org.jboss.as.messaging.CommonAttributes.LIVE_CONNECTOR_REF;
 import static org.jboss.as.messaging.CommonAttributes.LOCAL_TX;
-import static org.jboss.as.messaging.CommonAttributes.MANAGE_NAME;
-import static org.jboss.as.messaging.CommonAttributes.PAGING_DIRECTORY;
+import static org.jboss.as.messaging.CommonAttributes.MANAGE_XML_NAME;
 import static org.jboss.as.messaging.CommonAttributes.PARAM;
+import static org.jboss.as.messaging.CommonAttributes.PARAMS;
 import static org.jboss.as.messaging.CommonAttributes.PATH;
 import static org.jboss.as.messaging.CommonAttributes.POOLED_CONNECTION_FACTORY;
 import static org.jboss.as.messaging.CommonAttributes.QUEUE_ADDRESS;
 import static org.jboss.as.messaging.CommonAttributes.RELATIVE_TO;
+import static org.jboss.as.messaging.CommonAttributes.REMOTE_ACCEPTOR;
+import static org.jboss.as.messaging.CommonAttributes.REMOTE_CONNECTOR;
 import static org.jboss.as.messaging.CommonAttributes.REMOTING_INTERCEPTORS;
+import static org.jboss.as.messaging.CommonAttributes.ROLE;
 import static org.jboss.as.messaging.CommonAttributes.SECURITY_SETTING;
 import static org.jboss.as.messaging.CommonAttributes.SELECTOR;
-import static org.jboss.as.messaging.CommonAttributes.SEND_NAME;
+import static org.jboss.as.messaging.CommonAttributes.SEND_XML_NAME;
+import static org.jboss.as.messaging.CommonAttributes.HORNETQ_SERVER;
 import static org.jboss.as.messaging.CommonAttributes.SERVER_ID;
 import static org.jboss.as.messaging.CommonAttributes.SOCKET_BINDING;
 import static org.jboss.as.messaging.CommonAttributes.STATIC_CONNECTORS;
 import static org.jboss.as.messaging.CommonAttributes.SUBSYSTEM;
 import static org.jboss.as.messaging.CommonAttributes.TRANSACTION;
+import static org.jboss.as.messaging.MessagingMessages.MESSAGES;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import javax.xml.stream.Location;
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.EnumSet;
-import java.util.List;
-import java.util.Set;
 
 import org.jboss.as.controller.AttributeDefinition;
 import org.jboss.as.controller.ListAttributeDefinition;
 import org.jboss.as.controller.SimpleAttributeDefinition;
 import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
+import org.jboss.as.controller.descriptions.common.CommonDescriptions;
 import org.jboss.as.controller.parsing.ParseUtils;
 import org.jboss.as.controller.persistence.SubsystemMarshallingContext;
-import org.jboss.as.messaging.MessagingServices.TransportConfigType;
 import org.jboss.as.messaging.jms.JndiEntriesAttribute;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.ModelType;
@@ -135,13 +146,82 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
 
 
     public void readElement(final XMLExtendedStreamReader reader, final List<ModelNode> list) throws XMLStreamException {
+
         final ModelNode address = new ModelNode();
         address.add(SUBSYSTEM, MessagingExtension.SUBSYSTEM_NAME);
         address.protect();
 
+        final ModelNode subsystemAdd = new ModelNode();
+        subsystemAdd.get(OP).set(ADD);
+        subsystemAdd.get(OP_ADDR).set(address);
+        list.add(subsystemAdd);
+
+        final Namespace schemaVer = Namespace.forUri(reader.getNamespaceURI());
+        switch (schemaVer) {
+            case MESSAGING_1_0:
+                processHornetQServer(reader, address, list, schemaVer);
+                break;
+            case MESSAGING_1_1:
+                processHornetQServers(reader, address, list);
+                break;
+            default:
+                throw unexpectedElement(reader);
+        }
+
+    }
+
+    private void processHornetQServers(final XMLExtendedStreamReader reader, final ModelNode subsystemAddress, final List<ModelNode> list) throws XMLStreamException {
+        while (reader.hasNext() && reader.nextTag() != END_ELEMENT) {
+            final Namespace schemaVer = Namespace.forUri(reader.getNamespaceURI());
+            switch (schemaVer) {
+                case MESSAGING_1_0:
+                case UNKNOWN:
+                    throw ParseUtils.unexpectedElement(reader);
+                default: {
+                    final Element element = Element.forName(reader.getLocalName());
+                    switch (element) {
+                        case HORNETQ_SERVER:
+                            processHornetQServer(reader, subsystemAddress, list, schemaVer);
+                            break;
+                        default:
+                            throw ParseUtils.unexpectedElement(reader);
+                    }
+                }
+            }
+        }
+    }
+
+    private void processHornetQServer(final XMLExtendedStreamReader reader, final ModelNode subsystemAddress, final List<ModelNode> list, Namespace namespace) throws XMLStreamException {
+
+        String hqServerName = null;
+        String elementName = null;
+        switch (namespace) {
+            case MESSAGING_1_0:
+                // We're parsing the 1.0 xsd's <subsystem> element
+                requireNoAttributes(reader);
+                elementName = ModelDescriptionConstants.SUBSYSTEM;
+                break;
+            default: {
+                final int count = reader.getAttributeCount();
+                if (count > 0) {
+                    requireSingleAttribute(reader, Attribute.NAME.getLocalName());
+                    hqServerName = reader.getAttributeValue(0).trim();
+                }
+                elementName = CommonAttributes.HORNETQ_SERVER;
+            }
+        }
+
+        if (hqServerName == null || hqServerName.length() == 0) {
+            hqServerName = "default";
+        }
+
+        final ModelNode address = subsystemAddress.clone();
+        address.add(HORNETQ_SERVER, hqServerName);
+        address.protect();
+
         final ModelNode operation = new ModelNode();
         operation.get(OP).set(ADD);
-        operation.get(OP_ADDR).add(SUBSYSTEM, MessagingExtension.SUBSYSTEM_NAME);
+        operation.get(OP_ADDR).set(address);
         list.add(operation);
 
         EnumSet<Element> seen = EnumSet.noneOf(Element.class);
@@ -157,25 +237,15 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
             }
 
             switch (element) {
-                case ACCEPTORS: {
-                    // add acceptors
-                    final ModelNode acceptors = processAcceptors(reader);
-                    // TODO these should be resources
-                    operation.get(ACCEPTOR).set(acceptors);
+                case ACCEPTORS:
+                    processAcceptors(reader, address, list);
                     break;
-                } case ADDRESS_SETTINGS: {
-                    // add address settings
-                    final ModelNode addressSettings = processAddressSettings(reader);
-                    // TODO these should be resources
-                    operation.get(ADDRESS_SETTING).set(addressSettings);
+                case ADDRESS_SETTINGS:
+                    processAddressSettings(reader, address, list);
                     break;
-                }
-                case BINDINGS_DIRECTORY: {
-                    final ModelNode directory = parseDirectory(reader);
-                    // TODO this should be a resource
-                    operation.get(BINDINGS_DIRECTORY).set(directory);
+                case BINDINGS_DIRECTORY:
+                    parseDirectory(reader, CommonAttributes.BINDINGS_DIRECTORY, address, list);
                     break;
-                }
                 case BRIDGES:
                     processBridges(reader, address, list);
                     break;
@@ -185,12 +255,9 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
                 case CLUSTER_CONNECTIONS:
                     processClusterConnections(reader, address, list);
                     break;
-                case CONNECTORS: {
-                    final ModelNode connectors = processConnectors(reader);
-                    // TODO these should be resources
-                    operation.get(CONNECTOR).set(connectors);
+                case CONNECTORS:
+                    processConnectors(reader, address, list);
                     break;
-                }
                 case CONNECTOR_SERVICES:
                     processConnectorServices(reader, address, list);
                     break;
@@ -207,37 +274,27 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
                 case GROUPING_HANDLER:
                     processGroupingHandler(reader, address, list);
                     break;
-                case JOURNAL_DIRECTORY: {
-                    final ModelNode directory = parseDirectory(reader);
-                    // TODO this should be a resource
-                    operation.get(JOURNAL_DIRECTORY).set(directory);
+                case JOURNAL_DIRECTORY:
+                    parseDirectory(reader, CommonAttributes.JOURNAL_DIRECTORY, address, list);
                     break;
-                }
-                case LARGE_MESSAGES_DIRECTORY: {
-                    final ModelNode dir = parseDirectory(reader);
-                    operation.get(LARGE_MESSAGES_DIRECTORY).set(dir);
+                case LARGE_MESSAGES_DIRECTORY:
+                    parseDirectory(reader, CommonAttributes.LARGE_MESSAGES_DIRECTORY, address, list);
                     break;
-                }
                 case LIVE_CONNECTOR_REF: {
                     Location location = reader.getLocation();
                     String string = readStringAttributeElement(reader, CommonAttributes.CONNECTOR_NAME);
                     LIVE_CONNECTOR_REF.parseAndSetParameter(string, operation, location);
                     break;
                 }
-                case PAGING_DIRECTORY: {
-                    final ModelNode directory = parseDirectory(reader);
-                    // TODO this should be a resource
-                    operation.get(PAGING_DIRECTORY).set(directory);
+                case PAGING_DIRECTORY:
+                    parseDirectory(reader, CommonAttributes.PAGING_DIRECTORY, address, list);
                     break;
-                }
                 case REMOTING_INTERCEPTORS:
                     processRemotingInterceptors(reader, operation);
                     break;
                 case SECURITY_SETTINGS: {
                     // process security settings
-                    final ModelNode securitySettings = processSecuritySettings(reader);
-                    // TODO these should be resources
-                    operation.get(SECURITY_SETTING).set(securitySettings);
+                    processSecuritySettings(reader, address, list);
                     break;
                 }
                 case CORE_QUEUES: {
@@ -258,8 +315,17 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
                     handleElementText(reader, element, "server", operation);
                     break;
                 }
+                case HORNETQ_SERVER:
+                    // The end of the hornetq-server element
+                    if (namespace == Namespace.MESSAGING_1_0) {
+                        throw unexpectedEndElement(reader);
+                    }
+                    break;
                 case SUBSYSTEM:
                     // The end of the subsystem element
+                    if (namespace != Namespace.MESSAGING_1_0) {
+                        throw unexpectedEndElement(reader);
+                    }
                     break;
                 default:
                     if (SIMPLE_ROOT_RESOURCE_ELEMENTS.contains(element)) {
@@ -268,13 +334,13 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
                             handleElementText(reader, element, operation);
                         } else {
                             // These should be handled in specific case blocks above, e.g. case REMOTING_INTERCEPTORS:
-                            throw new UnsupportedOperationException(String.format("Implement support for element %s", element.getLocalName()));
+                            throw MESSAGES.unsupportedElement(element.getLocalName());
                         }
                     } else {
                         throw ParseUtils.unexpectedElement(reader);
                     }
             }
-        } while (reader.hasNext() && localName.equals(ModelDescriptionConstants.SUBSYSTEM) == false);
+        } while (reader.hasNext() && localName.equals(elementName) == false);
     }
 
     private static void processConnectorServices(XMLExtendedStreamReader reader, ModelNode address, List<ModelNode> updates) throws XMLStreamException {
@@ -389,15 +455,13 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
                     break;
                 case STATIC_CONNECTORS:
                     if (seen.contains(Element.DISCOVERY_GROUP_REF)) {
-                        throw new XMLStreamException(String.format("Illegal element %s: cannot be used when %s is used",
-                                STATIC_CONNECTORS, DISCOVERY_GROUP_REF), reader.getLocation());
+                        throw new XMLStreamException(MESSAGES.illegalElement(STATIC_CONNECTORS, DISCOVERY_GROUP_REF), reader.getLocation());
                     }
                     processStaticConnectors(reader, bridgeAdd, true);
                     break;
                 case DISCOVERY_GROUP_REF: {
                     if (seen.contains(Element.STATIC_CONNECTORS)) {
-                        throw new XMLStreamException(String.format("Illegal element %s: cannot be used when %s is used",
-                                DISCOVERY_GROUP_REF, STATIC_CONNECTORS), reader.getLocation());
+                        throw new XMLStreamException(MESSAGES.illegalElement(DISCOVERY_GROUP_REF, STATIC_CONNECTORS), reader.getLocation());
                     }
                     final Location location = reader.getLocation();
                     final String groupRef = readStringAttributeElement(reader, DISCOVERY_GROUP_NAME.getXmlName());
@@ -475,15 +539,13 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
                     break;
                 case STATIC_CONNECTORS:
                     if (seen.contains(Element.DISCOVERY_GROUP_REF)) {
-                        throw new XMLStreamException(String.format("Illegal element %s: cannot be used when %s is used",
-                                STATIC_CONNECTORS, DISCOVERY_GROUP_REF), reader.getLocation());
+                        throw new XMLStreamException(MESSAGES.illegalElement(STATIC_CONNECTORS, DISCOVERY_GROUP_REF), reader.getLocation());
                     }
                     processStaticConnectors(reader, bridgeAdd, false);
                     break;
                 case DISCOVERY_GROUP_REF: {
                     if (seen.contains(Element.STATIC_CONNECTORS)) {
-                        throw new XMLStreamException(String.format("Illegal element %s: cannot be used when %s is used",
-                                DISCOVERY_GROUP_REF, STATIC_CONNECTORS), reader.getLocation());
+                        throw new XMLStreamException(MESSAGES.illegalElement(DISCOVERY_GROUP_REF, STATIC_CONNECTORS), reader.getLocation());
                     }
                     final Location location = reader.getLocation();
                     final String groupRef = readStringAttributeElement(reader, DISCOVERY_GROUP_NAME.getXmlName());
@@ -497,7 +559,7 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
         }
 
         if (!seen.contains(Element.STATIC_CONNECTORS) && !seen.contains(Element.DISCOVERY_GROUP_REF)) {
-            throw new XMLStreamException(String.format("Either %s or %s is required", Element.STATIC_CONNECTORS.getLocalName(),
+            throw new XMLStreamException(MESSAGES.required(Element.STATIC_CONNECTORS.getLocalName(),
                     Element.DISCOVERY_GROUP_REF.getLocalName()), reader.getLocation());
         }
 
@@ -620,8 +682,25 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
 
     private static void parseBroadcastGroup(XMLExtendedStreamReader reader, ModelNode address, List<ModelNode> updates) throws XMLStreamException {
 
-        requireSingleAttribute(reader, CommonAttributes.NAME);
-        String name = reader.getAttributeValue(0);
+        String name = null;
+
+        int count = reader.getAttributeCount();
+        for (int i = 0; i < count; i++) {
+            final String attrValue = reader.getAttributeValue(i);
+            final Attribute attribute = Attribute.forName(reader.getAttributeLocalName(i));
+            switch (attribute) {
+                case NAME: {
+                    name = attrValue;
+                    break;
+                }
+                default: {
+                    throw ParseUtils.unexpectedAttribute(reader, i);
+                }
+            }
+        }
+        if(name == null) {
+            ParseUtils.missingRequired(reader, Collections.singleton(Attribute.NAME));
+        }
 
         ModelNode broadcastGroupAdd = org.jboss.as.controller.operations.common.Util.getEmptyOperation(ADD, address.clone().add(CommonAttributes.BROADCAST_GROUP, name));
 
@@ -634,6 +713,7 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
                 case LOCAL_BIND_PORT:
                 case GROUP_ADDRESS:
                 case GROUP_PORT:
+                case SOCKET_BINDING:
                 case BROADCAST_PERIOD:
                     handleElementText(reader, element, broadcastGroupAdd);
                     break;
@@ -670,10 +750,27 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
 
     private static void parseDiscoveryGroup(XMLExtendedStreamReader reader, ModelNode address, List<ModelNode> updates) throws XMLStreamException {
 
-        requireSingleAttribute(reader, CommonAttributes.NAME);
-        String name = reader.getAttributeValue(0);
+        String name = null;
 
-        ModelNode broadcastGroupAdd = org.jboss.as.controller.operations.common.Util.getEmptyOperation(ADD, address.clone().add(CommonAttributes.DISCOVERY_GROUP, name));
+        int count = reader.getAttributeCount();
+        for (int i = 0; i < count; i++) {
+            final String attrValue = reader.getAttributeValue(i);
+            final Attribute attribute = Attribute.forName(reader.getAttributeLocalName(i));
+            switch (attribute) {
+                case NAME: {
+                    name = attrValue;
+                    break;
+                }
+                default: {
+                    throw ParseUtils.unexpectedAttribute(reader, i);
+                }
+            }
+        }
+        if(name == null) {
+            ParseUtils.missingRequired(reader, Collections.singleton(Attribute.NAME));
+        }
+
+        ModelNode discoveryGroup = org.jboss.as.controller.operations.common.Util.getEmptyOperation(ADD, address.clone().add(CommonAttributes.DISCOVERY_GROUP, name));
 
         EnumSet<Element> required = EnumSet.of(Element.GROUP_ADDRESS, Element.GROUP_PORT);
         while(reader.hasNext() && reader.nextTag() != END_ELEMENT) {
@@ -684,8 +781,9 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
                 case GROUP_ADDRESS:
                 case GROUP_PORT:
                 case REFRESH_TIMEOUT:
+                case SOCKET_BINDING:
                 case INITIAL_WAIT_TIMEOUT:
-                    handleElementText(reader, element, broadcastGroupAdd);
+                    handleElementText(reader, element, discoveryGroup);
                     break;
                 default: {
                     throw ParseUtils.unexpectedElement(reader);
@@ -697,7 +795,7 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
             missingRequired(reader, required);
         }
 
-        updates.add(broadcastGroupAdd);
+        updates.add(discoveryGroup);
     }
 
     static void processConnectionFactories(final XMLExtendedStreamReader reader, ModelNode address, List<ModelNode> updates) throws XMLStreamException {
@@ -732,8 +830,7 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
        }
     }
 
-    static ModelNode processAcceptors(XMLExtendedStreamReader reader) throws XMLStreamException {
-        final ModelNode acceptors = new ModelNode();
+    static void processAcceptors(final XMLExtendedStreamReader reader, final ModelNode address, final List<ModelNode> updates) throws XMLStreamException {
         while(reader.hasNext() && reader.nextTag() != END_ELEMENT) {
             String name = null;
             String socketBinding = null;
@@ -765,32 +862,38 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
                 ParseUtils.missingRequired(reader, Collections.singleton(Attribute.NAME));
             }
 
+            final ModelNode acceptorAddress = address.clone();
+            final ModelNode operation = new ModelNode();
+            operation.get(OP).set(ADD);
+
             final Element element = Element.forName(reader.getLocalName());
             switch (element) {
                 case ACCEPTOR: {
-                    final ModelNode acceptor = acceptors.get(name);
-                    acceptor.get(TYPE).set(TransportConfigType.Generic.toString());
-                    if(socketBinding != null) acceptor.get(SOCKET_BINDING).set(socketBinding);
-                    parseTransportConfigurationParams(reader, acceptor, true);
+                    acceptorAddress.add(ACCEPTOR, name);
+                    if(socketBinding != null) operation.get(SOCKET_BINDING.getName()).set(socketBinding);
+                    parseTransportConfigurationParams(reader, operation, true);
                     break;
                 } case NETTY_ACCEPTOR: {
-                    final ModelNode acceptor = acceptors.get(name);
-                    acceptor.get(TYPE).set(TransportConfigType.Remote.toString());
-                    if(socketBinding != null) acceptor.get(SOCKET_BINDING).set(socketBinding);
-                    parseTransportConfigurationParams(reader, acceptor, false);
+                    acceptorAddress.add(REMOTE_ACCEPTOR, name);
+                    if(socketBinding == null) {
+                        ParseUtils.missingRequired(reader, Collections.singleton(Attribute.SOCKET_BINDING));
+                    }
+                    operation.get(SOCKET_BINDING.getName()).set(socketBinding);
+                    parseTransportConfigurationParams(reader, operation, false);
                     break;
                 } case IN_VM_ACCEPTOR: {
-                    final ModelNode acceptor = acceptors.get(name);
-                    acceptor.get(TYPE).set(TransportConfigType.InVM.toString());
-                    acceptor.get(SERVER_ID).set(serverId);
-                    parseTransportConfigurationParams(reader, acceptor, false);
+                    acceptorAddress.add(IN_VM_ACCEPTOR, name);
+                    operation.get(SERVER_ID.getName()).set(serverId);
+                    parseTransportConfigurationParams(reader, operation, false);
                     break;
                 } default: {
                     throw ParseUtils.unexpectedElement(reader);
                 }
             }
+            //
+            operation.get(OP_ADDR).set(acceptorAddress);
+            updates.add(operation);
         }
-        return acceptors;
     }
 
     static void parseQueues(final XMLExtendedStreamReader reader, final ModelNode address, final List<ModelNode> list) throws XMLStreamException {
@@ -853,7 +956,7 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
         }
     }
 
-    static ModelNode processSecuritySettings(XMLExtendedStreamReader reader) throws XMLStreamException {
+    static ModelNode processSecuritySettings(final XMLExtendedStreamReader reader, final ModelNode address, final List<ModelNode> operations) throws XMLStreamException {
         final ModelNode security = new ModelNode();
         int tag = reader.getEventType();
         String localName = null;
@@ -864,25 +967,25 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
 
             switch (element) {
                 case SECURITY_SETTING:
-                    String match = reader.getAttributeValue(0);
-                    parseSecurityRoles(reader, security.get(match));
+                    final String match = reader.getAttributeValue(0);
+
+                    final ModelNode addr = address.clone();
+                    addr.add(SECURITY_SETTING, match);
+                    final ModelNode operation = new ModelNode();
+                    operation.get(OP).set(ADD);
+                    operation.get(OP_ADDR).set(addr);
+                    operations.add(operation);
+
+                    parseSecurityRoles(reader, addr, operations);
                     break;
             }
         } while (reader.hasNext() && localName.equals(Element.SECURITY_SETTING.getLocalName()));
         return security;
     }
 
-    static void parseSecurityRoles(final XMLExtendedStreamReader reader, final ModelNode node) throws XMLStreamException {
+    static void parseSecurityRoles(final XMLExtendedStreamReader reader, final ModelNode address, final List<ModelNode> operations) throws XMLStreamException {
 
-        ArrayList<String> send = new ArrayList<String>();
-        ArrayList<String> consume = new ArrayList<String>();
-        ArrayList<String> createDurableQueue = new ArrayList<String>();
-        ArrayList<String> deleteDurableQueue = new ArrayList<String>();
-        ArrayList<String> createNonDurableQueue = new ArrayList<String>();
-        ArrayList<String> deleteNonDurableQueue = new ArrayList<String>();
-        ArrayList<String> manageRoles = new ArrayList<String>();
-        ArrayList<String> allRoles = new ArrayList<String>();
-
+        final Map<String, Set<AttributeDefinition>> permsByRole = new HashMap<String, Set<AttributeDefinition>>();
         int tag = reader.getEventType();
         String localName = null;
         do {
@@ -912,46 +1015,42 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
             }
 
             for (String role : roles) {
-                if (Attribute.SEND_NAME.getLocalName().equals(type)) {
-                    send.add(role.trim());
-                } else if (Attribute.CONSUME_NAME.getLocalName().equals(type)) {
-                    consume.add(role.trim());
-                } else if (Attribute.CREATEDURABLEQUEUE_NAME.getLocalName().equals(type)) {
-                    createDurableQueue.add(role);
-                } else if (Attribute.DELETEDURABLEQUEUE_NAME.getLocalName().equals(type)) {
-                    deleteDurableQueue.add(role);
-                } else if (Attribute.CREATE_NON_DURABLE_QUEUE_NAME.getLocalName().equals(type)) {
-                    createNonDurableQueue.add(role);
-                } else if (Attribute.DELETE_NON_DURABLE_QUEUE_NAME.getLocalName().equals(type)) {
-                    deleteNonDurableQueue.add(role);
-                } else if (Attribute.CREATETEMPQUEUE_NAME.getLocalName().equals(type)) {
-                    createNonDurableQueue.add(role);
-                } else if (Attribute.DELETETEMPQUEUE_NAME.getLocalName().equals(type)) {
-                    deleteNonDurableQueue.add(role);
-                } else if (Attribute.MANAGE_NAME.getLocalName().equals(type)) {
-                    manageRoles.add(role);
+                role = role.trim();
+                Set<AttributeDefinition> perms = permsByRole.get(role);
+                if (perms == null) {
+                    perms = new HashSet<AttributeDefinition>();
+                    permsByRole.put(role, perms);
                 }
-                if (!allRoles.contains(role.trim())) {
-                    allRoles.add(role.trim());
+                for (AttributeDefinition perm : SecurityRoleAdd.ROLE_ATTRIBUTES) {
+                    if (perm.getXmlName().equals(type)) {
+                        perms.add(perm);
+                    }
                 }
             }
             // Scan to element end
             reader.discardRemainder();
         } while (reader.hasNext());
 
-        for (String role : allRoles) {
-            node.get(role, SEND_NAME).set(send.contains(role));
-            node.get(role, CONSUME_NAME).set(consume.contains(role));
-            node.get(role, CREATEDURABLEQUEUE_NAME).set(createDurableQueue.contains(role));
-            node.get(role, DELETEDURABLEQUEUE_NAME).set(deleteDurableQueue.contains(role));
-            node.get(role, CREATE_NON_DURABLE_QUEUE_NAME).set(createNonDurableQueue.contains(role));
-            node.get(role, DELETE_NON_DURABLE_QUEUE_NAME).set(deleteNonDurableQueue.contains(role));
-            node.get(role, MANAGE_NAME).set(manageRoles.contains(role));
+        for (Map.Entry<String, Set<AttributeDefinition>> entry : permsByRole.entrySet()) {
+            final String role = entry.getKey();
+            final Set<AttributeDefinition> perms = entry.getValue();
+
+            final ModelNode addr = address.clone();
+            addr.add(ROLE, role);
+
+            final ModelNode operation = new ModelNode();
+            operation.get(OP).set(ADD);
+            operation.get(OP_ADDR).set(addr);
+
+            for (AttributeDefinition perm : SecurityRoleAdd.ROLE_ATTRIBUTES) {
+                operation.get(perm.getName()).set(perms.contains(perm));
+            }
+
+            operations.add(operation);
         }
     }
 
-    public static ModelNode processConnectors(XMLExtendedStreamReader reader) throws XMLStreamException {
-        final ModelNode connectors = new ModelNode();
+    static void processConnectors(final XMLExtendedStreamReader reader, final ModelNode address, final List<ModelNode> updates) throws XMLStreamException {
         while(reader.hasNext() && reader.nextTag() != END_ELEMENT) {
             String name = null;
             String socketBinding = null;
@@ -982,35 +1081,42 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
             if(name == null) {
                 ParseUtils.missingRequired(reader, Collections.singleton(Attribute.NAME));
             }
+
+            final ModelNode connectorAddress = address.clone();
+            final ModelNode operation = new ModelNode();
+            operation.get(OP).set(ADD);
+
             final Element element = Element.forName(reader.getLocalName());
             switch (element) {
                 case CONNECTOR: {
-                    final ModelNode connector = connectors.get(name);
-                    connector.get(TYPE).set(TransportConfigType.Generic.toString());
-                    if(socketBinding != null) connector.get(SOCKET_BINDING).set(socketBinding);
-                    parseTransportConfigurationParams(reader, connector, true);
+                    connectorAddress.add(CONNECTOR, name);
+                    if(socketBinding != null) operation.get(SOCKET_BINDING.getName()).set(socketBinding);
+                    parseTransportConfigurationParams(reader, operation, true);
                     break;
                 } case NETTY_CONNECTOR: {
-                    final ModelNode connector = connectors.get(name);
-                    connector.get(TYPE).set(TransportConfigType.Remote.toString());
-                    if(socketBinding != null) connector.get(SOCKET_BINDING).set(socketBinding);
-                    parseTransportConfigurationParams(reader, connector, false);
+                    connectorAddress.add(REMOTE_CONNECTOR, name);
+                    if(socketBinding == null) {
+                        ParseUtils.missingRequired(reader, Collections.singleton(Attribute.SOCKET_BINDING));
+                    }
+                    operation.get(SOCKET_BINDING.getName()).set(socketBinding);
+                    parseTransportConfigurationParams(reader, operation, false);
                     break;
                 } case IN_VM_CONNECTOR: {
-                    final ModelNode connector = connectors.get(name);
-                    connector.get(TYPE).set(TransportConfigType.InVM.toString());
-                    connector.get(SERVER_ID).set(serverId);
-                    parseTransportConfigurationParams(reader, connector, false);
+                    connectorAddress.add(IN_VM_CONNECTOR, name);
+                    operation.get(SERVER_ID.getName()).set(serverId);
+                    parseTransportConfigurationParams(reader, operation, false);
                     break;
                 } default: {
                     throw ParseUtils.unexpectedElement(reader);
                 }
             }
+
+            operation.get(OP_ADDR).set(connectorAddress);
+            updates.add(operation);
         }
-        return connectors;
     }
 
-    static ModelNode processAddressSettings(XMLExtendedStreamReader reader) throws XMLStreamException {
+    static void processAddressSettings(final XMLExtendedStreamReader reader, final ModelNode address, final List<ModelNode> operations) throws XMLStreamException {
         final ModelNode settings = new ModelNode();
 
         String localName = null;
@@ -1022,13 +1128,16 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
             switch (element) {
                 case ADDRESS_SETTING:
                     // Add address settings
-                    String match = reader.getAttributeValue(0);
-                    settings.get(match).set(parseAddressSettings(reader));
+                    final String match = reader.getAttributeValue(0);
+                    final ModelNode operation = parseAddressSettings(reader);
+                    operation.get(OP).set(ADD);
+                    operation.get(OP_ADDR).set(address);
+                    operation.get(OP_ADDR).add(CommonAttributes.ADDRESS_SETTING, match);
+
+                    operations.add(operation);
                     break;
             }
         } while (reader.hasNext() && localName.equals(Element.ADDRESS_SETTING.getLocalName()));
-
-        return settings;
     }
 
     static ModelNode parseAddressSettings(final XMLExtendedStreamReader reader) throws XMLStreamException {
@@ -1105,30 +1214,40 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
                 }
             }
         }
-        transportConfig.get(PARAM).set(params);
+        transportConfig.get(PARAMS).set(params);
     }
 
-    static ModelNode parseDirectory(XMLExtendedStreamReader reader) throws XMLStreamException {
-        final ModelNode directory = new ModelNode();
+    static void parseDirectory(final XMLExtendedStreamReader reader, final String name, final ModelNode address, final List<ModelNode> updates) throws XMLStreamException {
+        String path = null;
+        String relativeTo = null;
         final int count = reader.getAttributeCount();
         for (int i = 0; i < count; i++) {
-
             requireNoNamespaceAttribute(reader, i);
             final Attribute attribute = Attribute.forName(reader.getAttributeLocalName(i));
             final String value = reader.getAttributeValue(i);
             switch (attribute) {
                 case RELATIVE_TO:
-                    directory.get(RELATIVE_TO).set(value);
+                    relativeTo = value;
                     break;
                 case PATH:
-                    directory.get(PATH).set(value);
+                    path = value;
                     break;
                 default:
                     throw unexpectedAttribute(reader, i);
             }
         }
+        if(path == null) {
+            throw ParseUtils.missingRequired(reader, Collections.singleton(Attribute.PATH));
+        }
         requireNoContent(reader);
-        return directory;
+        final ModelNode operation = new ModelNode();
+        operation.get(OP).set(ADD);
+        operation.get(OP_ADDR).set(address);
+        operation.get(OP_ADDR).add(ModelDescriptionConstants.PATH, name);
+        operation.get(ModelDescriptionConstants.PATH).set(path);
+        if(relativeTo != null) operation.get(ModelDescriptionConstants.RELATIVE_TO).set(relativeTo);
+
+        updates.add(operation);
     }
 
     private static void parseDiverts(final XMLExtendedStreamReader reader, final ModelNode address, final List<ModelNode> list) throws XMLStreamException {
@@ -1198,7 +1317,7 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
     }
 
     static void unhandledElement(XMLExtendedStreamReader reader, Element element) throws XMLStreamException {
-        throw new XMLStreamException(String.format("Ignoring unhandled element: %s, at: %s", element, reader.getLocation().toString()));
+        throw MESSAGES.ignoringUnhandledElement(element, reader.getLocation().toString());
     }
 
     static void handleElementText(final XMLExtendedStreamReader reader, final Element element, final ModelNode node) throws XMLStreamException {
@@ -1260,14 +1379,14 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
                             toSet.set(modelValue.asString());
                             break;
                         default:
-                            throw new XMLStreamException(String.format("Illegal value %s for element %s", value, element.getLocalName()), location);
+                            throw new XMLStreamException(MESSAGES.illegalValue(value, element.getLocalName()), location);
                     }
                 } catch (IllegalArgumentException iae) {
-                    throw new XMLStreamException(String.format("Illegal value %s for element %s as it could not be converted to required type %s", value, element.getLocalName(), expectedType), location);
+                    throw new XMLStreamException(MESSAGES.illegalValue(value, element.getLocalName(), expectedType), location);
                 }
             }
         } else if (!allowNull) {
-            throw new XMLStreamException(String.format("Illegal value %s for element %s", value, element.getLocalName()), location);
+            throw new XMLStreamException(MESSAGES.illegalValue(value, element.getLocalName()), location);
         }
     }
 
@@ -1275,22 +1394,36 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
         context.startSubsystemElement(Namespace.CURRENT.getUriString(), false);
         final ModelNode node = context.getModelNode();
 
+        final ModelNode servers = node.require(HORNETQ_SERVER);
+        for (Property prop : servers.asPropertyList()) {
+            writeHornetQServer(writer, prop.getName(), prop.getValue());
+        }
+
+
+        writer.writeEndElement();
+    }
+
+    private void writeHornetQServer(final XMLExtendedStreamWriter writer, final String serverName, final ModelNode node) throws XMLStreamException {
+
+        writer.writeStartElement(Element.HORNETQ_SERVER.getLocalName());
+
+        if (!"default".equals(serverName)) {
+            writer.writeAttribute(Attribute.NAME.getLocalName(), serverName);
+        }
+
         for (AttributeDefinition simpleAttribute : CommonAttributes.SIMPLE_ROOT_RESOURCE_ATTRIBUTES) {
             simpleAttribute.marshallAsElement(node, writer);
         }
 
-        if (has(node, ACCEPTOR)) {
-            writeAcceptors(writer, node.get(ACCEPTOR));
-        }
-        if (has(node, ADDRESS_SETTING)) {
+        writeAcceptors(writer, node);
+        if (node.hasDefined(ADDRESS_SETTING)) {
             writeAddressSettings(writer, node.get(ADDRESS_SETTING));
         }
-        if (has(node, BINDINGS_DIRECTORY)) {
-            writeDirectory(writer, Element.BINDINGS_DIRECTORY, node);
+        final ModelNode paths = node.get(ModelDescriptionConstants.PATH);
+        if (paths.hasDefined(BINDINGS_DIRECTORY)) {
+            writeDirectory(writer, Element.BINDINGS_DIRECTORY, node.get(ModelDescriptionConstants.PATH));
         }
-        if (has(node, CONNECTOR)) {
-            writeConnectors(writer, node.get(CONNECTOR));
-        }
+        writeConnectors(writer, node);
         if (node.hasDefined(BROADCAST_GROUP)) {
             writeBroadcastGroups(writer, node.get(BROADCAST_GROUP));
         }
@@ -1309,19 +1442,19 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
         if (node.hasDefined(CommonAttributes.GROUPING_HANDLER)) {
             writeGroupingHandler(writer, node.get(GROUPING_HANDLER));
         }
-        if (has(node, CommonAttributes.JOURNAL_DIRECTORY)) {
-            writeDirectory(writer, Element.JOURNAL_DIRECTORY, node);
+        if (paths.hasDefined(CommonAttributes.JOURNAL_DIRECTORY)) {
+            writeDirectory(writer, Element.JOURNAL_DIRECTORY, node.get(ModelDescriptionConstants.PATH));
         }
-        if (has(node, CommonAttributes.LARGE_MESSAGES_DIRECTORY)) {
-            writeDirectory(writer, Element.LARGE_MESSAGES_DIRECTORY, node);
+        if (paths.hasDefined(CommonAttributes.LARGE_MESSAGES_DIRECTORY)) {
+            writeDirectory(writer, Element.LARGE_MESSAGES_DIRECTORY, node.get(ModelDescriptionConstants.PATH));
         }
-        if (has(node, CommonAttributes.PAGING_DIRECTORY)) {
-            writeDirectory(writer, Element.PAGING_DIRECTORY, node);
+        if (paths.hasDefined(CommonAttributes.PAGING_DIRECTORY)) {
+            writeDirectory(writer, Element.PAGING_DIRECTORY, node.get(ModelDescriptionConstants.PATH));
         }
-        if (has(node, CommonAttributes.SECURITY_SETTING)) {
+        if (node.hasDefined(CommonAttributes.SECURITY_SETTING)) {
             writeSecuritySettings(writer, node.get(CommonAttributes.SECURITY_SETTING));
         }
-        if (has(node, CommonAttributes.QUEUE)) {
+        if (node.hasDefined(CommonAttributes.QUEUE)) {
             writeQueues(writer, node.get(CommonAttributes.QUEUE));
         }
         if (node.hasDefined(CommonAttributes.CONNECTOR_SERVICE)) {
@@ -1347,7 +1480,6 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
            }
            writer.writeEndElement();
         }
-
 
         writer.writeEndElement();
     }
@@ -1388,7 +1520,7 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
                     if (CommonAttributes.FILTER == attribute) {
                         writeFilter(writer, property.getValue());
                     } else if (attribute == CommonAttributes.DISCOVERY_GROUP_NAME) {
-                        if (CommonAttributes.DISCOVERY_GROUP_NAME.isMarshallable(bridge, false)) {
+                        if (CommonAttributes.DISCOVERY_GROUP_NAME.isMarshallable(bridge)) {
                             writer.writeStartElement(Element.DISCOVERY_GROUP_REF.getLocalName());
                             CommonAttributes.DISCOVERY_GROUP_NAME.marshallAsAttribute(bridge, writer);
                             writer.writeEndElement();
@@ -1417,18 +1549,18 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
                         continue;
                     }
                     if (attribute == ConnectorRefsAttribute.CLUSTER_CONNECTION_CONNECTORS) {
-                        if (ConnectorRefsAttribute.CLUSTER_CONNECTION_CONNECTORS.isMarshallable(cluster, false)) {
+                        if (ConnectorRefsAttribute.CLUSTER_CONNECTION_CONNECTORS.isMarshallable(cluster)) {
                             writer.writeStartElement(Element.STATIC_CONNECTORS.getLocalName());
                             CommonAttributes.ALLOW_DIRECT_CONNECTIONS_ONLY.marshallAsAttribute(cluster, writer);
                             ConnectorRefsAttribute.CLUSTER_CONNECTION_CONNECTORS.marshallAsElement(cluster, writer);
                             writer.writeEndElement();
-                        } else if (CommonAttributes.ALLOW_DIRECT_CONNECTIONS_ONLY.isMarshallable(cluster, false)) {
+                        } else if (CommonAttributes.ALLOW_DIRECT_CONNECTIONS_ONLY.isMarshallable(cluster)) {
                             writer.writeEmptyElement(Element.STATIC_CONNECTORS.getLocalName());
                             CommonAttributes.ALLOW_DIRECT_CONNECTIONS_ONLY.marshallAsAttribute(cluster, writer);
                         }
                     }
                     else if (attribute == CommonAttributes.DISCOVERY_GROUP_NAME) {
-                        if (CommonAttributes.DISCOVERY_GROUP_NAME.isMarshallable(cluster, false)) {
+                        if (CommonAttributes.DISCOVERY_GROUP_NAME.isMarshallable(cluster)) {
                             writer.writeStartElement(Element.DISCOVERY_GROUP_REF.getLocalName());
                             CommonAttributes.DISCOVERY_GROUP_NAME.marshallAsAttribute(cluster, writer);
                             writer.writeEndElement();
@@ -1448,7 +1580,7 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
         boolean wroteHandler = false;
         for (Property handler : node.asPropertyList()) {
             if (wroteHandler) {
-                throw new IllegalStateException(String.format("Multiple %s children found; only one is allowed", GROUPING_HANDLER));
+                throw MESSAGES.multipleChildrenFound(GROUPING_HANDLER);
             }
             writer.writeStartElement(Element.GROUPING_HANDLER.getLocalName());
             writer.writeAttribute(Attribute.NAME.getLocalName(), handler.getName());
@@ -1460,77 +1592,77 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
         }
     }
 
-
-    private void writeAcceptors(final XMLExtendedStreamWriter writer, final ModelNode node) throws XMLStreamException {
+    static void writeAcceptors(final XMLExtendedStreamWriter writer, final ModelNode node) throws XMLStreamException {
         writer.writeStartElement(Element.ACCEPTORS.getLocalName());
-        for(final Property property : node.asPropertyList()) {
-            final ModelNode value = property.getValue();
-            if (!has(value, TYPE)) {
-                continue;
+        if(node.hasDefined(ACCEPTOR)) {
+            for(final Property property : node.get(ACCEPTOR).asPropertyList()) {
+                writer.writeStartElement(Element.ACCEPTOR.getLocalName());
+                writeAcceptorAndConnectorContent(writer, property);
+                writer.writeEndElement();
             }
-            switch( Enum.valueOf(TransportConfigType.class, value.get(TYPE).asString())) {
-                case Generic:
-                    writer.writeStartElement(Element.ACCEPTOR.getLocalName());
-                    break;
-                case Remote:
-                    writer.writeStartElement(Element.NETTY_ACCEPTOR.getLocalName());
-                    break;
-                case InVM:
-                    writer.writeStartElement(Element.IN_VM_ACCEPTOR.getLocalName());
-                    break;
+        }
+        if(node.hasDefined(REMOTE_ACCEPTOR)) {
+            for(final Property property : node.get(REMOTE_ACCEPTOR).asPropertyList()) {
+                writer.writeStartElement(Element.NETTY_ACCEPTOR.getLocalName());
+                writeAcceptorAndConnectorContent(writer, property);
+                writer.writeEndElement();
             }
-
-            writeAcceptorAndConnectorContent(writer, property);
-
-            writer.writeEndElement();
+        }
+        if(node.hasDefined(IN_VM_ACCEPTOR)) {
+            for(final Property property : node.get(IN_VM_ACCEPTOR).asPropertyList()) {
+                writer.writeStartElement(Element.IN_VM_ACCEPTOR.getLocalName());
+                writeAcceptorAndConnectorContent(writer, property);
+                writer.writeEndElement();
+            }
         }
         writer.writeEndElement();
     }
 
-    private void writeConnectors(final XMLExtendedStreamWriter writer, final ModelNode node) throws XMLStreamException {
+    static void writeConnectors(final XMLExtendedStreamWriter writer, final ModelNode node) throws XMLStreamException {
         writer.writeStartElement(Element.CONNECTORS.getLocalName());
-        for(final Property property : node.asPropertyList()) {
-            final ModelNode value = property.getValue();
-            if (!has(value, TYPE)) {
-                continue;
+        if(node.hasDefined(CONNECTOR)) {
+            for(final Property property : node.get(CONNECTOR).asPropertyList()) {
+                writer.writeStartElement(Element.CONNECTOR.getLocalName());
+                writeAcceptorAndConnectorContent(writer, property);
+                writer.writeEndElement();
             }
-            switch( Enum.valueOf(TransportConfigType.class, value.get(TYPE).asString())) {
-                case Generic:
-                    writer.writeStartElement(Element.CONNECTOR.getLocalName());
-                    break;
-                case Remote:
-                    writer.writeStartElement(Element.NETTY_CONNECTOR.getLocalName());
-                    break;
-                case InVM:
-                    writer.writeStartElement(Element.IN_VM_CONNECTOR.getLocalName());
-                    break;
+        }
+        if(node.hasDefined(REMOTE_CONNECTOR)) {
+            for(final Property property : node.get(REMOTE_CONNECTOR).asPropertyList()) {
+                writer.writeStartElement(Element.NETTY_CONNECTOR.getLocalName());
+                writeAcceptorAndConnectorContent(writer, property);
+                writer.writeEndElement();
             }
-            writeAcceptorAndConnectorContent(writer, property);
-
-            writer.writeEndElement();
+        }
+        if(node.hasDefined(IN_VM_CONNECTOR)) {
+            for(final Property property : node.get(IN_VM_CONNECTOR).asPropertyList()) {
+                writer.writeStartElement(Element.IN_VM_CONNECTOR.getLocalName());
+                writeAcceptorAndConnectorContent(writer, property);
+                writer.writeEndElement();
+            }
         }
         writer.writeEndElement();
     }
 
-    private void writeAcceptorAndConnectorContent(final XMLExtendedStreamWriter writer, final Property property) throws XMLStreamException {
+    static void writeAcceptorAndConnectorContent(final XMLExtendedStreamWriter writer, final Property property) throws XMLStreamException {
         writer.writeAttribute(Attribute.NAME.getLocalName(), property.getName());
         final ModelNode value = property.getValue();
 
-        if (has(value, SOCKET_BINDING)) {
-            writeAttribute(writer, Attribute.SOCKET_BINDING, value.get(SOCKET_BINDING));
+        if (value.hasDefined(SOCKET_BINDING.getName())) {
+            writeAttribute(writer, Attribute.SOCKET_BINDING, value.get(SOCKET_BINDING.getName()));
         }
-        if (has(value, SERVER_ID)) {
-            writeAttribute(writer, Attribute.SERVER_ID, value.get(SERVER_ID));
+        if (value.hasDefined(SERVER_ID.getName())) {
+            writeAttribute(writer, Attribute.SERVER_ID, value.get(SERVER_ID.getName()));
         }
 
-        if (has(value, FACTORY_CLASS.getName())) {
+        if (value.hasDefined(FACTORY_CLASS.getName())) {
             writeSimpleElement(writer, Element.FACTORY_CLASS, value);
         }
-        if (has(value, PARAM)) {
+        if (value.hasDefined(PARAM)) {
             for(final Property parameter : value.get(PARAM).asPropertyList()) {
                 writer.writeStartElement(Element.PARAM.getLocalName());
                 writer.writeAttribute(Attribute.KEY.getLocalName(), parameter.getName());
-                writeAttribute(writer, Attribute.VALUE, parameter.getValue());
+                writeAttribute(writer, Attribute.VALUE, parameter.getValue().get(VALUE));
                 writer.writeEndElement();
             }
         }
@@ -1543,47 +1675,50 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
             writer.writeStartElement(Element.SECURITY_SETTING.getLocalName());
             writer.writeAttribute(Attribute.MATCH.getLocalName(), matchRoles.getName());
 
-            ArrayList<String> send = new ArrayList<String>();
-            ArrayList<String> consume = new ArrayList<String>();
-            ArrayList<String> createDurableQueue = new ArrayList<String>();
-            ArrayList<String> deleteDurableQueue = new ArrayList<String>();
-            ArrayList<String> createNonDurableQueue = new ArrayList<String>();
-            ArrayList<String> deleteNonDurableQueue = new ArrayList<String>();
-            ArrayList<String> manageRoles = new ArrayList<String>();
+            if(matchRoles.getValue().hasDefined(ROLE)) {
 
-            for (Property rolePerms : matchRoles.getValue().asPropertyList()) {
-                final String role = rolePerms.getName();
-                final ModelNode perms = rolePerms.getValue();
-                if (perms.get(CommonAttributes.SEND_NAME).asBoolean()) {
-                    send.add(role);
+                ArrayList<String> send = new ArrayList<String>();
+                ArrayList<String> consume = new ArrayList<String>();
+                ArrayList<String> createDurableQueue = new ArrayList<String>();
+                ArrayList<String> deleteDurableQueue = new ArrayList<String>();
+                ArrayList<String> createNonDurableQueue = new ArrayList<String>();
+                ArrayList<String> deleteNonDurableQueue = new ArrayList<String>();
+                ArrayList<String> manageRoles = new ArrayList<String>();
+
+                for (Property rolePerms : matchRoles.getValue().get(ROLE).asPropertyList()) {
+                    final String role = rolePerms.getName();
+                    final ModelNode perms = rolePerms.getValue();
+                    if (perms.get(SecurityRoleAdd.SEND.getName()).asBoolean(false)) {
+                        send.add(role);
+                    }
+                    if (perms.get(SecurityRoleAdd.CONSUME.getName()).asBoolean(false)) {
+                        consume.add(role);
+                    }
+                    if (perms.get(SecurityRoleAdd.CREATE_DURABLE_QUEUE.getName()).asBoolean(false)) {
+                        createDurableQueue.add(role);
+                    }
+                    if (perms.get(SecurityRoleAdd.DELETE_DURABLE_QUEUE.getName()).asBoolean(false)) {
+                        deleteDurableQueue.add(role);
+                    }
+                    if (perms.get(SecurityRoleAdd.CREATE_NON_DURABLE_QUEUE.getName()).asBoolean(false)) {
+                        createNonDurableQueue.add(role);
+                    }
+                    if (perms.get(SecurityRoleAdd.DELETE_NON_DURABLE_QUEUE.getName()).asBoolean(false)) {
+                        deleteNonDurableQueue.add(role);
+                    }
+                    if (perms.get(SecurityRoleAdd.MANAGE.getName()).asBoolean(false)) {
+                        manageRoles.add(role);
+                    }
                 }
-                if (perms.get(CommonAttributes.CONSUME_NAME).asBoolean()) {
-                    consume.add(role);
-                }
-                if (perms.get(CommonAttributes.CREATEDURABLEQUEUE_NAME).asBoolean()) {
-                    createDurableQueue.add(role);
-                }
-                if (perms.get(CommonAttributes.DELETEDURABLEQUEUE_NAME).asBoolean()) {
-                    deleteDurableQueue.add(role);
-                }
-                if (perms.get(CommonAttributes.CREATE_NON_DURABLE_QUEUE_NAME).asBoolean()) {
-                    createNonDurableQueue.add(role);
-                }
-                if (perms.get(CommonAttributes.DELETE_NON_DURABLE_QUEUE_NAME).asBoolean()) {
-                    deleteNonDurableQueue.add(role);
-                }
-                if (perms.get(CommonAttributes.MANAGE_NAME).asBoolean()) {
-                    manageRoles.add(role);
-                }
+
+                writePermission(writer, SEND_XML_NAME, send);
+                writePermission(writer, CONSUME_XML_NAME, consume);
+                writePermission(writer, CREATEDURABLEQUEUE_XML_NAME, createDurableQueue);
+                writePermission(writer, DELETEDURABLEQUEUE_XML_NAME, deleteDurableQueue);
+                writePermission(writer, CREATE_NON_DURABLE_QUEUE_XML_NAME, createNonDurableQueue);
+                writePermission(writer, DELETE_NON_DURABLE_QUEUE_XML_NAME, deleteNonDurableQueue);
+                writePermission(writer, MANAGE_XML_NAME, manageRoles);
             }
-
-            writePermission(writer, SEND_NAME, send);
-            writePermission(writer, CONSUME_NAME, consume);
-            writePermission(writer, CREATEDURABLEQUEUE_NAME, createDurableQueue);
-            writePermission(writer, DELETEDURABLEQUEUE_NAME, deleteDurableQueue);
-            writePermission(writer, CREATE_NON_DURABLE_QUEUE_NAME, createNonDurableQueue);
-            writePermission(writer, DELETE_NON_DURABLE_QUEUE_NAME, deleteNonDurableQueue);
-            writePermission(writer, MANAGE_NAME, manageRoles);
 
             writer.writeEndElement();
         }
@@ -1614,39 +1749,17 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
             writer.writeStartElement(Element.ADDRESS_SETTING.getLocalName());
             writer.writeAttribute(Attribute.MATCH.getLocalName(), matchSetting.getName());
             final ModelNode setting = matchSetting.getValue();
-            if (has(setting, CommonAttributes.DEAD_LETTER_ADDRESS)) {
-                writeSimpleElement(writer, Element.DEAD_LETTER_ADDRESS_NODE_NAME, setting);
-            }
-            if (has(setting, CommonAttributes.EXPIRY_ADDRESS)) {
-                writeSimpleElement(writer, Element.EXPIRY_ADDRESS_NODE_NAME, setting);
-            }
-            if (has(setting, CommonAttributes.REDELIVERY_DELAY)) {
-                writeSimpleElement(writer, Element.REDELIVERY_DELAY_NODE_NAME, setting);
-            }
-            if (has(setting, CommonAttributes.MAX_SIZE_BYTES_NODE_NAME)) {
-                writeSimpleElement(writer, Element.MAX_SIZE_BYTES_NODE_NAME, setting);
-            }
-            if (has(setting, CommonAttributes.PAGE_SIZE_BYTES_NODE_NAME)) {
-                writeSimpleElement(writer, Element.PAGE_SIZE_BYTES_NODE_NAME, setting);
-            }
-            if (has(setting, CommonAttributes.MESSAGE_COUNTER_HISTORY_DAY_LIMIT)) {
-                writeSimpleElement(writer, Element.MESSAGE_COUNTER_HISTORY_DAY_LIMIT_NODE_NAME, setting);
-            }
-            if (has(setting, CommonAttributes.ADDRESS_FULL_MESSAGE_POLICY)) {
-                writeSimpleElement(writer, Element.ADDRESS_FULL_MESSAGE_POLICY_NODE_NAME, setting);
-            }
-            if (has(setting, CommonAttributes.LVQ)) {
-                writeSimpleElement(writer, Element.LVQ_NODE_NAME, setting);
-            }
-            if (has(setting, CommonAttributes.MAX_DELIVERY_ATTEMPTS)) {
-                writeSimpleElement(writer, Element.MAX_DELIVERY_ATTEMPTS, setting);
-            }
-            if (has(setting, CommonAttributes.REDISTRIBUTION_DELAY)) {
-                writeSimpleElement(writer, Element.REDISTRIBUTION_DELAY_NODE_NAME, setting);
-            }
-            if (has(setting, CommonAttributes.SEND_TO_DLA_ON_NO_ROUTE)) {
-                writeSimpleElement(writer, Element.SEND_TO_DLA_ON_NO_ROUTE, setting);
-            }
+            writeSimpleElement(writer, Element.DEAD_LETTER_ADDRESS_NODE_NAME, setting);
+            writeSimpleElement(writer, Element.EXPIRY_ADDRESS_NODE_NAME, setting);
+            writeSimpleElement(writer, Element.REDELIVERY_DELAY_NODE_NAME, setting);
+            writeSimpleElement(writer, Element.MAX_SIZE_BYTES_NODE_NAME, setting);
+            writeSimpleElement(writer, Element.PAGE_SIZE_BYTES_NODE_NAME, setting);
+            writeSimpleElement(writer, Element.MESSAGE_COUNTER_HISTORY_DAY_LIMIT_NODE_NAME, setting);
+            writeSimpleElement(writer, Element.ADDRESS_FULL_MESSAGE_POLICY_NODE_NAME, setting);
+            writeSimpleElement(writer, Element.LVQ_NODE_NAME, setting);
+            writeSimpleElement(writer, Element.MAX_DELIVERY_ATTEMPTS, setting);
+            writeSimpleElement(writer, Element.REDISTRIBUTION_DELAY_NODE_NAME, setting);
+            writeSimpleElement(writer, Element.SEND_TO_DLA_ON_NO_ROUTE, setting);
             writer.writeEndElement();
         }
         writer.writeEndElement();
@@ -1728,7 +1841,7 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
 
     static void writeSimpleElement(final XMLExtendedStreamWriter writer, final Element element, final ModelNode node) throws XMLStreamException {
         final String localName = element.getLocalName();
-        if(node.has(localName)) {
+        if(node.hasDefined(localName)) {
             final String content = node.get(localName).asString();
             if(content != null) {
                 writer.writeStartElement(localName);
@@ -1741,12 +1854,12 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
     static void writeDirectory(final XMLExtendedStreamWriter writer, final Element element, final ModelNode node) throws XMLStreamException {
         final String localName = element.getLocalName();
         if(node.has(localName)) {
-            final String path = node.get(localName).has(PATH) ? node.get(localName, PATH).asString() : null;
-            final String relativeTo = node.get(localName).has(RELATIVE_TO) ? node.get(localName, RELATIVE_TO).asString() : null;
+            final String path = node.get(localName).has(PATH.getName()) ? node.get(localName, PATH.getName()).asString() : null;
+            final String relativeTo = node.get(localName).has(RELATIVE_TO.getName()) ? node.get(localName, RELATIVE_TO.getName()).asString() : null;
             if(path != null || relativeTo != null) {
                 writer.writeEmptyElement(localName);
-                if(path != null) writer.writeAttribute(PATH, path);
-                if(relativeTo != null) writer.writeAttribute(RELATIVE_TO, relativeTo);
+                if(path != null) writer.writeAttribute(PATH.getName(), path);
+                if(relativeTo != null) writer.writeAttribute(RELATIVE_TO.getName(), relativeTo);
             }
         }
     }
@@ -1778,30 +1891,31 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
 
     private void writeConnectionFactory(XMLExtendedStreamWriter writer, ModelNode node, String name, ModelNode factory) throws XMLStreamException
     {
-        if (CommonAttributes.DISCOVERY_GROUP_NAME.isMarshallable(node, false)) {
+        if (CommonAttributes.DISCOVERY_GROUP_NAME.isMarshallable(node)) {
             writer.writeStartElement(Element.DISCOVERY_GROUP_REF.getLocalName());
             CommonAttributes.DISCOVERY_GROUP_NAME.marshallAsAttribute(node, writer);
             writer.writeEndElement();
         }
-        if (has(factory, CONNECTOR)) {
+        if (factory.hasDefined(CONNECTOR)) {
             writer.writeStartElement(Element.CONNECTORS.getLocalName());
             for (Property connProp : factory.get(CONNECTOR).asPropertyList()) {
+                writer.writeStartElement(Element.CONNECTOR_REF.getLocalName());
+                writer.writeAttribute(Attribute.CONNECTOR_NAME.getLocalName(), connProp.getName());
                 final ModelNode conn = connProp.getValue();
                 if (conn.isDefined()) {
-                    writer.writeStartElement(Element.CONNECTOR_REF.getLocalName());
-                    writer.writeAttribute(Attribute.CONNECTOR_NAME.getLocalName(), connProp.getName());
-                    writer.writeEndElement();
+                    writer.writeAttribute(Attribute.BACKUP_CONNECTOR_NAME.getLocalName(), connProp.getValue().asString());
                 }
+                writer.writeEndElement();
             }
             writer.writeEndElement();
         }
         JndiEntriesAttribute.CONNECTION_FACTORY.marshallAsElement(factory, writer);
-        if(has(factory, TRANSACTION)) {
+        if(factory.hasDefined(TRANSACTION)) {
             writer.writeStartElement(Element.TRANSACTION.getLocalName());
             writeTransactionTypeAttribute(writer, Element.MODE, factory.get(TRANSACTION));
             writer.writeEndElement();
         }
-        if(has(factory, INBOUND_CONFIG)) {
+        if(factory.hasDefined(INBOUND_CONFIG)) {
             final ModelNode inboundConfigs = factory.get(INBOUND_CONFIG);
             if (inboundConfigs.getType() == ModelType.LIST) {
                 writer.writeStartElement(Element.INBOUND_CONFIG.getLocalName());
@@ -1845,8 +1959,8 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
         CommonAttributes.FAILOVER_ON_SERVER_SHUTDOWN.marshallAsElement(node, writer);
         CommonAttributes.LOAD_BALANCING_CLASS_NAME.marshallAsElement(node, writer);
         CommonAttributes.USE_GLOBAL_POOLS.marshallAsElement(node, writer);
-        CommonAttributes.CONNECTION_SCHEDULED_THREAD_POOL_MAX_SIZE.marshallAsElement(factory, false, writer);
-        CommonAttributes.CONNECTION_THREAD_POOL_MAX_SIZE.marshallAsElement(factory, false, writer);
+        CommonAttributes.CONNECTION_SCHEDULED_THREAD_POOL_MAX_SIZE.marshallAsElement(factory, writer);
+        CommonAttributes.CONNECTION_THREAD_POOL_MAX_SIZE.marshallAsElement(factory, writer);
         CommonAttributes.GROUP_ID.marshallAsElement(node, writer);
 
         writer.writeEndElement();
@@ -1892,11 +2006,8 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
         }
         writer.writeAttribute(attr.getLocalName(), txSupport);
     }
-    private boolean has(ModelNode node, String name) {
-        return node.has(name) && node.get(name).isDefined();
-    }
 
-    private void writeAttribute(final XMLExtendedStreamWriter writer, final Attribute attr, final ModelNode value) throws XMLStreamException {
+    static void writeAttribute(final XMLExtendedStreamWriter writer, final Attribute attr, final ModelNode value) throws XMLStreamException {
         writer.writeAttribute(attr.getLocalName(), value.asString());
     }
 
@@ -1994,6 +2105,7 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
         final ModelNode connectors = new ModelNode();
         while(reader.hasNext() && reader.nextTag() != END_ELEMENT) {
             String name = null;
+            String backup = null;
             int count = reader.getAttributeCount();
             for (int i = 0; i < count; i++) {
                 final String value = reader.getAttributeValue(i);
@@ -2001,6 +2113,9 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
                 switch (attribute) {
                     case CONNECTOR_NAME: {
                         name = value.trim();
+                        break;
+                    } case BACKUP_CONNECTOR_NAME: {
+                        backup = value.trim();
                         break;
                     } default: {
                         throw ParseUtils.unexpectedAttribute(reader, i);
@@ -2015,7 +2130,11 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
                 throw ParseUtils.unexpectedElement(reader);
             }
             ParseUtils.requireNoContent(reader);
-            final ModelNode connector = connectors.get(name).setEmptyObject();
+
+            final ModelNode connector = connectors.get(name);
+            if (backup != null) {
+                connector.set(backup);
+            }
         }
         return connectors;
     }
@@ -2068,6 +2187,7 @@ public class MessagingSubsystemParser implements XMLStreamConstants, XMLElementR
                     ParseUtils.requireNoContent(reader);
                     break;
                 }
+                case HA:
                 case DISCOVERY_INITIAL_WAIT_TIMEOUT:
                 case CLIENT_FAILURE_CHECK_PERIOD:
                 case CONNECTION_TTL:

@@ -43,7 +43,7 @@ public class JaasConfigurationService implements Service<Configuration> {
 
     private static final Logger log = Logger.getLogger("org.jboss.as.security");
 
-    private Configuration configuration;
+    private final Configuration configuration;
 
     public JaasConfigurationService(Configuration configuration) {
         this.configuration = configuration;
@@ -51,9 +51,8 @@ public class JaasConfigurationService implements Service<Configuration> {
 
     /** {@inheritDoc} */
     @Override
-    public void start(StartContext arg0) throws StartException {
-        if (log.isDebugEnabled())
-            log.debug("Starting JaasConfigurationService");
+    public void start(StartContext context) throws StartException {
+        log.debugf("Starting JaasConfigurationService");
 
         // set new configuration
         Configuration.setConfiguration(configuration);
@@ -61,7 +60,7 @@ public class JaasConfigurationService implements Service<Configuration> {
 
     /** {@inheritDoc} */
     @Override
-    public void stop(StopContext arg0) {
+    public void stop(StopContext context) {
         // restore configuration to null
         Configuration.setConfiguration(null);
     }

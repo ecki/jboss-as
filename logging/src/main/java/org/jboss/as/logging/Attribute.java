@@ -22,6 +22,11 @@
 
 package org.jboss.as.logging;
 
+import org.jboss.as.controller.AttributeDefinition;
+import org.jboss.dmr.ModelNode;
+import org.jboss.staxmapper.XMLExtendedStreamWriter;
+
+import javax.xml.stream.XMLStreamException;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -35,12 +40,14 @@ public enum Attribute {
     APPEND(CommonAttributes.APPEND),
     AUTOFLUSH(CommonAttributes.AUTOFLUSH),
     CATEGORY(CommonAttributes.CATEGORY),
+    CLASS(CommonAttributes.CLASS),
     FILE_NAME(CommonAttributes.FILE_NAME),
     MIN_INCLUSIVE(CommonAttributes.MIN_INCLUSIVE),
     MIN_LEVEL(CommonAttributes.MIN_LEVEL),
     MAX_BACKUP_INDEX(CommonAttributes.MAX_BACKUP_INDEX),
     MAX_INCLUSIVE(CommonAttributes.MAX_INCLUSIVE),
     MAX_LEVEL(CommonAttributes.MAX_LEVEL),
+    MODULE(CommonAttributes.MODULE),
     NAME(CommonAttributes.NAME),
     NEW_LEVEL(CommonAttributes.NEW_LEVEL),
     OVERFLOW_ACTION(CommonAttributes.OVERFLOW_ACTION),
@@ -54,13 +61,18 @@ public enum Attribute {
     SUFFIX(CommonAttributes.SUFFIX),
     TARGET(CommonAttributes.TARGET),
     USE_PARENT_HANDLERS(CommonAttributes.USE_PARENT_HANDLERS),
-    VALUE(CommonAttributes.VALUE),
-    ;
+    VALUE(CommonAttributes.VALUE),;
 
     private final String name;
+    private final AttributeDefinition definition;
 
-    Attribute(final String name) {
-        this.name = name;
+    Attribute(final AttributeDefinition definition) {
+        if (definition == null) {
+            this.name = null;
+        } else {
+            this.name = definition.getXmlName();
+        }
+        this.definition = definition;
     }
 
     /**
@@ -70,6 +82,14 @@ public enum Attribute {
      */
     public String getLocalName() {
         return name;
+    }
+
+    public AttributeDefinition getDefinition() {
+        return definition;
+    }
+
+    public void marshall(final ModelNode node, final XMLExtendedStreamWriter writer) throws XMLStreamException {
+        definition.marshallAsElement(node, writer);
     }
 
     private static final Map<String, Attribute> MAP;

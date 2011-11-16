@@ -22,10 +22,12 @@
 
 package org.jboss.as.domain.management.security;
 
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADVANCED_FILTER;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.BASE_DN;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RECURSIVE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.USERNAME_ATTRIBUTE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.USER_DN;
+import static org.jboss.as.domain.management.DomainManagementMessages.MESSAGES;
 
 import javax.naming.Context;
 import javax.naming.NamingEnumeration;
@@ -38,6 +40,7 @@ import javax.naming.directory.SearchResult;
 import javax.security.auth.callback.Callback;
 import javax.security.auth.callback.NameCallback;
 import javax.security.auth.callback.UnsupportedCallbackException;
+import javax.security.sasl.AuthorizeCallback;
 import javax.security.sasl.RealmCallback;
 import java.io.IOException;
 
@@ -48,6 +51,7 @@ import org.jboss.msc.service.StartContext;
 import org.jboss.msc.service.StartException;
 import org.jboss.msc.service.StopContext;
 import org.jboss.msc.value.InjectedValue;
+import org.jboss.sasl.callback.VerifyPasswordCallback;
 
 /**
  * A CallbackHandler for users within an LDAP directory.
@@ -58,20 +62,30 @@ public class UserLdapCallbackHandler implements Service<UserLdapCallbackHandler>
 
     public static final String SERVICE_SUFFIX = "ldap";
 
-    private static final Class[] supportedCallbacks = {RealmCallback.class, NameCallback.class, VerifyPasswordCallback.class};
+    private static final Class[] supportedCallbacks = {RealmCallback.class, NameCallback.class, VerifyPasswordCallback.class, AuthorizeCallback.class};
     private static final String DEFAULT_USER_DN = "dn";
 
     private final InjectedValue<ConnectionManager> connectionManager = new InjectedValue<ConnectionManager>();
 
     private final String baseDn;
     private final String usernameAttribute;
+    private final String advancedFilter;
     private final boolean recursive;
     private final String userDn;
     protected final int searchTimeLimit = 10000; // TODO - Maybe make configurable.
 
     public UserLdapCallbackHandler(ModelNode userLdap) {
         baseDn = userLdap.require(BASE_DN).asString();
-        usernameAttribute = userLdap.require(USERNAME_ATTRIBUTE).asString();
+        if (userLdap.hasDefined(USERNAME_ATTRIBUTE)) {
+            usernameAttribute = userLdap.require(USERNAME_ATTRIBUTE).asString();
+            advancedFilter = null;
+        } else if (userLdap.hasDefined(ADVANCED_FILTER)) {
+            advancedFilter = userLdap.require(ADVANCED_FILTER).asString();
+            usernameAttribute = null;
+        } else {
+            throw MESSAGES.oneOfRequired(USERNAME_ATTRIBUTE, ADVANCED_FILTER);
+        }
+
         if (userLdap.has(RECURSIVE)) {
             recursive = userLdap.require(RECURSIVE).asBoolean();
         } else {
@@ -118,6 +132,17 @@ public class UserLdapCallbackHandler implements Service<UserLdapCallbackHandler>
     }
 
     public void handle(Callback[] callbacks) throws IOException, UnsupportedCallbackException {
+        if (callbacks.length == 1 && callbacks[0] instanceof AuthorizeCallback) {
+            AuthorizeCallback acb = (AuthorizeCallback) callbacks[0];
+            String authenticationId = acb.getAuthenticationID();
+            String authorizationId = acb.getAuthorizationID();
+
+            // TODO - Remove "" check once SASL-3 is resolved.
+            acb.setAuthorized("".equals(authorizationId) || authenticationId.equals(authorizationId));
+
+            return;
+        }
+
         ConnectionManager connectionManager = this.connectionManager.getValue();
         String username = null;
         VerifyPasswordCallback verifyPasswordCallback = null;
@@ -135,10 +160,10 @@ public class UserLdapCallbackHandler implements Service<UserLdapCallbackHandler>
         }
 
         if (username == null || username.length() == 0) {
-            throw new IOException("No username provided.");
+            throw MESSAGES.noUsername();
         }
         if (verifyPasswordCallback == null) {
-            throw new IOException("No password to verify.");
+            throw MESSAGES.noPassword();
         }
 
         InitialDirContext searchContext = null;
@@ -158,11 +183,11 @@ public class UserLdapCallbackHandler implements Service<UserLdapCallbackHandler>
             searchControls.setTimeLimit(searchTimeLimit);
 
             Object[] filterArguments = new Object[]{username};
-            String filter = "(" + usernameAttribute + "={0})";
+            String filter = usernameAttribute != null ? "(" + usernameAttribute + "={0})" : advancedFilter;
 
             searchEnumeration = searchContext.search(baseDn, filter, filterArguments, searchControls);
             if (searchEnumeration.hasMore() == false) {
-                throw new IOException("User '" + username + "' not found in directory.");
+                throw MESSAGES.userNotFoundInDirectory(username);
             }
 
             String distinguishedUserDN = null;
@@ -179,7 +204,7 @@ public class UserLdapCallbackHandler implements Service<UserLdapCallbackHandler>
                 if (result.isRelative() == true)
                     distinguishedUserDN = result.getName() + ("".equals(baseDn) ? "" : "," + baseDn);
                 else
-                    throw new NamingException("Can't follow referal for authentication: " + result.getName());
+                    throw MESSAGES.nameNotFound(result.getName());
             }
 
             // 3 - Connect as user once their DN is identified
@@ -189,7 +214,7 @@ public class UserLdapCallbackHandler implements Service<UserLdapCallbackHandler>
             }
 
         } catch (Exception e) {
-            throw new IOException("Unable to perform verification", e);
+            throw MESSAGES.cannotPerformVerification(e);
         } finally {
             safeClose(searchEnumeration);
             safeClose(searchContext);

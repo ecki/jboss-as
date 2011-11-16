@@ -29,13 +29,13 @@ import org.jboss.msc.service.Service;
 import org.jboss.msc.service.ServiceBuilder;
 import org.jboss.msc.service.ServiceBuilder.DependencyType;
 import org.jboss.msc.service.ServiceController;
+import org.jboss.msc.service.ServiceController.Mode;
 import org.jboss.msc.service.ServiceListener;
 import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.service.ServiceTarget;
 import org.jboss.msc.service.StartContext;
 import org.jboss.msc.service.StartException;
 import org.jboss.msc.service.StopContext;
-import org.jboss.msc.service.ServiceController.Mode;
 import org.jboss.msc.value.InjectedValue;
 import org.jboss.ws.common.management.DefaultEndpointRegistry;
 import org.jboss.ws.common.management.ManagedEndpointRegistry;
@@ -53,8 +53,8 @@ public final class EndpointRegistryService implements Service<EndpointRegistry> 
     private static final ServiceName MBEAN_SERVER_NAME = ServiceName.JBOSS.append("mbean", "server");
     private static final EndpointRegistryService INSTANCE = new EndpointRegistryService();
 
-    private EndpointRegistry registry;
-    private InjectedValue<MBeanServer> injectedMBeanServer = new InjectedValue<MBeanServer>();
+    private volatile EndpointRegistry registry;
+    private final InjectedValue<MBeanServer> injectedMBeanServer = new InjectedValue<MBeanServer>();
 
     private EndpointRegistryService() {
         // forbidden inheritance

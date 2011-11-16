@@ -30,13 +30,18 @@ interface Constants {
     String ACCESS_LOG = "access-log";
     String ALIAS = "alias";
     String CA_CERTIFICATE_FILE = "ca-certificate-file";
+    String CA_CERTIFICATE_PASSWORD = "ca-certificate-password";
     String CA_REVOCATION_URL = "ca-revocation-url";
+    String CACHE_CONTAINER = "cache-container";
+    String CACHE_NAME = "cache-name";
     String CERTIFICATE_FILE = "certificate-file";
     String CERTIFICATE_KEY_FILE = "certificate-key-file";
     String CHECK_INTERVAL = "check-interval";
     String CIPHER_SUITE = "cipher-suite";
     String CONDITION = "condition";
+    String CONFIGURATION = "configuration";
     String CONNECTOR = "connector";
+    String CONTAINER = "container";
     String CONTAINER_CONFIG = "configuration";
     String DEFAULT_VIRTUAL_SERVER = "default-virtual-server";
     String DEFAULT_WEB_MODULE = "default-web-module";
@@ -44,6 +49,7 @@ interface Constants {
     String DIRECTORY = "directory";
     String DISABLED = "disabled";
     String DISPLAY_SOURCE_FRAGMENT = "display-source-fragment";
+    String DOMAIN = "domain";
     String DUMP_SMAP = "dump-smap";
     String ENABLED = "enabled";
     String ENABLE_LOOKUPS = "enable-lookups";
@@ -54,10 +60,12 @@ interface Constants {
     String FILE_ENCONDING = "file-encoding";
     String FLAGS = "flags";
     String GENERATE_STRINGS_AS_CHAR_ARRAYS = "generate-strings-as-char-arrays";
+    String INSTANCE_ID = "instance-id";
     String JAVA_ENCODING = "java-encoding";
     String JSP_CONFIGURATION = "jsp-configuration";
     String KEEP_GENERATED = "keep-generated";
     String KEY_ALIAS = "key-alias";
+    String KEYSTORE_TYPE = "keystore-type";
     String LISTINGS = "listings";
     String MAPPED_FILE = "mapped-file";
     String MAX_CONNECTIONS = "max-connections";
@@ -75,6 +83,7 @@ interface Constants {
     String PROTOCOL = "protocol";
     String PROXY_NAME = "proxy-name";
     String PROXY_PORT = "proxy-port";
+    String REAUTHENTICATE = "reauthenticate";
     String READ_ONLY = "read-only";
     String RECOMPILE_ON_FAIL = "recompile-on-fail";
     String REDIRECT_PORT = "redirect-port";
@@ -93,6 +102,7 @@ interface Constants {
     String SOCKET_BINDING = "socket-binding";
     String SOURCE_VM = "source-vm";
     String SSL = "ssl";
+    String SSO = "sso";
     String STATIC_RESOURCES = "static-resources";
     String SUBSTITUTION = "substitution";
     String SUBSYSTEM = "subsystem";
@@ -100,6 +110,7 @@ interface Constants {
     String TARGET_VM = "target-vm";
     String TEST = "test";
     String TRIM_SPACES = "trim-spaces";
+    String TRUSTSTORE_TYPE = "truststore-type";
     String VALUE = "value";
     String VERIFY_CLIENT = "verify-client";
     String VERIFY_DEPTH = "verify-depth";
@@ -107,5 +118,14 @@ interface Constants {
     String WEBDAV = "webdav";
     String WELCOME_FILE = "welcome-file";
     String X_POWERED_BY = "x-powered-by";
+
+    /* Connect stats attributes */
+    String BYTES_SENT = "bytesSent";
+    String BYTES_RECEIVED = "bytesReceived";
+    String PROCESSING_TIME = "processingTime";
+    String ERROR_COUNT = "errorCount";
+    String MAX_TIME = "maxTime";
+    String REQUEST_COUNT = "requestCount";
+
 
 }

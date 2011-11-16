@@ -22,6 +22,9 @@
 
 package org.jboss.as.connector.subsystems.datasources;
 
+import static org.jboss.as.connector.ConnectorLogger.DS_DEPLOYER_LOGGER;
+import static org.jboss.as.connector.ConnectorMessages.MESSAGES;
+
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.security.AccessController;
@@ -31,7 +34,6 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 
 import javax.resource.ResourceException;
 import javax.resource.spi.ManagedConnectionFactory;
@@ -57,6 +59,7 @@ import org.jboss.jca.common.api.validator.ValidateException;
 import org.jboss.jca.common.metadata.ds.DatasourcesImpl;
 import org.jboss.jca.common.metadata.ds.DriverImpl;
 import org.jboss.jca.core.api.management.ManagementRepository;
+import org.jboss.jca.core.connectionmanager.ConnectionManager;
 import org.jboss.jca.core.spi.mdr.NotFoundException;
 import org.jboss.jca.core.spi.transaction.TransactionIntegration;
 import org.jboss.jca.deployers.DeployersLogger;
@@ -81,10 +84,9 @@ import org.jboss.security.SubjectFactory;
  */
 public abstract class AbstractDataSourceService implements Service<DataSource> {
 
-    public static final Logger log = Logger.getLogger("org.jboss.as.connector.deployer.dsdeployer");
-
     public static final ServiceName SERVICE_NAME_BASE = ServiceName.JBOSS.append("data-source");
-    private final InjectedValue<TransactionIntegration> transactionIntegrationValue = new InjectedValue<TransactionIntegration>();
+    private static final DeployersLogger DEPLOYERS_LOGGER = Logger.getMessageLogger(DeployersLogger.class, AS7DataSourceDeployer.class.getName());
+    protected final InjectedValue<TransactionIntegration> transactionIntegrationValue = new InjectedValue<TransactionIntegration>();
     private final InjectedValue<Driver> driverValue = new InjectedValue<Driver>();
     private final InjectedValue<ManagementRepository> managementRepositoryValue = new InjectedValue<ManagementRepository>();
     private final InjectedValue<SubjectFactory> subjectFactory = new InjectedValue<SubjectFactory>();
@@ -92,6 +94,7 @@ public abstract class AbstractDataSourceService implements Service<DataSource> {
 
     private final String jndiName;
 
+    protected CommonDeployment deploymentMD;
     private javax.sql.DataSource sqlDataSource;
 
     protected AbstractDataSourceService(final String jndiName) {
@@ -102,20 +105,34 @@ public abstract class AbstractDataSourceService implements Service<DataSource> {
         try {
             final ServiceContainer container = startContext.getController().getServiceContainer();
 
-            CommonDeployment deploymentMD = getDeployer().deploy(container);
+            deploymentMD = getDeployer().deploy(container);
             if (deploymentMD.getCfs().length != 1) {
-                throw new StartException("unable to start the ds because it generate more than one cf");
+                throw MESSAGES.cannotStartDs();
             }
             sqlDataSource = (javax.sql.DataSource) deploymentMD.getCfs()[0];
-            log.debugf("Adding datasource: %s", deploymentMD.getCfJndiNames()[0]);
+            DS_DEPLOYER_LOGGER.debugf("Adding datasource: %s", deploymentMD.getCfJndiNames()[0]);
         } catch (Throwable t) {
-            throw new StartException("Error during the deployment of " + jndiName, t);
+            throw MESSAGES.deploymentError(t, jndiName);
         }
     }
 
-    protected abstract AS7DataSourceDeployer getDeployer();
+    protected abstract AS7DataSourceDeployer getDeployer() throws ValidateException ;
 
     public synchronized void stop(StopContext stopContext) {
+        if (deploymentMD != null) {
+
+            if (deploymentMD.getDataSources() != null && managementRepositoryValue.getValue() != null) {
+                for (org.jboss.jca.core.api.management.DataSource mgtDs : deploymentMD.getDataSources()) {
+                    managementRepositoryValue.getValue().getDataSources().remove(mgtDs);
+                }
+            }
+
+            if (deploymentMD.getConnectionManagers() != null) {
+                for (ConnectionManager cm : deploymentMD.getConnectionManagers()) {
+                    cm.shutdown();
+                }
+            }
+        }
 
         sqlDataSource = null;
     }
@@ -204,7 +221,7 @@ public abstract class AbstractDataSourceService implements Service<DataSource> {
         public CommonDeployment deploy(ServiceContainer serviceContainer) throws DeployException {
             try {
                 if (serviceContainer == null) {
-                    throw new DeployException("ServiceContainer not provided");
+                    throw new DeployException(MESSAGES.nullVar("ServiceContainer"));
                 }
                 this.serviceContainer = serviceContainer;
 
@@ -219,8 +236,9 @@ public abstract class AbstractDataSourceService implements Service<DataSource> {
                         String moduleName = installedDriver.getModuleName() != null ? installedDriver.getModuleName().getName()
                                 : null;
                         org.jboss.jca.common.api.metadata.ds.Driver driver = new DriverImpl(installedDriver.getDriverName(),
-                                installedDriver.getMajorVersion(), installedDriver.getMinorVersion(), moduleName,
-                                installedDriver.getDriverClassName(), installedDriver.getXaDataSourceClassName());
+                                installedDriver.getMajorVersion(), installedDriver.getMinorVersion(),
+                                moduleName, installedDriver.getDriverClassName(),
+                                installedDriver.getDataSourceClassName(), installedDriver.getXaDataSourceClassName());
                         drivers.put(driverName, driver);
                         dataSources = new DatasourcesImpl(Arrays.asList(dataSourceConfig), null, drivers);
                     }
@@ -232,7 +250,8 @@ public abstract class AbstractDataSourceService implements Service<DataSource> {
                                 : null;
                         org.jboss.jca.common.api.metadata.ds.Driver driver = new DriverImpl(installedDriver.getDriverName(),
                                 installedDriver.getMajorVersion(), installedDriver.getMinorVersion(), moduleName,
-                                installedDriver.getDriverClassName(), installedDriver.getXaDataSourceClassName());
+                                installedDriver.getDriverClassName(),
+                                installedDriver.getDataSourceClassName(), installedDriver.getXaDataSourceClassName());
                         drivers.put(driverName, driver);
                         dataSources = new DatasourcesImpl(null, Arrays.asList(xaDataSourceConfig), drivers);
                     }
@@ -242,9 +261,9 @@ public abstract class AbstractDataSourceService implements Service<DataSource> {
                         "uniqueJdbcLocalId", "uniqueJdbcXAId", dataSources, AbstractDataSourceService.class.getClassLoader());
                 return c;
             } catch (MalformedURLException e) {
-                throw new DeployException("unable to deploy", e);
+                throw MESSAGES.cannotDeploy(e);
             } catch (ValidateException e) {
-                throw new DeployException("unable to validate and deploy ds or xads", e);
+                throw MESSAGES.cannotDeployAndValidate(e);
             }
 
         }
@@ -289,7 +308,7 @@ public abstract class AbstractDataSourceService implements Service<DataSource> {
 
                 return o;
             } catch (Throwable t) {
-                throw new DeployException("Deployment " + className + " failed", t);
+                throw MESSAGES.deploymentFailed(t, className);
             }
         }
 
@@ -336,9 +355,9 @@ public abstract class AbstractDataSourceService implements Service<DataSource> {
 
             if (xaDataSourceConfig.getUrlDelimiter() != null) {
                 try {
-                    xaManagedConnectionFactory.setURLDelimiter(dataSourceConfig.getUrlDelimiter());
+                    xaManagedConnectionFactory.setURLDelimiter(xaDataSourceConfig.getUrlDelimiter());
                 } catch (ResourceException e) {
-                    throw new DeployException("failed to get url delimiter", e);
+                    throw MESSAGES.failedToGetUrlDelimiter(e);
                 }
             }
             if (xaDataSourceConfig.getXaDataSourceClass() != null) {
@@ -365,6 +384,7 @@ public abstract class AbstractDataSourceService implements Service<DataSource> {
             }
 
             setMcfProperties(xaManagedConnectionFactory, xaDataSourceConfig, xaDataSourceConfig.getStatement());
+            xaManagedConnectionFactory.setUserTransactionJndiName("java:comp/UserTransaction");
             return xaManagedConnectionFactory;
 
         }
@@ -375,6 +395,9 @@ public abstract class AbstractDataSourceService implements Service<DataSource> {
             final LocalManagedConnectionFactory managedConnectionFactory = new LocalManagedConnectionFactory();
             managedConnectionFactory.setUserTransactionJndiName("java:comp/UserTransaction");
             managedConnectionFactory.setDriverClass(dataSourceConfig.getDriverClass());
+            if (dataSourceConfig.getDataSourceClass() != null) {
+                managedConnectionFactory.setDataSourceClass(dataSourceConfig.getDataSourceClass());
+            }
 
             if (dataSourceConfig.getConnectionProperties() != null) {
                 managedConnectionFactory.setConnectionProperties(buildConfigPropsString(dataSourceConfig
@@ -483,11 +506,13 @@ public abstract class AbstractDataSourceService implements Service<DataSource> {
         @Override
         protected String buildJndiName(String rawJndiName, Boolean javaContext) {
             final String jndiName;
-            if (!rawJndiName.startsWith("java:")) {
+            if (!rawJndiName.startsWith("java:") && javaContext) {
                 if (rawJndiName.startsWith("jboss/")) {
-                    jndiName = "java:/" + rawJndiName;
-                } else {
+                    // Bind to java:jboss/ namespace
                     jndiName = "java:" + rawJndiName;
+                } else {
+                    // Bind to java:/ namespace
+                    jndiName= "java:/" + rawJndiName;
                 }
             } else {
                 jndiName = rawJndiName;
@@ -497,8 +522,7 @@ public abstract class AbstractDataSourceService implements Service<DataSource> {
 
         @Override
         protected DeployersLogger getLogger() {
-
-            return Logger.getMessageLogger(DeployersLogger.class, AS7DataSourceDeployer.class.getName());
+            return DEPLOYERS_LOGGER;
         }
 
     }

@@ -22,23 +22,25 @@
 
 package org.jboss.as.ejb3.component.session;
 
+import java.lang.reflect.Method;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+
+import javax.ejb.LockType;
+
 import org.jboss.as.ee.component.ComponentConfiguration;
 import org.jboss.as.ejb3.PrimitiveClassLoaderUtil;
 import org.jboss.as.ejb3.component.EJBBusinessMethod;
 import org.jboss.as.ejb3.component.EJBComponentCreateService;
+import org.jboss.as.ejb3.component.EJBViewDescription;
 import org.jboss.as.ejb3.component.MethodIntf;
-import org.jboss.as.ejb3.deployment.EjbJarConfiguration;
-import org.jboss.invocation.InterceptorFactory;
-import org.jboss.invocation.Interceptors;
+import org.jboss.as.ejb3.concurrency.AccessTimeoutDetails;
+import org.jboss.as.ejb3.deployment.ApplicationExceptions;
 import org.jboss.invocation.proxy.MethodIdentifier;
-
-import javax.ejb.AccessTimeout;
-import javax.ejb.LockType;
-import java.lang.reflect.Method;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.IdentityHashMap;
-import java.util.Map;
+import org.jboss.msc.service.ServiceName;
+import org.jboss.msc.value.InjectedValue;
 
 /**
  * User: jpai
@@ -46,22 +48,21 @@ import java.util.Map;
 public abstract class SessionBeanComponentCreateService extends EJBComponentCreateService {
 
     private final Map<String, LockType> beanLevelLockType;
-
     private final Map<EJBBusinessMethod, LockType> methodApplicableLockTypes;
+    private final Map<String, AccessTimeoutDetails> beanLevelAccessTimeout;
+    private final Map<EJBBusinessMethod, AccessTimeoutDetails> methodApplicableAccessTimeouts;
 
-    private final Map<String, AccessTimeout> beanLevelAccessTimeout;
+    private final InjectedValue<ExecutorService> asyncExecutorService = new InjectedValue<ExecutorService>();
 
-    private final Map<EJBBusinessMethod, AccessTimeout> methodApplicableAccessTimeouts;
-
-    private final Map<Method, InterceptorFactory> timeoutInterceptors;
-    private final Method timeoutMethod;
+    private final ServiceName ejbObjectview;
+    private final ServiceName ejbLocalObjectView;
 
     /**
      * Construct a new instance.
      *
      * @param componentConfiguration the component configuration
      */
-    public SessionBeanComponentCreateService(final ComponentConfiguration componentConfiguration, final EjbJarConfiguration ejbJarConfiguration) {
+    public SessionBeanComponentCreateService(final ComponentConfiguration componentConfiguration, final ApplicationExceptions ejbJarConfiguration) {
         super(componentConfiguration, ejbJarConfiguration);
 
         final SessionBeanComponentDescription sessionBeanComponentDescription = (SessionBeanComponentDescription) componentConfiguration.getComponentDescription();
@@ -81,38 +82,28 @@ public abstract class SessionBeanComponentCreateService extends EJBComponentCrea
 
         this.beanLevelAccessTimeout = sessionBeanComponentDescription.getBeanLevelAccessTimeout();
 
-        final Map<MethodIdentifier, AccessTimeout> methodAccessTimeouts = sessionBeanComponentDescription.getMethodApplicableAccessTimeouts();
+        final Map<MethodIdentifier, AccessTimeoutDetails> methodAccessTimeouts = sessionBeanComponentDescription.getMethodApplicableAccessTimeouts();
         if (methodAccessTimeouts == null) {
             this.methodApplicableAccessTimeouts = Collections.emptyMap();
         } else {
-            final Map<EJBBusinessMethod, AccessTimeout> accessTimeouts = new HashMap();
-            for (Map.Entry<MethodIdentifier, AccessTimeout> entry : methodAccessTimeouts.entrySet()) {
+            final Map<EJBBusinessMethod, AccessTimeoutDetails> accessTimeouts = new HashMap<EJBBusinessMethod, AccessTimeoutDetails>();
+            for (Map.Entry<MethodIdentifier, AccessTimeoutDetails> entry : methodAccessTimeouts.entrySet()) {
                 final MethodIdentifier ejbMethodDescription = entry.getKey();
                 final EJBBusinessMethod ejbMethod = this.getEJBBusinessMethod(ejbMethodDescription);
                 accessTimeouts.put(ejbMethod, entry.getValue());
             }
             this.methodApplicableAccessTimeouts = Collections.unmodifiableMap(accessTimeouts);
         }
-        if (sessionBeanComponentDescription.isTimerServiceApplicable()) {
-            Map<Method, InterceptorFactory> timeoutInterceptors = new IdentityHashMap<Method, InterceptorFactory>();
-            for (Method method : componentConfiguration.getDefinedComponentMethods()) {
-                timeoutInterceptors.put(method, Interceptors.getChainedInterceptorFactory(componentConfiguration.getAroundTimeoutInterceptors(method)));
-            }
-            this.timeoutInterceptors = timeoutInterceptors;
-        } else {
-            timeoutInterceptors = null;
-        }
-        this.timeoutMethod = sessionBeanComponentDescription.getTimeoutMethod();
 
-        if(this.timeoutMethod != null) {
-            processTxAttr(sessionBeanComponentDescription, MethodIntf.BEAN, this.timeoutMethod);
-        }
-        if(sessionBeanComponentDescription.getScheduleMethods() != null) {
-            for(Method method : sessionBeanComponentDescription.getScheduleMethods().keySet()) {
-            processTxAttr(sessionBeanComponentDescription, MethodIntf.BEAN, method);
+        if (sessionBeanComponentDescription.getScheduleMethods() != null) {
+            for (Method method : sessionBeanComponentDescription.getScheduleMethods().keySet()) {
+                processTxAttr(sessionBeanComponentDescription, MethodIntf.BEAN, method);
             }
         }
-
+        final EJBViewDescription local = sessionBeanComponentDescription.getEjbLocalView();
+        ejbLocalObjectView = local == null ? null : local.getServiceName();
+        final EJBViewDescription remote = sessionBeanComponentDescription.getEjbRemoteView();
+        ejbObjectview = remote == null ? null : remote.getServiceName();
     }
 
     public Map<String, LockType> getBeanLockType() {
@@ -123,11 +114,11 @@ public abstract class SessionBeanComponentCreateService extends EJBComponentCrea
         return this.methodApplicableLockTypes;
     }
 
-    public Map<EJBBusinessMethod, AccessTimeout> getMethodApplicableAccessTimeouts() {
+    public Map<EJBBusinessMethod, AccessTimeoutDetails> getMethodApplicableAccessTimeouts() {
         return this.methodApplicableAccessTimeouts;
     }
 
-    public Map<String, AccessTimeout> getBeanAccessTimeout() {
+    public Map<String, AccessTimeoutDetails> getBeanAccessTimeout() {
         return this.beanLevelAccessTimeout;
     }
 
@@ -150,11 +141,15 @@ public abstract class SessionBeanComponentCreateService extends EJBComponentCrea
         return new EJBBusinessMethod(methodName, paramTypes);
     }
 
-    public Map<Method, InterceptorFactory> getTimeoutInterceptors() {
-        return timeoutInterceptors;
+    public InjectedValue<ExecutorService> getAsyncExecutorService() {
+        return asyncExecutorService;
     }
 
-    public Method getTimeoutMethod() {
-        return timeoutMethod;
+    public ServiceName getEjbLocalObjectView() {
+        return ejbLocalObjectView;
+    }
+
+    public ServiceName getEjbObjectview() {
+        return ejbObjectview;
     }
 }

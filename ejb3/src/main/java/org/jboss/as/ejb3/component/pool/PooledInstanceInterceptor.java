@@ -21,38 +21,62 @@
  */
 package org.jboss.as.ejb3.component.pool;
 
+import java.rmi.RemoteException;
+
+import javax.ejb.ConcurrentAccessException;
+import javax.ejb.ConcurrentAccessTimeoutException;
+
 import org.jboss.as.ee.component.ComponentInstance;
-import org.jboss.as.ejb3.component.AbstractEJBInterceptor;
-import org.jboss.invocation.ImmediateInterceptorFactory;
+import org.jboss.as.ejb3.component.interceptors.AbstractEJBInterceptor;
+import org.jboss.as.ejb3.component.EJBComponent;
 import org.jboss.invocation.InterceptorContext;
-import org.jboss.invocation.InterceptorFactory;
 
 /**
  * @author <a href="mailto:cdewolf@redhat.com">Carlo de Wolf</a>
  */
 public class PooledInstanceInterceptor extends AbstractEJBInterceptor {
-    static final PooledInstanceInterceptor INSTANCE = new PooledInstanceInterceptor();
-    static final InterceptorFactory FACTORY = new ImmediateInterceptorFactory(INSTANCE);
+    public static final PooledInstanceInterceptor INSTANCE = new PooledInstanceInterceptor();
 
     private PooledInstanceInterceptor() {
 
     }
 
-    public static InterceptorFactory pooled() {
-        return FACTORY;
-    }
-
     @Override
     public Object processInvocation(InterceptorContext context) throws Exception {
-        PooledComponent<ComponentInstance> component = getComponent(context, PooledComponent.class);
+        PooledComponent<ComponentInstance> component = (PooledComponent<ComponentInstance>) getComponent(context, EJBComponent.class);
         ComponentInstance instance = component.getPool().get();
         context.putPrivateData(ComponentInstance.class, instance);
+        boolean discarded = false;
         try {
             return context.proceed();
-        }
-        finally {
+        } catch (Exception ex) {
+            final EJBComponent ejbComponent = (EJBComponent)component;
+            // Detect app exception
+            if (ejbComponent.getApplicationException(ex.getClass(), context.getMethod()) != null) {
+                // it's an application exception, just throw it back.
+                throw ex;
+            }
+            if(ex instanceof ConcurrentAccessTimeoutException || ex instanceof ConcurrentAccessException) {
+                throw ex;
+            }
+            if (ex instanceof RuntimeException || ex instanceof RemoteException) {
+                discarded = true;
+                component.getPool().discard(instance);
+            }
+            throw ex;
+        } catch (final Error e) {
+            discarded = true;
+            component.getPool().discard(instance);
+            throw e;
+        } catch (final Throwable t) {
+            discarded = true;
+            component.getPool().discard(instance);
+            throw new RuntimeException(t);
+        }  finally {
             context.putPrivateData(ComponentInstance.class, null);
-            component.getPool().release(instance);
+            if (!discarded) {
+                component.getPool().release(instance);
+            }
         }
     }
 }

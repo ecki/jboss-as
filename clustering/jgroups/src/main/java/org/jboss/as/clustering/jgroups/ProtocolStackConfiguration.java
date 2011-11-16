@@ -25,6 +25,8 @@ import java.util.List;
 
 import javax.management.MBeanServer;
 
+import org.jboss.as.server.ServerEnvironment;
+
 /**
  * Defines the configuration of a JGroups protocol stack.
  * @author Paul Ferraro
@@ -33,8 +35,6 @@ public interface ProtocolStackConfiguration {
 
     String getName();
 
-//    ServerEnvironment getEnvironment();
-
     ProtocolDefaults getDefaults();
 
     MBeanServer getMBeanServer();
@@ -42,4 +42,6 @@ public interface ProtocolStackConfiguration {
     TransportConfiguration getTransport();
 
     List<ProtocolConfiguration> getProtocols();
+
+    ServerEnvironment getEnvironment();
 }

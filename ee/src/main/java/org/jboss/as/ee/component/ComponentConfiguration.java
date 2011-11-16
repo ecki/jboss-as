@@ -22,10 +22,7 @@
 
 package org.jboss.as.ee.component;
 
-import org.jboss.as.ee.component.interceptors.OrderedItemContainer;
-import org.jboss.as.naming.ManagedReferenceFactory;
-import org.jboss.invocation.InterceptorFactory;
-import org.jboss.msc.service.Service;
+import static org.jboss.as.ee.EeMessages.MESSAGES;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -35,6 +32,12 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
+import org.jboss.as.ee.component.interceptors.OrderedItemContainer;
+import org.jboss.as.naming.ManagedReferenceFactory;
+import org.jboss.as.server.deployment.reflect.ClassIndex;
+import org.jboss.invocation.InterceptorFactory;
+import org.jboss.msc.service.Service;
 
 /**
  * The construction parameter set passed in to an abstract component.
@@ -50,7 +53,7 @@ public class ComponentConfiguration {
     private final ComponentDescription componentDescription;
 
     // Core component config
-    private final EEModuleClassConfiguration moduleClassConfiguration;
+    private final ClassIndex classIndex;
     private ComponentCreateServiceFactory componentCreateServiceFactory = ComponentCreateServiceFactory.BASIC;
 
     // Interceptor config
@@ -64,7 +67,7 @@ public class ComponentConfiguration {
     // Component instance management
     private ManagedReferenceFactory instanceFactory;
 
-    private final List<DependencyConfigurator<Service<Component>>> createDependencies = new ArrayList<DependencyConfigurator<Service<Component>>>();
+    private final List<DependencyConfigurator<? extends Service<Component>>> createDependencies = new ArrayList<DependencyConfigurator<? extends Service<Component>>>();
     private final List<DependencyConfigurator<ComponentStartService>> startDependencies = new ArrayList<DependencyConfigurator<ComponentStartService>>();
 
     // Views
@@ -72,9 +75,9 @@ public class ComponentConfiguration {
 
     private InterceptorFactory namespaceContextInterceptorFactory;
 
-    public ComponentConfiguration(final ComponentDescription componentDescription, final EEModuleClassConfiguration moduleClassConfiguration) {
+    public ComponentConfiguration(final ComponentDescription componentDescription, final ClassIndex classIndex) {
         this.componentDescription = componentDescription;
-        this.moduleClassConfiguration = moduleClassConfiguration;
+        this.classIndex = classIndex;
     }
 
     /**
@@ -92,7 +95,7 @@ public class ComponentConfiguration {
      * @return the component class
      */
     public Class<?> getComponentClass() {
-        return moduleClassConfiguration.getModuleClass();
+        return classIndex.getModuleClass();
     }
 
     /**
@@ -110,7 +113,7 @@ public class ComponentConfiguration {
      * @return the set of methods
      */
     public Set<Method> getDefinedComponentMethods() {
-        return moduleClassConfiguration.getClassMethods();
+        return classIndex.getClassMethods();
     }
 
     /**
@@ -153,7 +156,7 @@ public class ComponentConfiguration {
      * @param publicOnly If true then then interceptor is only added to public methods
      */
     public void addComponentInterceptor(InterceptorFactory factory, int priority, boolean publicOnly) {
-        for (Method method : moduleClassConfiguration.getClassMethods()) {
+        for (Method method : classIndex.getClassMethods()) {
             if (publicOnly && !Modifier.isPublic(method.getModifiers())) {
                 continue;
             }
@@ -208,7 +211,7 @@ public class ComponentConfiguration {
      * @param priority   The interceptors relative order
      */
     public void addTimeoutInterceptor(InterceptorFactory factory, int priority) {
-        for (Method method : moduleClassConfiguration.getClassMethods()) {
+        for (Method method : classIndex.getClassMethods()) {
             OrderedItemContainer<InterceptorFactory> interceptors = timeoutInterceptors.get(method);
             if (interceptors == null) {
                 timeoutInterceptors.put(method, interceptors = new OrderedItemContainer<InterceptorFactory>());
@@ -223,7 +226,7 @@ public class ComponentConfiguration {
      *
      * @return the create dependencies list
      */
-    public List<DependencyConfigurator<Service<Component>>> getCreateDependencies() {
+    public List<DependencyConfigurator<? extends Service<Component>>> getCreateDependencies() {
         return createDependencies;
     }
 
@@ -323,8 +326,8 @@ public class ComponentConfiguration {
         this.instanceFactory = instanceFactory;
     }
 
-    public EEModuleClassConfiguration getModuleClassConfiguration() {
-        return moduleClassConfiguration;
+    public ClassIndex getClassIndex() {
+        return classIndex;
     }
 
     /**
@@ -343,7 +346,7 @@ public class ComponentConfiguration {
      */
     public void setComponentCreateServiceFactory(final ComponentCreateServiceFactory componentCreateServiceFactory) {
         if (componentCreateServiceFactory == null) {
-            throw new IllegalArgumentException("componentCreateServiceFactory is null");
+            throw MESSAGES.nullVar("componentCreateServiceFactory");
         }
         this.componentCreateServiceFactory = componentCreateServiceFactory;
     }

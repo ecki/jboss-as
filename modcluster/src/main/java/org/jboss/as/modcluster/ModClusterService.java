@@ -21,13 +21,13 @@
  */
 package org.jboss.as.modcluster;
 
+import static org.jboss.as.modcluster.ModClusterLogger.ROOT_LOGGER;
+
 import java.net.InetSocketAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
 import java.util.Enumeration;
 import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -41,7 +41,6 @@ import org.jboss.as.network.SocketBinding;
 import org.jboss.as.network.SocketBindingManager;
 import org.jboss.as.web.WebServer;
 import org.jboss.dmr.ModelNode;
-import org.jboss.logging.Logger;
 import org.jboss.modcluster.catalina.CatalinaEventHandlerAdapter;
 import org.jboss.modcluster.config.ModClusterConfig;
 import org.jboss.modcluster.load.LoadBalanceFactorProvider;
@@ -73,11 +72,10 @@ import org.jboss.msc.value.InjectedValue;
  */
 class ModClusterService implements ModCluster, Service<ModCluster> {
 
-    private static final Logger log = Logger.getLogger("org.jboss.as.modcluster");
-
     static final ServiceName NAME = ServiceName.JBOSS.append("mod-cluster");
 
-    private ModelNode modelconf;
+    private final String unmaskedPassword;
+    private final ModelNode modelconf;
 
     private CatalinaEventHandlerAdapter adapter;
     private LoadBalanceFactorProvider load;
@@ -89,13 +87,15 @@ class ModClusterService implements ModCluster, Service<ModCluster> {
     /* Depending on configuration we use one of the other */
     private org.jboss.modcluster.ModClusterService service;
     private ModClusterConfig config;
-    public ModClusterService(ModelNode modelconf) {
+    public ModClusterService(final String unmaskedPassword, final ModelNode modelconf) {
+        this.unmaskedPassword = unmaskedPassword;
         this.modelconf = modelconf;
     }
 
     /** {@inheritDoc} */
+    @Override
     public synchronized void start(StartContext context) throws StartException {
-        log.debugf("Starting Mod_cluster Extension");
+        ROOT_LOGGER.debugf("Starting Mod_cluster Extension");
 
         config = new ModClusterConfig();
         // Set the configuration.
@@ -133,7 +133,7 @@ class ModClusterService implements ModCluster, Service<ModCluster> {
                 config.setAdvertiseGroupAddress(binding.getMulticastSocketAddress().getHostName());
                 config.setAdvertiseInterface(binding.getSocketAddress().getAddress().getHostAddress());
                 if (!defaultavert)
-                    log.error("Mod_cluster requires Advertise but Multicast interface is not available");
+                    ROOT_LOGGER.multicastInterfaceNotAvailable();
                 config.setAdvertise(true);
             }
         }
@@ -144,8 +144,8 @@ class ModClusterService implements ModCluster, Service<ModCluster> {
             if (ssl.has(CommonAttributes.KEY_ALIAS))
                 config.setSslKeyAlias(ssl.get(CommonAttributes.KEY_ALIAS).asString());
             if (ssl.has(CommonAttributes.PASSWORD)) {
-                config.setSslTrustStorePassword(ssl.get(CommonAttributes.PASSWORD).asString());
-                config.setSslKeyStorePassword(ssl.get(CommonAttributes.PASSWORD).asString());
+                config.setSslTrustStorePassword(unmaskedPassword);
+                config.setSslKeyStorePassword(unmaskedPassword);
             }
             if (ssl.has(CommonAttributes.CERTIFICATE_KEY_FILE))
                 config.setSslKeyStore(ssl.get(CommonAttributes.CERTIFICATE_KEY_FILE).asString());
@@ -176,38 +176,59 @@ class ModClusterService implements ModCluster, Service<ModCluster> {
             config.setStopContextTimeout(modelconf.get(CommonAttributes.SOCKET_TIMEOUT).asInt());
             config.setStopContextTimeoutUnit(TimeUnit.SECONDS);
         }
-        if (modelconf.hasDefined(CommonAttributes.SOCKET_TIMEOUT))
-            config.setSocketTimeout(modelconf.get(CommonAttributes.SOCKET_TIMEOUT).asInt());
+        if (modelconf.hasDefined(CommonAttributes.SOCKET_TIMEOUT)) {
+            // the default value is 20000 = 20 seconds.
+            config.setSocketTimeout(modelconf.get(CommonAttributes.SOCKET_TIMEOUT).asInt()*1000);
+        }
 
-        // Read the metrics configuration.
-        final ModelNode loadmetric = modelconf.get(CommonAttributes.LOAD_METRIC);
+        if (modelconf.hasDefined(CommonAttributes.STICKY_SESSION))
+            config.setStickySession(modelconf.get(CommonAttributes.STICKY_SESSION).asBoolean());
+        if (modelconf.hasDefined(CommonAttributes.STICKY_SESSION_REMOVE))
+            config.setStickySessionRemove(modelconf.get(CommonAttributes.STICKY_SESSION_REMOVE).asBoolean());
+        if (modelconf.hasDefined(CommonAttributes.STICKY_SESSION_FORCE))
+            config.setStickySessionForce(modelconf.get(CommonAttributes.STICKY_SESSION_FORCE).asBoolean());
+        if (modelconf.hasDefined(CommonAttributes.WORKER_TIMEOUT))
+            config.setWorkerTimeout(modelconf.get(CommonAttributes.WORKER_TIMEOUT).asInt());
+        if (modelconf.hasDefined(CommonAttributes.MAX_ATTEMPTS))
+            config.setMaxAttempts(modelconf.get(CommonAttributes.MAX_ATTEMPTS).asInt());
+        if (modelconf.hasDefined(CommonAttributes.FLUSH_PACKETS))
+            config.setFlushPackets(modelconf.get(CommonAttributes.FLUSH_PACKETS).asBoolean());
+        if (modelconf.hasDefined(CommonAttributes.FLUSH_WAIT))
+            config.setFlushWait(modelconf.get(CommonAttributes.FLUSH_WAIT).asInt());
+        if (modelconf.hasDefined(CommonAttributes.PING))
+            config.setPing(modelconf.get(CommonAttributes.PING).asInt());
+        if (modelconf.hasDefined(CommonAttributes.SMAX))
+            config.setSmax(modelconf.get(CommonAttributes.SMAX).asInt());
+        if (modelconf.hasDefined(CommonAttributes.TTL))
+            config.setTtl(modelconf.get(CommonAttributes.TTL).asInt());
+        if (modelconf.hasDefined(CommonAttributes.NODE_TIMEOUT))
+            config.setNodeTimeout(modelconf.get(CommonAttributes.NODE_TIMEOUT).asInt());
+        if (modelconf.hasDefined(CommonAttributes.BALANCER))
+            config.setBalancer(modelconf.get(CommonAttributes.BALANCER).asString());
+        if (modelconf.hasDefined(CommonAttributes.DOMAIN))
+            config.setLoadBalancingGroup(modelconf.get(CommonAttributes.DOMAIN).asString());
 
-        if (loadmetric.hasDefined(CommonAttributes.SIMPLE_LOAD_PROVIDER)) {
+        if (modelconf.hasDefined(CommonAttributes.SIMPLE_LOAD_PROVIDER)) {
             // TODO it seems we don't support that stuff.
             // LoadBalanceFactorProvider implementation, org.jboss.modcluster.load.impl.SimpleLoadBalanceFactorProvider.
-            final ModelNode node = loadmetric.get(CommonAttributes.SIMPLE_LOAD_PROVIDER);
+            final ModelNode node = modelconf.get(CommonAttributes.SIMPLE_LOAD_PROVIDER);
             SimpleLoadBalanceFactorProvider myload = new SimpleLoadBalanceFactorProvider();
             myload.setLoadBalanceFactor(node.get(CommonAttributes.FACTOR).asInt(1));
             load = myload;
         }
 
         Set<LoadMetric<LoadContext>> metrics = new HashSet<LoadMetric<LoadContext>>();
-        if (loadmetric.hasDefined(CommonAttributes.DYNAMIC_LOAD_PROVIDER)) {
-            final ModelNode node = loadmetric.get(CommonAttributes.DYNAMIC_LOAD_PROVIDER);
-            int decayFactor = node.get(CommonAttributes.DECAY).asInt(512);
-            int history = node.get(CommonAttributes.HISTORY).asInt(512);
+        if (modelconf.hasDefined(CommonAttributes.DYNAMIC_LOAD_PROVIDER)) {
+            final ModelNode node = modelconf.get(CommonAttributes.DYNAMIC_LOAD_PROVIDER);
+            int decayFactor = node.get(CommonAttributes.DECAY).asInt(DynamicLoadBalanceFactorProvider.DEFAULT_DECAY_FACTOR);
+            int history = node.get(CommonAttributes.HISTORY).asInt(DynamicLoadBalanceFactorProvider.DEFAULT_HISTORY);
             // We should have bunch of load-metric and/or custom-load-metric here.
             // TODO read the child nodes or what ....String nodes = node.
             if (node.hasDefined(CommonAttributes.LOAD_METRIC)) {
-                final ModelNode nodemetric = node.get(CommonAttributes.LOAD_METRIC);
-                final List<ModelNode> array = nodemetric.asList();
-                addLoadMetrics(metrics, array);
+                addLoadMetrics(metrics, node.get(CommonAttributes.LOAD_METRIC));
              }
             if (node.hasDefined(CommonAttributes.CUSTOM_LOAD_METRIC)) {
-                final ModelNode nodemetric = node.get(CommonAttributes.CUSTOM_LOAD_METRIC);
-                final List<ModelNode> array = nodemetric.asList();
-                addCustomLoadMetrics(metrics, array);
-
+                addLoadMetrics(metrics, node.get(CommonAttributes.CUSTOM_LOAD_METRIC));
             }
             if (!metrics.isEmpty()) {
                 DynamicLoadBalanceFactorProvider loader = new DynamicLoadBalanceFactorProvider(metrics);
@@ -219,7 +240,7 @@ class ModClusterService implements ModCluster, Service<ModCluster> {
 
         if (load == null) {
             // Use a default one...
-            log.info("Mod_cluster uses default load balancer provider");
+            ROOT_LOGGER.useDefaultLoadBalancer();
             SimpleLoadBalanceFactorProvider myload = new SimpleLoadBalanceFactorProvider();
             myload.setLoadBalanceFactor(1);
             load = myload;
@@ -229,20 +250,19 @@ class ModClusterService implements ModCluster, Service<ModCluster> {
         try {
             adapter.start();
         } catch (JMException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
+            ROOT_LOGGER.startFailure(e, "ModClusterService");
         }
     }
 
     /** {@inheritDoc} */
+    @Override
     public synchronized void stop(StopContext context) {
         // TODO need something...
         if (adapter != null)
             try {
                 adapter.stop();
             } catch (JMException e) {
-                // TODO Auto-generated catch block
-                e.printStackTrace();
+                ROOT_LOGGER.stopFailure(e, "ModClusterService");
             }
         adapter = null;
     }
@@ -256,88 +276,55 @@ class ModClusterService implements ModCluster, Service<ModCluster> {
         return Registry.getRegistry(null, null).getMBeanServer();
     }
 
-    private void addLoadMetrics(Set<LoadMetric<LoadContext>> metrics, List<ModelNode> array) {
-        Iterator<ModelNode> it= array.iterator();
-
-        while(it.hasNext()) {
-            final ModelNode node= (ModelNode)it.next();
-            int capacity = node.get(CommonAttributes.CAPACITY).asInt(512);
-            int weight = node.get(CommonAttributes.WEIGHT).asInt(9);
-            String type = node.get(CommonAttributes.TYPE).asString();
+    private void addLoadMetrics(Set<LoadMetric<LoadContext>> metrics, ModelNode nodes) {
+        for (ModelNode node: nodes.asList()) {
+            double capacity = node.get(CommonAttributes.CAPACITY).asDouble(LoadMetric.DEFAULT_CAPACITY);
+            int weight = node.get(CommonAttributes.WEIGHT).asInt(LoadMetric.DEFAULT_WEIGHT);
             Class<? extends LoadMetric> loadMetricClass = null;
-            LoadMetric<LoadContext> metric = null;
+            if (node.hasDefined(CommonAttributes.TYPE)) {
+                String type = node.get(CommonAttributes.TYPE).asString();
+                //  SourcedLoadMetric
+                if (type.equals("cpu"))
+                    loadMetricClass = AverageSystemLoadMetric.class;
+                if (type.equals("mem"))
+                    loadMetricClass = SystemMemoryUsageLoadMetric.class;
+                if (type.equals("heap"))
+                    loadMetricClass = HeapMemoryUsageLoadMetric.class;
 
-            //  SourcedLoadMetric
-            if (type.equals("cpu"))
-                loadMetricClass = AverageSystemLoadMetric.class;
-            if (type.equals("mem"))
-                loadMetricClass = SystemMemoryUsageLoadMetric.class;
+                // MBeanAttributeLoadMetric...
+                if (type.equals("sessions"))
+                    loadMetricClass = ActiveSessionsLoadMetric.class;
+                if (type.equals("receive-traffic"))
+                    loadMetricClass = ReceiveTrafficLoadMetric.class;
+                if (type.equals("send-traffic"))
+                    loadMetricClass = SendTrafficLoadMetric.class;
+                if (type.equals("requests"))
+                    loadMetricClass = RequestCountLoadMetric.class;
 
-            if (type.equals("heap"))
-                loadMetricClass = HeapMemoryUsageLoadMetric.class;
-
-            // MBeanAttributeLoadMetric...
-            if (type.equals("sessions"))
-                loadMetricClass = ActiveSessionsLoadMetric.class;
-            if (type.equals("receive-traffic"))
-                loadMetricClass = ReceiveTrafficLoadMetric.class;
-            if (type.equals("send-traffic"))
-                loadMetricClass = SendTrafficLoadMetric.class;
-            if (type.equals("requests"))
-                loadMetricClass = RequestCountLoadMetric.class;
-
-            // MBeanAttributeRatioLoadMetric
-            if (type.equals("connection-pool"))
-                loadMetricClass = ConnectionPoolUsageLoadMetric.class;
-            if (type.equals("busyness"))
-                loadMetricClass = BusyConnectorsLoadMetric.class;
-
-
-            if (loadMetricClass != null) {
+                // MBeanAttributeRatioLoadMetric
+                if (type.equals("connection-pool"))
+                    loadMetricClass = ConnectionPoolUsageLoadMetric.class;
+                if (type.equals("busyness"))
+                    loadMetricClass = BusyConnectorsLoadMetric.class;
+            } else {
+                String className = node.get(CommonAttributes.CLASS).asString();
                 try {
-                    metric = loadMetricClass.newInstance();
-                    metric.setCapacity(capacity);
-                    metric.setWeight(weight);
-                    metrics.add(metric);
-                } catch (InstantiationException e) {
-                    // TODO Auto-generated catch block
-                    e.printStackTrace();
-                } catch (IllegalAccessException e) {
-                    // TODO Auto-generated catch block
-                    e.printStackTrace();
+                    loadMetricClass = (Class<? extends LoadMetric>) this.getClass().getClassLoader().loadClass(className);
+                } catch (ClassNotFoundException e) {
+                    ROOT_LOGGER.errorAddingMetrics(e);
                 }
             }
-        }
-    }
 
-
-    private void addCustomLoadMetrics(Set<LoadMetric<LoadContext>> metrics, List<ModelNode> array) {
-        Iterator<ModelNode> it= array.iterator();
-        while(it.hasNext()) {
-            final ModelNode node= (ModelNode)it.next();
-            int capacity = node.get(CommonAttributes.CAPACITY).asInt(512);
-            int weight = node.get(CommonAttributes.WEIGHT).asInt(9);
-            String name = node.get(CommonAttributes.CLASS).asString();
-            Class<? extends LoadMetric> loadMetricClass = null;
-            LoadMetric<LoadContext> metric = null;
-            try {
-                loadMetricClass = (Class<? extends LoadMetric>) this.getClass().getClassLoader().loadClass(name);
-            } catch (ClassNotFoundException e1) {
-                // TODO Auto-generated catch block
-                e1.printStackTrace();
-            }
             if (loadMetricClass != null) {
                 try {
-                    metric = loadMetricClass.newInstance();
+                    LoadMetric<LoadContext> metric = loadMetricClass.newInstance();
                     metric.setCapacity(capacity);
                     metric.setWeight(weight);
                     metrics.add(metric);
                 } catch (InstantiationException e) {
-                    // TODO Auto-generated catch block
-                    e.printStackTrace();
+                    ROOT_LOGGER.errorAddingMetrics(e);
                 } catch (IllegalAccessException e) {
-                    // TODO Auto-generated catch block
-                    e.printStackTrace();
+                    ROOT_LOGGER.errorAddingMetrics(e);
                 }
             }
         }
@@ -373,5 +360,52 @@ class ModClusterService implements ModCluster, Service<ModCluster> {
     @Override
     public Map<InetSocketAddress, String> getProxyInfo() {
         return service.getProxyInfo();
+    }
+    @Override
+    public void refresh() {
+        service.refresh();
+    }
+    @Override
+    public void reset() {
+        service.reset();
+    }
+    @Override
+    public void enable() {
+        service.enable();
+    }
+    @Override
+    public void disable() {
+        service.disable();
+    }
+    @Override
+    public void stop(int waittime) {
+        service.stop(waittime, TimeUnit.SECONDS);
+    }
+    @Override
+    public boolean enableContext(String host, String context) {
+        return service.enableContext(host, context);
+    }
+
+    @Override
+    public boolean disableContext(String host, String context) {
+        return service.disableContext(host, context);
+    }
+
+    @Override
+    public boolean stopContext(String host, String context, int waittime) {
+        return service.stopContext(host, context, waittime, TimeUnit.SECONDS);
+    }
+    @Override
+    public void addProxy(String host, int port) {
+        service.addProxy(host, port);
+    }
+    @Override
+    public void removeProxy(String host, int port) {
+        service.removeProxy(host, port);
+    }
+
+    @Override
+    public Map<InetSocketAddress, String> getProxyConfiguration() {
+        return service.getProxyConfiguration();
     }
 }

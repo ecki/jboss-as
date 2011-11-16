@@ -23,7 +23,6 @@
 package org.jboss.as.demos.domain.host.runner;
 
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADD;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.CRITERIA;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.HOST;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.INTERFACE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.NAME;
@@ -41,7 +40,8 @@ import java.io.IOException;
 import java.net.InetAddress;
 
 import org.jboss.as.controller.client.ModelControllerClient;
-import org.jboss.as.protocol.old.StreamUtils;
+import org.jboss.as.demos.DemoAuthentication;
+import org.jboss.as.protocol.StreamUtils;
 import org.jboss.dmr.ModelNode;
 
 /**
@@ -51,7 +51,7 @@ import org.jboss.dmr.ModelNode;
  */
 public class ExampleRunner {
     public static void main(String[] args) throws Exception {
-        final ModelControllerClient client = ModelControllerClient.Factory.create(InetAddress.getByName("localhost"), 9999);
+        final ModelControllerClient client = ModelControllerClient.Factory.create(InetAddress.getByName("localhost"), 9999, DemoAuthentication.getCallbackHandler());
         try {
             new ExampleRunner().run(client);
         } finally {
@@ -112,7 +112,7 @@ public class ExampleRunner {
         operation.get(OP).set(ADD);
         operation.get(OP_ADDR).set(address);
         operation.get(NAME).set("new");
-        operation.get(CRITERIA).set("any-address");
+        operation.get("any-address").set(true);
 
         final ModelNode reversing = new ModelNode();
         reversing.get(OP).set("remove");

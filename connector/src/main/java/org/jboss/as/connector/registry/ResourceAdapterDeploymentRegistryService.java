@@ -24,11 +24,12 @@ package org.jboss.as.connector.registry;
 
 import org.jboss.as.connector.ConnectorServices;
 
-import org.jboss.logging.Logger;
 import org.jboss.msc.service.Service;
 import org.jboss.msc.service.StartContext;
 import org.jboss.msc.service.StartException;
 import org.jboss.msc.service.StopContext;
+
+import static org.jboss.as.connector.ConnectorLogger.DEPLOYMENT_CONNECTOR_REGISTRY_LOGGER;
 
 /**
  * The resource adapter deployment registry service
@@ -36,9 +37,7 @@ import org.jboss.msc.service.StopContext;
  */
 public final class ResourceAdapterDeploymentRegistryService implements Service<ResourceAdapterDeploymentRegistry> {
 
-    private static final Logger log = Logger.getLogger("org.jboss.as.deployment.connector.registry");
-
-    private ResourceAdapterDeploymentRegistry value;
+    private final ResourceAdapterDeploymentRegistry value;
 
     /**
      * Create an instance
@@ -54,7 +53,7 @@ public final class ResourceAdapterDeploymentRegistryService implements Service<R
 
     @Override
     public void start(StartContext context) throws StartException {
-        log.debugf("Starting sevice %s", ConnectorServices.RESOURCE_ADAPTER_REGISTRY_SERVICE);
+        DEPLOYMENT_CONNECTOR_REGISTRY_LOGGER.debugf("Starting sevice %s", ConnectorServices.RESOURCE_ADAPTER_REGISTRY_SERVICE);
     }
 
     /**
@@ -62,6 +61,6 @@ public final class ResourceAdapterDeploymentRegistryService implements Service<R
      */
     @Override
     public void stop(StopContext context) {
-        log.debugf("Stopping sevice %s", ConnectorServices.RESOURCE_ADAPTER_REGISTRY_SERVICE);
+        DEPLOYMENT_CONNECTOR_REGISTRY_LOGGER.debugf("Stopping sevice %s", ConnectorServices.RESOURCE_ADAPTER_REGISTRY_SERVICE);
     }
 }

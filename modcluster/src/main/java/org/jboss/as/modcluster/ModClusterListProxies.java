@@ -27,21 +27,18 @@ import java.util.Locale;
 import java.util.Map;
 
 import org.jboss.as.controller.OperationContext;
-import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.OperationFailedException;
+import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.descriptions.DescriptionProvider;
 import org.jboss.dmr.ModelNode;
-import org.jboss.logging.Logger;
 import org.jboss.msc.service.ServiceController;
+
+import static org.jboss.as.modcluster.ModClusterLogger.ROOT_LOGGER;
 
 // implements ModelQueryOperationHandler, DescriptionProvider
 public class ModClusterListProxies implements OperationStepHandler, DescriptionProvider{
 
-    private static final Logger log = Logger.getLogger("org.jboss.as.modcluster");
-
     static final ModClusterListProxies INSTANCE = new ModClusterListProxies();
-
-    // private final InjectedValue<ModCluster> modcluster = new InjectedValue<ModCluster>();
 
     @Override
     public ModelNode getModelDescription(Locale locale) {
@@ -53,11 +50,12 @@ public class ModClusterListProxies implements OperationStepHandler, DescriptionP
             throws OperationFailedException {
         if (context.getType() == OperationContext.Type.SERVER) {
             context.addStep(new OperationStepHandler() {
+                @Override
                 public void execute(OperationContext context, ModelNode operation) throws OperationFailedException {
                     ServiceController<?> controller = context.getServiceRegistry(false).getService(ModClusterService.NAME);
                     ModCluster modcluster = (ModCluster) controller.getValue();
                     Map<InetSocketAddress, String> map = modcluster.getProxyInfo();
-                    log.debugf("Mod_cluster ListProxies " + map);
+                    ROOT_LOGGER.debugf("Mod_cluster ListProxies %s", map);
                     if (!map.isEmpty()) {
                         final ModelNode result = new ModelNode();
                         Object[] addr = map.keySet().toArray();

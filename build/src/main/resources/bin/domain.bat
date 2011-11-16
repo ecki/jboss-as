@@ -25,6 +25,7 @@ if "x%JBOSS_HOME%" == "x" (
 )
 
 rem Read an optional configuration file.
+<<<<<<< HEAD
 if "x%DOMAIN_CONF%" == "x" (   
    set DOMAIN_CONF="%DIRNAME%domain.conf.bat"
 )
@@ -33,6 +34,21 @@ if exist "%DOMAIN_CONF%" (
    call "%DOMAIN_CONF%" %*
 ) else (
    echo Config file not found "%DOMAIN_CONF%".
+=======
+if "x%DOMAIN_CONF%" == "x" (
+   set "DOMAIN_CONF=%DIRNAME%domain.conf.bat"
+)
+if exist "%DOMAIN_CONF%" (
+   echo Calling "%DOMAIN_CONF%"
+   call "%DOMAIN_CONF%" %*
+) else (
+   echo Config file not found "%DOMAIN_CONF%"
+)
+
+pushd %DIRNAME%..
+if "x%JBOSS_HOME%" == "x" (
+  set "JBOSS_HOME=%CD%"
+>>>>>>> upstream/master
 )
 
 set DIRNAME=
@@ -68,6 +84,11 @@ rem Setup JBoss specific properties
 rem Setup the java endorsed dirs
 set JBOSS_ENDORSED_DIRS="%JBOSS_HOME%\lib\endorsed"
 
+rem Set default module root paths
+if "x%MODULEPATH%" == "x" (
+  set  "MODULEPATH=%JBOSS_HOME%\modules"
+)
+
 echo ===============================================================================
 echo.
 echo   JBoss Bootstrap Environment
@@ -82,19 +103,34 @@ echo ===========================================================================
 echo.
 
 :RESTART
+<<<<<<< HEAD
 "%JAVA%" %JAVA_OPTS% ^
  -Dorg.jboss.boot.log.file="%JBOSS_HOME%\domain\log\process-controller\boot.log" ^
  -Dlogging.configuration="file:%JBOSS_HOME%/domain/configuration/logging.properties" ^
     -jar "%RUNJAR%" ^
     -mp "%JBOSS_HOME%\modules" ^
     -logmodule org.jboss.logmanager ^
+=======
+"%JAVA%" %PROCESS_CONTROLLER_JAVA_OPTS% ^
+ "-Dorg.jboss.boot.log.file=%JBOSS_HOME%\domain\log\process-controller\boot.log" ^
+ "-Dlogging.configuration=file:%JBOSS_HOME%/domain/configuration/logging.properties" ^
+    -jar "%JBOSS_HOME%\jboss-modules.jar" ^
+    -mp "%MODULEPATH%" ^
+    -logmodule "org.jboss.logmanager" ^
+>>>>>>> upstream/master
      org.jboss.as.process-controller ^
     -jboss-home "%JBOSS_HOME%" ^
     -jvm "%JAVA%" ^
     -- ^
+<<<<<<< HEAD
     -Dorg.jboss.boot.log.file="%JBOSS_HOME%\domain\log\host-controller\boot.log" ^
     -Dlogging.configuration="file:%JBOSS_HOME%/domain/configuration/logging.properties" ^
     %JAVA_OPTS% ^
+=======
+    "-Dorg.jboss.boot.log.file=%JBOSS_HOME%\domain\log\host-controller\boot.log" ^
+    "-Dlogging.configuration=file:%JBOSS_HOME%/domain/configuration/logging.properties" ^
+    %HOST_CONTROLLER_JAVA_OPTS% ^
+>>>>>>> upstream/master
     -- ^
     -default-jvm "%JAVA%" ^
     %*

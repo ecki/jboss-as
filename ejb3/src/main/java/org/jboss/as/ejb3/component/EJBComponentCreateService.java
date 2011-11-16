@@ -22,25 +22,32 @@
 
 package org.jboss.as.ejb3.component;
 
-import org.jboss.as.ee.component.BasicComponentCreateService;
-import org.jboss.as.ee.component.ComponentConfiguration;
-import org.jboss.as.ee.component.ViewConfiguration;
-import org.jboss.as.ee.component.ViewDescription;
-import org.jboss.as.ejb3.deployment.EjbJarConfiguration;
-import org.jboss.as.ejb3.security.EJBSecurityMetaData;
-import org.jboss.as.server.deployment.DeploymentUnit;
-import org.jboss.invocation.proxy.MethodIdentifier;
-import org.jboss.msc.service.ServiceController;
-import org.jboss.msc.service.ServiceName;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.util.HashMap;
+import java.util.IdentityHashMap;
+import java.util.List;
+import java.util.Map;
 
 import javax.ejb.TimerService;
 import javax.ejb.TransactionAttributeType;
 import javax.ejb.TransactionManagementType;
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+
+import org.jboss.as.ee.component.BasicComponentCreateService;
+import org.jboss.as.ee.component.ComponentConfiguration;
+import org.jboss.as.ee.component.ViewConfiguration;
+import org.jboss.as.ee.component.ViewDescription;
+import org.jboss.as.ejb3.deployment.ApplicationExceptions;
+import org.jboss.as.ejb3.remote.EJBRemoteTransactionsRepository;
+import org.jboss.as.ejb3.security.EJBSecurityMetaData;
+import org.jboss.as.server.deployment.DeploymentUnit;
+import org.jboss.invocation.InterceptorFactory;
+import org.jboss.invocation.Interceptors;
+import org.jboss.invocation.proxy.MethodIdentifier;
+import org.jboss.msc.inject.Injector;
+import org.jboss.msc.service.ServiceController;
+import org.jboss.msc.service.ServiceName;
+import org.jboss.msc.value.InjectedValue;
 
 /**
  * @author Jaikiran Pai
@@ -51,7 +58,7 @@ public class EJBComponentCreateService extends BasicComponentCreateService {
 
     private final TransactionManagementType transactionManagementType;
 
-    private final EjbJarConfiguration ejbJarConfiguration;
+    private final ApplicationExceptions applicationExceptions;
 
     private final Map<String, ServiceName> viewServices;
 
@@ -59,16 +66,31 @@ public class EJBComponentCreateService extends BasicComponentCreateService {
 
     private final TimerService timerService;
 
+    private final Map<Method, InterceptorFactory> timeoutInterceptors;
+
+    private final Method timeoutMethod;
+
+    private final ServiceName ejbLocalHome;
+
+    private final ServiceName ejbHome;
+
+
+    private final String applicationName;
+    private final String earApplicationName;
+    private final String moduleName;
+    private final String distinctName;
+
+    private final InjectedValue<EJBRemoteTransactionsRepository> ejbRemoteTransactionsRepository = new InjectedValue<EJBRemoteTransactionsRepository>();
 
     /**
      * Construct a new instance.
      *
      * @param componentConfiguration the component configuration
      */
-    public EJBComponentCreateService(final ComponentConfiguration componentConfiguration, final EjbJarConfiguration ejbJarConfiguration) {
+    public EJBComponentCreateService(final ComponentConfiguration componentConfiguration, final ApplicationExceptions applicationExceptions) {
         super(componentConfiguration);
 
-        this.ejbJarConfiguration = ejbJarConfiguration;
+        this.applicationExceptions = applicationExceptions;
         final EJBComponentDescription ejbComponentDescription = (EJBComponentDescription) componentConfiguration.getComponentDescription();
         this.transactionManagementType = ejbComponentDescription.getTransactionManagementType();
 
@@ -83,20 +105,37 @@ public class EJBComponentCreateService extends BasicComponentCreateService {
         // Setup the security metadata for the bean
         this.securityMetaData = new EJBSecurityMetaData(componentConfiguration);
 
+        if (ejbComponentDescription.isTimerServiceApplicable()) {
+            Map<Method, InterceptorFactory> timeoutInterceptors = new IdentityHashMap<Method, InterceptorFactory>();
+            for (Method method : componentConfiguration.getDefinedComponentMethods()) {
+                timeoutInterceptors.put(method, Interceptors.getChainedInterceptorFactory(componentConfiguration.getAroundTimeoutInterceptors(method)));
+            }
+            this.timeoutInterceptors = timeoutInterceptors;
+        } else {
+            timeoutInterceptors = null;
+        }
+
         List<ViewConfiguration> views = componentConfiguration.getViews();
         if (views != null) {
             for (ViewConfiguration view : views) {
+                //TODO: Get rid of this crap, it should not be here
                 final EJBViewConfiguration ejbView = (EJBViewConfiguration) view;
-                final MethodIntf viewType = ejbView.getMethodIntf();
-                for (Method method : view.getProxyFactory().getCachedMethods()) {
-                    // TODO: proxy factory exposes non-public methods, is this a bug in the no-interface view?
-                    if (!Modifier.isPublic(method.getModifiers()))
-                        continue;
-                    final Method componentMethod = getComponentMethod(componentConfiguration, method.getName(), method.getParameterTypes());
-                    this.processTxAttr(ejbComponentDescription, viewType, componentMethod);
+                if (ejbView.getMethodIntf() == MethodIntf.LOCAL || ejbView.getMethodIntf() == MethodIntf.REMOTE) {
+                    final MethodIntf viewType = ejbView.getMethodIntf();
+                    for (Method method : view.getProxyFactory().getCachedMethods()) {
+                        // TODO: proxy factory exposes non-public methods, is this a bug in the no-interface view?
+                        if (!Modifier.isPublic(method.getModifiers()))
+                            continue;
+                        final Method componentMethod = getComponentMethod(componentConfiguration, method.getName(), method.getParameterTypes());
+                        if (componentMethod != null) {
+                            this.processTxAttr(ejbComponentDescription, viewType, componentMethod);
+                        }
+                    }
                 }
             }
         }
+
+        this.timeoutMethod = ejbComponentDescription.getTimeoutMethod();
 
         // FIXME: TODO: a temporary measure until EJBTHREE-2120 is fully resolved, let's create tx attribute map
         // for the component methods. Once the issue is resolved, we should get rid of this block and just rely on setting
@@ -111,13 +150,21 @@ public class EJBComponentCreateService extends BasicComponentCreateService {
             viewServices.put(view.getViewClassName(), view.getServiceName());
         }
         this.viewServices = viewServices;
+        EjbHomeViewDescription localHome = ejbComponentDescription.getEjbLocalHomeView();
+        this.ejbLocalHome = localHome == null ? null : ejbComponentDescription.getEjbLocalHomeView().getServiceName();
+        EjbHomeViewDescription home = ejbComponentDescription.getEjbHomeView();
+        this.ejbHome = home == null ? null : home.getServiceName();
+        this.applicationName = componentConfiguration.getApplicationName();
+        this.earApplicationName = componentConfiguration.getComponentDescription().getModuleDescription().getEarApplicationName();
+        this.moduleName = componentConfiguration.getModuleName();
+        this.distinctName = componentConfiguration.getComponentDescription().getModuleDescription().getDistinctName();
     }
 
     private static Method getComponentMethod(final ComponentConfiguration componentConfiguration, final String name, final Class<?>[] parameterTypes) {
         try {
             return componentConfiguration.getComponentClass().getMethod(name, parameterTypes);
         } catch (NoSuchMethodException e) {
-            throw new RuntimeException(e);
+            return null;
         }
     }
 
@@ -136,8 +183,8 @@ public class EJBComponentCreateService extends BasicComponentCreateService {
         return transactionManagementType;
     }
 
-    EjbJarConfiguration getEjbJarConfiguration() {
-        return this.ejbJarConfiguration;
+    ApplicationExceptions getApplicationExceptions() {
+        return this.applicationExceptions;
     }
 
     protected void processTxAttr(final EJBComponentDescription ejbComponentDescription, final MethodIntf methodIntf, final Method method) {
@@ -145,7 +192,6 @@ public class EJBComponentCreateService extends BasicComponentCreateService {
             // it's a BMT bean
             return;
         }
-
 
         String className = method.getDeclaringClass().getName();
         String methodName = method.getName();
@@ -171,7 +217,48 @@ public class EJBComponentCreateService extends BasicComponentCreateService {
         return this.securityMetaData;
     }
 
+    public Map<Method, InterceptorFactory> getTimeoutInterceptors() {
+        return timeoutInterceptors;
+    }
+
     public TimerService getTimerService() {
         return timerService;
+    }
+
+    public Method getTimeoutMethod() {
+        return timeoutMethod;
+    }
+
+    public ServiceName getEjbHome() {
+        return ejbHome;
+    }
+
+    public ServiceName getEjbLocalHome() {
+        return ejbLocalHome;
+    }
+
+    public String getApplicationName() {
+        return applicationName;
+    }
+
+    public String getEarApplicationName() {
+        return this.earApplicationName;
+    }
+
+    public String getDistinctName() {
+        return distinctName;
+    }
+
+    public String getModuleName() {
+        return moduleName;
+    }
+
+    public Injector<EJBRemoteTransactionsRepository> getEJBRemoteTransactionsRepositoryInjector() {
+        return this.ejbRemoteTransactionsRepository;
+    }
+
+    EJBRemoteTransactionsRepository getEJBRemoteTransactionsRepository() {
+        // remote tx repo is applicable only for remote views, hence the optionalValue
+        return this.ejbRemoteTransactionsRepository.getOptionalValue();
     }
 }

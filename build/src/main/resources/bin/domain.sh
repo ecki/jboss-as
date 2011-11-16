@@ -1,7 +1,7 @@
 #!/bin/sh
 
-DIRNAME=`dirname $0`
-PROGNAME=`basename $0`
+DIRNAME=`dirname "$0"`
+PROGNAME=`basename "$0"`
 GREP="grep"
 
 # Use the maximum available, or set MAX_FD != -1 to use that
@@ -61,7 +61,7 @@ fi
 # Setup JBOSS_HOME
 if [ "x$JBOSS_HOME" = "x" ]; then
     # get the full path (without any relative bits)
-    JBOSS_HOME=`cd $DIRNAME/..; pwd`
+    JBOSS_HOME=`cd "$DIRNAME/.."; pwd`
 fi
 export JBOSS_HOME
 
@@ -107,12 +107,17 @@ else
     JVM_OPTVERSION="-server $JVM_OPTVERSION"
 fi
 
+if [ "x$MODULEPATH" = "x" ]; then
+    MODULEPATH="$JBOSS_HOME/modules"
+fi
+
 # For Cygwin, switch paths to Windows format before running java
 if $cygwin; then
     JBOSS_HOME=`cygpath --path --windows "$JBOSS_HOME"`
     JAVA_HOME=`cygpath --path --windows "$JAVA_HOME"`
     JBOSS_CLASSPATH=`cygpath --path --windows "$JBOSS_CLASSPATH"`
     JBOSS_ENDORSED_DIRS=`cygpath --path --windows "$JBOSS_ENDORSED_DIRS"`
+    MODULEPATH=`cygpath --path --windows "$MODULEPATH"`
 fi
 
 # Display our environment
@@ -132,11 +137,11 @@ echo ""
 while true; do
    if [ "x$LAUNCH_JBOSS_IN_BACKGROUND" = "x" ]; then
       # Execute the JVM in the foreground
-      eval \"$JAVA\" $JAVA_OPTS \
+      eval \"$JAVA\" $PROCESS_CONTROLLER_JAVA_OPTS \
          \"-Dorg.jboss.boot.log.file=$JBOSS_HOME/domain/log/process-controller/boot.log\" \
          \"-Dlogging.configuration=file:$JBOSS_HOME/domain/configuration/logging.properties\" \
          -jar \"$JBOSS_HOME/jboss-modules.jar\" \
-         -mp \"$JBOSS_HOME/modules\" \
+         -mp \"${MODULEPATH}\" \
          -logmodule "org.jboss.logmanager" \
          org.jboss.as.process-controller \
          -jboss-home \"$JBOSS_HOME\" \
@@ -144,18 +149,18 @@ while true; do
          -- \
          \"-Dorg.jboss.boot.log.file=$JBOSS_HOME/domain/log/host-controller/boot.log\" \
          \"-Dlogging.configuration=file:$JBOSS_HOME/domain/configuration/logging.properties\" \
-         $JAVA_OPTS \
+         $HOST_CONTROLLER_JAVA_OPTS \
          -- \
          -default-jvm \"$JAVA\" \
          "$@"
       JBOSS_STATUS=$?
    else
       # Execute the JVM in the background
-      eval \"$JAVA\" $JAVA_OPTS \
+      eval \"$JAVA\" $PROCESS_CONTROLLER_JAVA_OPTS \
          \"-Dorg.jboss.boot.log.file=$JBOSS_HOME/domain/log/process-controller/boot.log\" \
          \"-Dlogging.configuration=file:$JBOSS_HOME/domain/configuration/logging.properties\" \
          -jar \"$JBOSS_HOME/jboss-modules.jar\" \
-         -mp \"$JBOSS_HOME/modules\" \
+         -mp \"${MODULEPATH}\" \
          -logmodule "org.jboss.logmanager" \
          org.jboss.as.process-controller \
          -jboss-home \"$JBOSS_HOME\" \
@@ -163,7 +168,7 @@ while true; do
          -- \
          \"-Dorg.jboss.boot.log.file=$JBOSS_HOME/domain/log/host-controller/boot.log\" \
          \"-Dlogging.configuration=file:$JBOSS_HOME/domain/configuration/logging.properties\" \
-         $JAVA_OPTS \
+         $HOST_CONTROLLER_JAVA_OPTS \
          -- \
          -default-jvm \"$JAVA\" \
          "$@" "&"
@@ -197,6 +202,9 @@ while true; do
             # Wait for a complete shudown
             wait $JBOSS_PID 2>/dev/null
       fi
+      if [ "x$JBOSS_PIDFILE" != "x" ]; then
+            grep "$JBOSS_PID" $JBOSS_PIDFILE && rm $JBOSS_PIDFILE
+      fi 
    fi
    exit $JBOSS_STATUS
 done

@@ -22,6 +22,12 @@
 
 package org.jboss.as.logging;
 
+import org.jboss.as.controller.AttributeDefinition;
+import org.jboss.dmr.ModelNode;
+import org.jboss.staxmapper.XMLExtendedStreamWriter;
+
+import javax.xml.stream.XMLStreamException;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -30,7 +36,7 @@ import java.util.Map;
  */
 public enum Element {
 
-    UNKNOWN(null),
+    UNKNOWN((String) null),
 
     ACCEPT(CommonAttributes.ACCEPT),
     ALL(CommonAttributes.ALL),
@@ -39,6 +45,7 @@ public enum Element {
     ASYNC_HANDLER(CommonAttributes.ASYNC_HANDLER),
     CHANGE_LEVEL(CommonAttributes.CHANGE_LEVEL),
     CONSOLE_HANDLER(CommonAttributes.CONSOLE_HANDLER),
+    CUSTOM_HANDLER(CommonAttributes.CUSTOM_HANDLER),
     DENY(CommonAttributes.DENY),
     ENCODING(CommonAttributes.ENCODING),
     FILE(CommonAttributes.FILE),
@@ -57,6 +64,7 @@ public enum Element {
     PATTERN_FORMATTER(CommonAttributes.PATTERN_FORMATTER),
     PERIODIC_ROTATING_FILE_HANDLER(CommonAttributes.PERIODIC_ROTATING_FILE_HANDLER),
     PROPERTIES(CommonAttributes.PROPERTIES),
+    PROPERTY(CommonAttributes.PROPERTY),
     QUEUE_LENGTH(CommonAttributes.QUEUE_LENGTH),
     REPLACE(CommonAttributes.REPLACE),
     ROOT_LOGGER(CommonAttributes.ROOT_LOGGER),
@@ -64,13 +72,19 @@ public enum Element {
     SIZE_ROTATING_FILE_HANDLER(CommonAttributes.SIZE_ROTATING_FILE_HANDLER),
     SUBHANDLERS(CommonAttributes.SUBHANDLERS),
     SUFFIX(CommonAttributes.SUFFIX),
-    TARGET(CommonAttributes.TARGET),
-    ;
+    TARGET(CommonAttributes.TARGET),;
 
     private final String name;
+    private final AttributeDefinition definition;
 
     Element(final String name) {
         this.name = name;
+        this.definition = null;
+    }
+
+    Element(final AttributeDefinition definition) {
+        this.name = definition.getXmlName();
+        this.definition = definition;
     }
 
     /**
@@ -80,6 +94,14 @@ public enum Element {
      */
     public String getLocalName() {
         return name;
+    }
+
+    public boolean hasDefinition() {
+        return definition != null;
+    }
+
+    public AttributeDefinition getDefinition() {
+        return definition;
     }
 
     private static final Map<String, Element> MAP;

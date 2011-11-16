@@ -21,12 +21,12 @@
  */
 package org.jboss.as.ejb3.component.stateful;
 
-import org.jboss.as.ejb3.component.AbstractEJBInterceptor;
+import org.jboss.as.ejb3.component.interceptors.AbstractEJBInterceptor;
+import org.jboss.ejb.client.SessionID;
 import org.jboss.invocation.InterceptorContext;
 import org.jboss.logging.Logger;
 
 import javax.ejb.NoSuchEJBException;
-import java.io.Serializable;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -37,9 +37,9 @@ import java.util.concurrent.atomic.AtomicReference;
 public class StatefulComponentInstanceDestroyInterceptor extends AbstractEJBInterceptor {
     private static final Logger log = Logger.getLogger(StatefulComponentInstanceDestroyInterceptor.class);
 
-    private final AtomicReference<Serializable> sessionIdReference;
+    private final AtomicReference<SessionID> sessionIdReference;
 
-    public StatefulComponentInstanceDestroyInterceptor(AtomicReference<Serializable> sessionIdReference) {
+    public StatefulComponentInstanceDestroyInterceptor(AtomicReference<SessionID> sessionIdReference) {
         this.sessionIdReference = sessionIdReference;
     }
 
@@ -47,7 +47,7 @@ public class StatefulComponentInstanceDestroyInterceptor extends AbstractEJBInte
     public Object processInvocation(InterceptorContext context) throws Exception {
         StatefulSessionComponent component = getComponent(context, StatefulSessionComponent.class);
         // TODO: this is a contract with the client interceptor
-        Serializable sessionId = this.sessionIdReference.get();
+        SessionID sessionId = this.sessionIdReference.get();
         if (sessionId == null) {
             throw new IllegalStateException("Session id hasn't been set for stateful component: " + component.getComponentName());
         }

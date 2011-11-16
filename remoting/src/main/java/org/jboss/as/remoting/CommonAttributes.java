@@ -27,7 +27,6 @@ package org.jboss.as.remoting;
  */
 interface CommonAttributes {
 
-    String ADD_CONNECTOR = "add-connector";
     String AUTHENTICATION_PROVIDER = "authentication-provider";
     String CONNECTOR = "connector";
     String FORWARD_SECRECY = "forward-secrecy";
@@ -35,7 +34,7 @@ interface CommonAttributes {
     String NO_ACTIVE = "no-active";
     String NO_ANONYMOUS = "no-anonymous";
     String NO_DICTIONARY = "no-dictionary";
-    String NO_PLAINTEXT = "no-plaintext";
+    String NO_PLAIN_TEXT = "no-plain-text";
     String PASS_CREDENTIALS = "pass-credentials";
     String POLICY = "policy";
     String PROPERTIES = "properties";
@@ -43,6 +42,8 @@ interface CommonAttributes {
     String QOP = "qop";
     String REUSE_SESSION= "reuse-session";
     String SASL = "sasl";
+    String SASL_POLICY = "sasl-policy";
+    String SECURITY = "security";
     String SERVER_AUTH = "server-auth";
     String SOCKET_BINDING = "socket-binding";
     String STRENGTH = "strength";

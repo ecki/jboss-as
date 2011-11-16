@@ -24,27 +24,19 @@ package org.jboss.as.domain.controller;
 
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADD;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.BOOT_TIME;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.DEFAULT_INTERFACE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.DEPLOYMENT;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.DESCRIBE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.EXTENSION;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.FIXED_PORT;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.HOST;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.INCLUDES;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.INTERFACE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.JVM;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.MULTICAST_ADDRESS;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.MULTICAST_PORT;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.NAMESPACES;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PATH;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PORT;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PORT_OFFSET;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PROCESS_TYPE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PROFILE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.REMOVE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SCHEMA_LOCATIONS;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SERVER_GROUP;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SOCKET_BINDING;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SOCKET_BINDING_GROUP;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SOCKET_BINDING_PORT_OFFSET;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SYSTEM_PROPERTY;
@@ -52,13 +44,17 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.VAL
 
 import java.util.EnumSet;
 
+import org.jboss.as.controller.CompositeOperationHandler;
 import org.jboss.as.controller.ExtensionContext;
 import org.jboss.as.controller.ExtensionContextImpl;
-import org.jboss.as.controller.CompositeOperationHandler;
 import org.jboss.as.controller.PathElement;
+import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
 import org.jboss.as.controller.descriptions.common.CommonProviders;
+import org.jboss.as.controller.operations.common.ExtensionAddHandler;
 import org.jboss.as.controller.operations.common.ExtensionRemoveHandler;
 import org.jboss.as.controller.operations.common.InterfaceAddHandler;
+import org.jboss.as.controller.operations.common.InterfaceCriteriaWriteHandler;
+import org.jboss.as.controller.operations.common.InterfaceLegacyCriteriaReadHandler;
 import org.jboss.as.controller.operations.common.JVMHandlers;
 import org.jboss.as.controller.operations.common.NamespaceAddHandler;
 import org.jboss.as.controller.operations.common.NamespaceRemoveHandler;
@@ -69,27 +65,20 @@ import org.jboss.as.controller.operations.common.SchemaLocationRemoveHandler;
 import org.jboss.as.controller.operations.common.SnapshotDeleteHandler;
 import org.jboss.as.controller.operations.common.SnapshotListHandler;
 import org.jboss.as.controller.operations.common.SnapshotTakeHandler;
-import org.jboss.as.controller.operations.common.SocketBindingAddHandler;
-import org.jboss.as.controller.operations.common.SocketBindingGroupIncludeAddHandler;
-import org.jboss.as.controller.operations.common.SocketBindingGroupIncludeRemoveHandler;
 import org.jboss.as.controller.operations.common.SocketBindingGroupRemoveHandler;
-import org.jboss.as.controller.operations.common.SocketBindingRemoveHandler;
 import org.jboss.as.controller.operations.common.SystemPropertyAddHandler;
 import org.jboss.as.controller.operations.common.SystemPropertyRemoveHandler;
 import org.jboss.as.controller.operations.common.SystemPropertyValueWriteAttributeHandler;
 import org.jboss.as.controller.operations.common.XmlMarshallingHandler;
 import org.jboss.as.controller.operations.global.GlobalOperationHandlers;
 import org.jboss.as.controller.operations.global.WriteAttributeHandlers;
-import org.jboss.as.controller.operations.global.WriteAttributeHandlers.InetAddressValidatingHandler;
 import org.jboss.as.controller.operations.global.WriteAttributeHandlers.IntRangeValidatingHandler;
-import org.jboss.as.controller.operations.global.WriteAttributeHandlers.ListValidatatingHandler;
 import org.jboss.as.controller.operations.global.WriteAttributeHandlers.ModelTypeValidatingHandler;
-import org.jboss.as.controller.operations.global.WriteAttributeHandlers.StringLengthValidatingHandler;
-import org.jboss.as.controller.operations.validation.StringLengthValidator;
 import org.jboss.as.controller.persistence.ExtensibleConfigurationPersister;
 import org.jboss.as.controller.registry.AttributeAccess.Storage;
 import org.jboss.as.controller.registry.ManagementResourceRegistration;
 import org.jboss.as.controller.registry.OperationEntry;
+import org.jboss.as.controller.resource.SocketBindingGroupResourceDefinition;
 import org.jboss.as.domain.controller.descriptions.DomainDescriptionProviders;
 import org.jboss.as.domain.controller.operations.ApplyRemoteMasterDomainModelHandler;
 import org.jboss.as.domain.controller.operations.ProcessTypeHandler;
@@ -112,8 +101,13 @@ import org.jboss.as.domain.controller.operations.deployment.ServerGroupDeploymen
 import org.jboss.as.domain.controller.operations.deployment.ServerGroupDeploymentRemoveHandler;
 import org.jboss.as.domain.controller.operations.deployment.ServerGroupDeploymentReplaceHandler;
 import org.jboss.as.domain.controller.operations.deployment.ServerGroupDeploymentUndeployHandler;
+import org.jboss.as.domain.controller.resource.SocketBindingResourceDefinition;
+import org.jboss.as.server.ServerEnvironment;
+import org.jboss.as.server.controller.descriptions.ServerDescriptionConstants;
 import org.jboss.as.server.deployment.repository.api.ContentRepository;
-import org.jboss.as.server.operations.ExtensionAddHandler;
+import org.jboss.as.server.operations.LaunchTypeHandler;
+import org.jboss.as.server.services.net.LocalDestinationOutboundSocketBindingResourceDefinition;
+import org.jboss.as.server.services.net.RemoteDestinationOutboundSocketBindingResourceDefinition;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.ModelType;
 
@@ -131,17 +125,7 @@ public class DomainModelUtil {
      * @param rootModel - the model to be updated.
      */
     public static void updateCoreModel(final ModelNode rootModel) {
-        rootModel.get(NAMESPACES).setEmptyList();
-        rootModel.get(SCHEMA_LOCATIONS).setEmptyList();
-        rootModel.get(EXTENSION);
-        rootModel.get(PATH);
-        rootModel.get(SYSTEM_PROPERTY);
-        rootModel.get(PROFILE);
-        rootModel.get(INTERFACE);
-        rootModel.get(SOCKET_BINDING_GROUP);
-        rootModel.get(DEPLOYMENT);
-        rootModel.get(SERVER_GROUP);
-        rootModel.get(HOST);
+        //
     }
 
     public static ExtensionContext initializeMasterDomainRegistry(final ManagementResourceRegistration root, final ExtensibleConfigurationPersister configurationPersister,
@@ -186,6 +170,7 @@ public class DomainModelUtil {
         root.registerOperationHandler(SnapshotTakeHandler.OPERATION_NAME, snapshotTake, snapshotTake, false);
 
         root.registerReadOnlyAttribute(PROCESS_TYPE, isMaster ? ProcessTypeHandler.MASTER : ProcessTypeHandler.SLAVE, Storage.RUNTIME);
+        root.registerReadOnlyAttribute(ServerDescriptionConstants.LAUNCH_TYPE, new LaunchTypeHandler(ServerEnvironment.LaunchType.DOMAIN), Storage.RUNTIME);
 
         root.registerOperationHandler(GlobalOperationHandlers.VALIDATE_ADDRESS_OPERATION_NAME, GlobalOperationHandlers.VALIDATE_ADDRESS, CommonProviders.VALIDATE_ADDRESS_PROVIDER, true);
 
@@ -199,6 +184,8 @@ public class DomainModelUtil {
         final ManagementResourceRegistration interfaces = root.registerSubModel(PathElement.pathElement(INTERFACE), CommonProviders.NAMED_INTERFACE_PROVIDER);
         interfaces.registerOperationHandler(ADD, InterfaceAddHandler.NAMED_INSTANCE, InterfaceAddHandler.NAMED_INSTANCE, false);
         interfaces.registerOperationHandler(REMOVE, InterfaceAddHandler.NAMED_INSTANCE, InterfaceAddHandler.NAMED_INSTANCE, false);
+        InterfaceCriteriaWriteHandler.register(interfaces);
+        interfaces.registerReadOnlyAttribute(ModelDescriptionConstants.CRITERIA, InterfaceLegacyCriteriaReadHandler.INSTANCE, Storage.CONFIGURATION);
 
         final ManagementResourceRegistration profile = root.registerSubModel(PathElement.pathElement(PROFILE), DomainDescriptionProviders.PROFILE);
         profile.registerOperationHandler(ADD, ProfileAddHandler.INSTANCE, ProfileAddHandler.INSTANCE, false);
@@ -209,28 +196,19 @@ public class DomainModelUtil {
         paths.registerOperationHandler(ADD, PathAddHandler.NAMED_INSTANCE, PathAddHandler.NAMED_INSTANCE, false);
         paths.registerOperationHandler(REMOVE, PathRemoveHandler.INSTANCE, PathRemoveHandler.INSTANCE, false);
 
-        final ManagementResourceRegistration socketBindingGroup = root.registerSubModel(PathElement.pathElement(SOCKET_BINDING_GROUP), DomainDescriptionProviders.SOCKET_BINDING_GROUP);
-        socketBindingGroup.registerOperationHandler(ADD, SocketBindingGroupAddHandler.INSTANCE, SocketBindingGroupAddHandler.INSTANCE, false);
-        socketBindingGroup.registerOperationHandler(REMOVE, SocketBindingGroupRemoveHandler.INSTANCE, SocketBindingGroupRemoveHandler.INSTANCE, false);
-        socketBindingGroup.registerReadWriteAttribute(PORT_OFFSET, null, new IntRangeValidatingHandler(0, 65535, true, true), Storage.CONFIGURATION);
-        socketBindingGroup.registerReadWriteAttribute(DEFAULT_INTERFACE, null, new StringLengthValidatingHandler(1, false, true), Storage.CONFIGURATION);
-        socketBindingGroup.registerReadWriteAttribute(INCLUDES, null, new ListValidatatingHandler(new StringLengthValidator(1, false), true, 0, Integer.MAX_VALUE), Storage.CONFIGURATION);
-        socketBindingGroup.registerOperationHandler(SocketBindingGroupIncludeAddHandler.OPERATION_NAME, SocketBindingGroupIncludeAddHandler.INSTANCE, SocketBindingGroupIncludeAddHandler.INSTANCE);
-        socketBindingGroup.registerOperationHandler(SocketBindingGroupIncludeRemoveHandler.OPERATION_NAME, SocketBindingGroupIncludeRemoveHandler.INSTANCE, SocketBindingGroupIncludeRemoveHandler.INSTANCE);
-        final ManagementResourceRegistration socketBindings = socketBindingGroup.registerSubModel(PathElement.pathElement(SOCKET_BINDING), DomainDescriptionProviders.SOCKET_BINDING);
-        socketBindings.registerOperationHandler(ADD, SocketBindingAddHandler.INSTANCE, SocketBindingAddHandler.INSTANCE, false);
-        socketBindings.registerOperationHandler(REMOVE, SocketBindingRemoveHandler.INSTANCE, SocketBindingRemoveHandler.INSTANCE, false);
-        socketBindings.registerReadWriteAttribute(INTERFACE, null, new StringLengthValidatingHandler(1, true, true), Storage.CONFIGURATION);
-        socketBindings.registerReadWriteAttribute(PORT, null, new IntRangeValidatingHandler(0, 65535, false, true), Storage.CONFIGURATION);
-        socketBindings.registerReadWriteAttribute(FIXED_PORT, null, new ModelTypeValidatingHandler(ModelType.BOOLEAN, true, true), Storage.CONFIGURATION);
-        socketBindings.registerReadWriteAttribute(MULTICAST_ADDRESS, null, new InetAddressValidatingHandler(true, true), Storage.CONFIGURATION);
-        socketBindings.registerReadWriteAttribute(MULTICAST_PORT, null, new IntRangeValidatingHandler(0, 65535, true, true), Storage.CONFIGURATION);
+        final ManagementResourceRegistration socketBindingGroup = root.registerSubModel(new SocketBindingGroupResourceDefinition(SocketBindingGroupAddHandler.INSTANCE, SocketBindingGroupRemoveHandler.INSTANCE, true));
+        socketBindingGroup.registerSubModel(SocketBindingResourceDefinition.INSTANCE);
+        // outbound-socket-binding (for remote destination)
+        socketBindingGroup.registerSubModel(RemoteDestinationOutboundSocketBindingResourceDefinition.INSTANCE);
+        // outbound-socket-binding (for local destination)
+        socketBindingGroup.registerSubModel(LocalDestinationOutboundSocketBindingResourceDefinition.INSTANCE);
+
 
         final ManagementResourceRegistration serverGroups = root.registerSubModel(PathElement.pathElement(SERVER_GROUP), DomainDescriptionProviders.SERVER_GROUP);
         serverGroups.registerOperationHandler(ADD, ServerGroupAddHandler.INSTANCE, ServerGroupAddHandler.INSTANCE, false);
         serverGroups.registerOperationHandler(REMOVE, ServerGroupRemoveHandler.INSTANCE, ServerGroupRemoveHandler.INSTANCE, false);
         serverGroups.registerReadWriteAttribute(SOCKET_BINDING_GROUP, null, WriteAttributeHandlers.WriteAttributeOperationHandler.INSTANCE, Storage.CONFIGURATION);
-        serverGroups.registerReadWriteAttribute(SOCKET_BINDING_PORT_OFFSET, null, new IntRangeValidatingHandler(1), Storage.CONFIGURATION);
+        serverGroups.registerReadWriteAttribute(SOCKET_BINDING_PORT_OFFSET, null, new IntRangeValidatingHandler(0), Storage.CONFIGURATION);
         final ManagementResourceRegistration groupVMs = serverGroups.registerSubModel(PathElement.pathElement(JVM), CommonProviders.JVM_PROVIDER);
         JVMHandlers.register(groupVMs);
         ServerGroupDeploymentReplaceHandler sgdrh = new ServerGroupDeploymentReplaceHandler(fileRepository);
@@ -258,13 +236,14 @@ public class DomainModelUtil {
 
         // Extensions
         final ManagementResourceRegistration extensions = root.registerSubModel(PathElement.pathElement(EXTENSION), CommonProviders.EXTENSION_PROVIDER);
-        final ExtensionContext extensionContext = new ExtensionContextImpl(profile, deployments, configurationPersister);
+        final ExtensionContext extensionContext = new ExtensionContextImpl(profile, deployments, configurationPersister,
+                isMaster ? ExtensionContext.ProcessType.MASTER_HOST_CONTROLLER : ExtensionContext.ProcessType.SLAVE_HOST_CONTROLLER);
         final ExtensionAddHandler addExtensionHandler = new ExtensionAddHandler(extensionContext);
         extensions.registerOperationHandler(ExtensionAddHandler.OPERATION_NAME, addExtensionHandler, addExtensionHandler, false);
         extensions.registerOperationHandler(ExtensionRemoveHandler.OPERATION_NAME, ExtensionRemoveHandler.INSTANCE, ExtensionRemoveHandler.INSTANCE, false);
 
         if(!isMaster) {
-            ApplyRemoteMasterDomainModelHandler armdmh = new ApplyRemoteMasterDomainModelHandler(extensionContext);
+            ApplyRemoteMasterDomainModelHandler armdmh = new ApplyRemoteMasterDomainModelHandler(extensionContext, fileRepository);
             root.registerOperationHandler(ApplyRemoteMasterDomainModelHandler.OPERATION_NAME, armdmh, armdmh, false, OperationEntry.EntryType.PRIVATE);
         } else {
             ReadMasterDomainModelHandler rmdmh = new ReadMasterDomainModelHandler(domainController, registry);

@@ -28,10 +28,9 @@
   <parent>
     <groupId>org.jboss.as</groupId>
     <artifactId>jboss-as-parent</artifactId>
-    <version>7.1.0.Alpha1-SNAPSHOT</version>
+    <version>7.1.0.Alpha2-SNAPSHOT</version>
   </parent>
 
-  <groupId>org.jboss.as</groupId>
   <artifactId>jboss-as-spec-api</artifactId>
   <name>JBoss Application Server: Exported Java EE Specification APIs</name>
   <description>Java EE Specification APIs exported by the Application Server</description>
@@ -55,7 +54,7 @@
     </dependency>
     <dependency>
       <groupId>org.jboss.spec.javax.faces</groupId>
-      <artifactId>jboss-jsf-api_2.0_spec</artifactId>
+      <artifactId>jboss-jsf-api_2.1_spec</artifactId>
     </dependency>
     <dependency>
       <groupId>org.jboss.spec.javax.interceptor</groupId>
@@ -125,6 +124,35 @@
       <groupId>javax.enterprise</groupId>
       <artifactId>cdi-api</artifactId>
     </dependency>
+    <dependency>
+      <groupId>org.osgi</groupId>
+      <artifactId>org.osgi.core</artifactId>
+    </dependency>
+    <dependency>
+       <groupId>org.osgi</groupId>
+       <artifactId>org.osgi.compendium</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>javax.mail</groupId>
+      <artifactId>mail</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.jboss.spec.javax.annotation</groupId>
+      <artifactId>jboss-annotations-api_1.1_spec</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>javax.validation</groupId>
+      <artifactId>validation-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.jboss.spec.javax.management.j2ee</groupId>
+      <artifactId>jboss-j2eemgmt-api_1.1_spec</artifactId>
+    </dependency>
   </dependencies>
+  
+  <!-- Modules -->
+  <modules>
+    <module>test</module>
+  </modules>
 
 </project>

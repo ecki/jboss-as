@@ -21,7 +21,10 @@
  */
 package org.jboss.as.cli.operation;
 
-import java.util.List;
+import java.util.Collection;
+
+import org.jboss.as.cli.CommandArgument;
+import org.jboss.as.cli.CommandContext;
 
 
 /**
@@ -31,11 +34,11 @@ import java.util.List;
  */
 public interface OperationCandidatesProvider {
 
-    List<String> getNodeNames(OperationRequestAddress prefix);
+    Collection<String> getNodeNames(CommandContext ctx, OperationRequestAddress prefix);
 
-    List<String> getNodeTypes(OperationRequestAddress prefix);
+    Collection<String> getNodeTypes(CommandContext ctx, OperationRequestAddress prefix);
 
-    List<String> getOperationNames(OperationRequestAddress prefix);
+    Collection<String> getOperationNames(CommandContext ctx, OperationRequestAddress prefix);
 
-    List<String> getPropertyNames(String operationName, OperationRequestAddress address);
+    Collection<CommandArgument> getProperties(CommandContext ctx, String operationName, OperationRequestAddress address);
 }

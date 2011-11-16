@@ -23,10 +23,11 @@ package org.jboss.as.cli.impl;
 
 import java.util.List;
 
+import org.jboss.as.cli.ArgumentValueConverter;
 import org.jboss.as.cli.CommandFormatException;
 import org.jboss.as.cli.CommandLineCompleter;
-import org.jboss.as.cli.ParsedArguments;
 import org.jboss.as.cli.handlers.CommandHandlerWithArguments;
+import org.jboss.as.cli.operation.ParsedCommandLine;
 
 /**
  *
@@ -35,17 +36,23 @@ import org.jboss.as.cli.handlers.CommandHandlerWithArguments;
 public class ArgumentWithValue extends ArgumentWithoutValue {
 
     private final CommandLineCompleter valueCompleter;
+    private final ArgumentValueConverter valueConverter;
 
     public ArgumentWithValue(CommandHandlerWithArguments handler, String fullName) {
         this(handler, fullName, null);
     }
 
     public ArgumentWithValue(CommandHandlerWithArguments handler, CommandLineCompleter valueCompleter, String fullName) {
-        this(handler, valueCompleter, fullName, null);
+        this(handler, valueCompleter, ArgumentValueConverter.DEFAULT, fullName, null);
+    }
+
+    public ArgumentWithValue(CommandHandlerWithArguments handler, CommandLineCompleter valueCompleter,
+            ArgumentValueConverter valueConverter, String fullName) {
+        this(handler, valueCompleter, valueConverter, fullName, null);
     }
 
     public ArgumentWithValue(CommandHandlerWithArguments handler, String fullName, String shortName) {
-        this(handler, null, fullName, shortName);
+        this(handler, null, ArgumentValueConverter.DEFAULT, fullName, shortName);
     }
 
     public ArgumentWithValue(CommandHandlerWithArguments handler, int index, String fullName) {
@@ -55,11 +62,14 @@ public class ArgumentWithValue extends ArgumentWithoutValue {
     public ArgumentWithValue(CommandHandlerWithArguments handler, CommandLineCompleter valueCompleter, int index, String fullName) {
         super(handler, index, fullName);
         this.valueCompleter = valueCompleter;
+        valueConverter = ArgumentValueConverter.DEFAULT;
     }
 
-    public ArgumentWithValue(CommandHandlerWithArguments handler, CommandLineCompleter valueCompleter, String fullName, String shortName) {
+    public ArgumentWithValue(CommandHandlerWithArguments handler, CommandLineCompleter valueCompleter,
+            ArgumentValueConverter valueConverter, String fullName, String shortName) {
         super(handler, fullName, shortName);
         this.valueCompleter = valueCompleter;
+        this.valueConverter = valueConverter;
     }
 
     public CommandLineCompleter getValueCompleter() {
@@ -70,20 +80,20 @@ public class ArgumentWithValue extends ArgumentWithoutValue {
      * @see org.jboss.as.cli.CommandArgument#getValue(org.jboss.as.cli.CommandContext)
      */
     @Override
-    public String getValue(ParsedArguments args, boolean required) throws CommandFormatException {
+    public String getValue(ParsedCommandLine args, boolean required) throws CommandFormatException {
 
         String value = null;
-        if(args.hasArguments()) {
+        if(args.hasProperties()) {
             if(index >= 0) {
-                List<String> others = args.getOtherArguments();
+                List<String> others = args.getOtherProperties();
                 if(others.size() > index) {
                     return others.get(index);
                 }
             }
 
-            value = args.getArgument(fullName);
+            value = args.getPropertyValue(fullName);
             if(value == null && shortName != null) {
-                value = args.getArgument(shortName);
+                value = args.getPropertyValue(shortName);
             }
         }
 
@@ -100,5 +110,30 @@ public class ArgumentWithValue extends ArgumentWithoutValue {
     @Override
     public boolean isValueRequired() {
         return true;
+    }
+
+    @Override
+    public boolean isValueComplete(ParsedCommandLine args) throws CommandFormatException {
+
+        if(!isPresent(args)) {
+            return false;
+        }
+
+        if (index >= 0 && index < args.getOtherProperties().size()) {
+            return true;
+        }
+
+        if(fullName.equals(args.getLastParsedPropertyName())) {
+            return false;
+        }
+
+        if(shortName != null && shortName.equals(args.getLastParsedPropertyName())) {
+            return false;
+        }
+        return true;
+    }
+
+    public ArgumentValueConverter getValueConverter() {
+        return valueConverter;
     }
 }

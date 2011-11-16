@@ -22,9 +22,16 @@
 
 package org.jboss.as.ejb3.deployment.processors;
 
+import java.util.List;
+
+import javax.interceptor.AroundTimeout;
+import javax.interceptor.InvocationContext;
+
 import org.jboss.as.ee.component.Attachments;
-import org.jboss.as.ee.component.EEApplicationClasses;
 import org.jboss.as.ee.component.EEModuleClassDescription;
+import org.jboss.as.ee.component.EEModuleDescription;
+import org.jboss.as.ee.component.interceptors.InterceptorClassDescription;
+import org.jboss.as.ee.metadata.MetadataCompleteMarker;
 import org.jboss.as.server.deployment.DeploymentPhaseContext;
 import org.jboss.as.server.deployment.DeploymentUnit;
 import org.jboss.as.server.deployment.DeploymentUnitProcessingException;
@@ -38,10 +45,6 @@ import org.jboss.jandex.DotName;
 import org.jboss.jandex.MethodInfo;
 import org.jboss.jandex.Type;
 
-import javax.interceptor.AroundTimeout;
-import javax.interceptor.InvocationContext;
-import java.util.List;
-
 /**
  * Deployment processor responsible for finding @AroundTimeout annotated methods in classes within a deployment.
  *
@@ -54,28 +57,35 @@ public class AroundTimeoutAnnotationParsingProcessor implements DeploymentUnitPr
 
     public void deploy(DeploymentPhaseContext phaseContext) throws DeploymentUnitProcessingException {
         final DeploymentUnit deploymentUnit = phaseContext.getDeploymentUnit();
-        final EEApplicationClasses applicationClasses = deploymentUnit.getAttachment(Attachments.EE_APPLICATION_CLASSES_DESCRIPTION);
+
+        if(MetadataCompleteMarker.isMetadataComplete(deploymentUnit)) {
+            return;
+        }
+
+        final EEModuleDescription eeModuleDescription = deploymentUnit.getAttachment(Attachments.EE_MODULE_DESCRIPTION);
         final CompositeIndex index = deploymentUnit.getAttachment(org.jboss.as.server.deployment.Attachments.COMPOSITE_ANNOTATION_INDEX);
 
         final List<AnnotationInstance> aroundInvokes = index.getAnnotations(AROUND_TIMEOUT_ANNOTATION_NAME);
         for (AnnotationInstance annotation : aroundInvokes) {
-            processAroundInvoke(annotation.target(), applicationClasses);
+            processAroundInvoke(annotation.target(), eeModuleDescription);
         }
     }
 
     public void undeploy(final DeploymentUnit context) {
     }
 
-    private void processAroundInvoke(final AnnotationTarget target, final EEApplicationClasses applicationClasses) {
+    private void processAroundInvoke(final AnnotationTarget target, final EEModuleDescription eeModuleDescription) {
         if (!(target instanceof MethodInfo)) {
             throw new IllegalArgumentException("@AroundTimeout is only valid on method targets.");
         }
         final MethodInfo methodInfo = MethodInfo.class.cast(target);
         final ClassInfo classInfo = methodInfo.declaringClass();
-        final EEModuleClassDescription classDescription = applicationClasses.getOrAddClassByName(classInfo.name().toString());
+        final EEModuleClassDescription classDescription = eeModuleDescription.addOrGetLocalClassDescription(classInfo.name().toString());
 
         validateArgumentType(classInfo, methodInfo);
-        classDescription.setAroundTimeoutMethod(MethodIdentifier.getIdentifier(Object.class, methodInfo.name(), InvocationContext.class));
+        final InterceptorClassDescription.Builder builder = InterceptorClassDescription.builder(classDescription.getInterceptorClassDescription());
+        builder.setAroundTimeout(MethodIdentifier.getIdentifier(Object.class, methodInfo.name(), InvocationContext.class));
+        classDescription.setInterceptorClassDescription(builder.build());
     }
 
     private void validateArgumentType(final ClassInfo classInfo, final MethodInfo methodInfo) {

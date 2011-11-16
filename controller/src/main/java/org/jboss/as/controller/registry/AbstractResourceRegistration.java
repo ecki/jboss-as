@@ -34,6 +34,8 @@ import org.jboss.as.controller.ProxyController;
 import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.PathAddress;
 import org.jboss.as.controller.PathElement;
+import org.jboss.as.controller.ResourceDefinition;
+import org.jboss.as.controller.SimpleResourceDefinition;
 import org.jboss.as.controller.descriptions.DescriptionProvider;
 import org.jboss.as.controller.registry.OperationEntry.EntryType;
 
@@ -54,12 +56,24 @@ abstract class AbstractResourceRegistration implements ManagementResourceRegistr
 
     /** {@inheritDoc} */
     @Override
-    public abstract ManagementResourceRegistration registerSubModel(final PathElement address, final DescriptionProvider descriptionProvider);
+    public final ManagementResourceRegistration registerSubModel(final PathElement address, final DescriptionProvider descriptionProvider) {
+        return registerSubModel(new SimpleResourceDefinition(address, descriptionProvider));
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public abstract ManagementResourceRegistration registerSubModel(final ResourceDefinition resourceDefinition);
 
     /** {@inheritDoc} */
     @Override
     public void registerOperationHandler(String operationName, OperationStepHandler handler, DescriptionProvider descriptionProvider) {
         registerOperationHandler(operationName, handler, descriptionProvider, false);
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public void registerOperationHandler(String operationName, OperationStepHandler handler, DescriptionProvider descriptionProvider, EnumSet<OperationEntry.Flag> flags) {
+        registerOperationHandler(operationName, handler, descriptionProvider, false, EntryType.PUBLIC, flags);
     }
 
     /** {@inheritDoc} */
@@ -84,28 +98,43 @@ abstract class AbstractResourceRegistration implements ManagementResourceRegistr
     @Override
     public abstract void unregisterProxyController(PathElement address);
 
-    /**
-     * Get a handler at a specific address.
-     *
-     * @param pathAddress the address
-     * @param operationName the operation name
-     * @return the operation handler, or {@code null} if none match
-     */
+    /** {@inheritDoc} */
     @Override
-    public final OperationStepHandler getOperationHandler(final PathAddress pathAddress, final String operationName) {
-        OperationStepHandler inheritable = getInheritableOperationHandler(operationName);
-        OperationStepHandler result =  getOperationHandler(pathAddress.iterator(), operationName, inheritable);
+    public final OperationEntry getOperationEntry(final PathAddress pathAddress, final String operationName) {
+        OperationEntry inheritable = getInheritableOperationEntry(operationName);
+        OperationEntry result =  getOperationEntry(pathAddress.iterator(), operationName, inheritable);
         NodeSubregistry ancestorSubregistry = parent;
         while (result == null && ancestorSubregistry != null) {
             AbstractResourceRegistration ancestor = ancestorSubregistry.getParent();
-            result = ancestor.getInheritableOperationHandler(operationName);
+            result = ancestor.getInheritableOperationEntry(operationName);
             ancestorSubregistry = ancestor.parent;
         }
         return result;
     }
 
-    abstract OperationStepHandler getOperationHandler(ListIterator<PathElement> iterator, String operationName, OperationStepHandler inherited);
-    abstract OperationStepHandler getInheritableOperationHandler(String operationName);
+    abstract OperationEntry getOperationEntry(ListIterator<PathElement> iterator, String operationName, OperationEntry inherited);
+    abstract OperationEntry getInheritableOperationEntry(String operationName);
+
+    /** {@inheritDoc} */
+    @Override
+    public final OperationStepHandler getOperationHandler(final PathAddress pathAddress, final String operationName) {
+        OperationEntry entry = getOperationEntry(pathAddress, operationName);
+        return entry == null ? null : entry.getOperationHandler();
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public DescriptionProvider getOperationDescription(final PathAddress address, final String operationName) {
+        OperationEntry entry = getOperationEntry(address, operationName);
+        return entry == null ? null : entry.getDescriptionProvider();
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public final Set<OperationEntry.Flag> getOperationFlags(final PathAddress pathAddress, final String operationName) {
+        OperationEntry entry = getOperationEntry(pathAddress, operationName);
+        return entry == null ? null : entry.getFlags();
+    }
 
     @Override
     public AttributeAccess getAttributeAccess(final PathAddress address, final String attributeName) {
@@ -129,47 +158,6 @@ abstract class AbstractResourceRegistration implements ManagementResourceRegistr
     }
 
     abstract void getOperationDescriptions(ListIterator<PathElement> iterator, Map<String, OperationEntry> providers, boolean inherited);
-
-    /** {@inheritDoc} */
-    @Override
-    public DescriptionProvider getOperationDescription(final PathAddress address, final String operationName) {
-        DescriptionProvider inheritable = getInheritableOperationDescription(operationName);
-        DescriptionProvider result = getOperationDescription(address.iterator(), operationName, inheritable);
-        NodeSubregistry ancestorSubregistry = parent;
-        while (result == null && ancestorSubregistry != null) {
-            AbstractResourceRegistration ancestor = ancestorSubregistry.getParent();
-            result = ancestor.getInheritableOperationDescription(operationName);
-            ancestorSubregistry = ancestor.parent;
-        }
-        return result;
-    }
-
-    abstract DescriptionProvider getOperationDescription(Iterator<PathElement> iterator, String operationName, DescriptionProvider inherited);
-    abstract DescriptionProvider getInheritableOperationDescription(String operationName);
-
-    /**
-     * Get a handler at a specific address.
-     *
-     * @param pathAddress the address
-     * @param operationName the operation name
-     * @return the operation handler, or {@code null} if none match
-     */
-    @Override
-    public final Set<OperationEntry.Flag> getOperationFlags(final PathAddress pathAddress, final String operationName) {
-        Set<OperationEntry.Flag> inheritable = getInheritableOperationFlags(operationName);
-        Set<OperationEntry.Flag> result =  getOperationFlags(pathAddress.iterator(), operationName, inheritable);
-        NodeSubregistry ancestorSubregistry = parent;
-        while (result == null && ancestorSubregistry != null) {
-            AbstractResourceRegistration ancestor = ancestorSubregistry.getParent();
-            result = ancestor.getInheritableOperationFlags(operationName);
-            ancestorSubregistry = ancestor.parent;
-        }
-        return result;
-    }
-
-    abstract Set<OperationEntry.Flag> getOperationFlags(ListIterator<PathElement> iterator, String operationName, Set<OperationEntry.Flag> inherited);
-
-    abstract Set<OperationEntry.Flag> getInheritableOperationFlags(String operationName);
 
     /** {@inheritDoc} */
     @Override
@@ -221,10 +209,6 @@ abstract class AbstractResourceRegistration implements ManagementResourceRegistr
     }
 
     abstract ManagementResourceRegistration getResourceRegistration(Iterator<PathElement> iterator);
-
-    final String getValueString()  {
-        return valueString;
-    }
 
     final String getLocationString() {
         if (parent == null) {

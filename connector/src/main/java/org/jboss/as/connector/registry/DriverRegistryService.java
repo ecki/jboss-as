@@ -24,11 +24,12 @@ package org.jboss.as.connector.registry;
 
 import org.jboss.as.connector.ConnectorServices;
 
-import org.jboss.logging.Logger;
 import org.jboss.msc.service.Service;
 import org.jboss.msc.service.StartContext;
 import org.jboss.msc.service.StartException;
 import org.jboss.msc.service.StopContext;
+
+import static org.jboss.as.connector.ConnectorLogger.DEPLOYMENT_CONNECTOR_REGISTRY_LOGGER;
 
 /**
  * The JDBC driver registry service
@@ -37,9 +38,7 @@ import org.jboss.msc.service.StopContext;
  */
 public final class DriverRegistryService implements Service<DriverRegistry> {
 
-    private static final Logger log = Logger.getLogger("org.jboss.as.deployment.connector.registry");
-
-    private DriverRegistry value;
+    private final DriverRegistry value;
 
     /**
      * Create an instance
@@ -55,11 +54,11 @@ public final class DriverRegistryService implements Service<DriverRegistry> {
 
     @Override
     public void start(StartContext context) throws StartException {
-        log.debugf("Starting sevice %s", ConnectorServices.JDBC_DRIVER_REGISTRY_SERVICE);
+        DEPLOYMENT_CONNECTOR_REGISTRY_LOGGER.debugf("Starting service %s", ConnectorServices.JDBC_DRIVER_REGISTRY_SERVICE);
     }
 
     @Override
     public void stop(StopContext context) {
-        log.debugf("Stopping sevice %s", ConnectorServices.JDBC_DRIVER_REGISTRY_SERVICE);
+        DEPLOYMENT_CONNECTOR_REGISTRY_LOGGER.debugf("Stopping service %s", ConnectorServices.JDBC_DRIVER_REGISTRY_SERVICE);
     }
 }

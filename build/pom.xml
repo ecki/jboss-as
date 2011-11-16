@@ -30,7 +30,7 @@
     <parent>
         <groupId>org.jboss.as</groupId>
         <artifactId>jboss-as-parent</artifactId>
-        <version>7.1.0.Alpha1-SNAPSHOT</version>
+        <version>7.1.0.Alpha2-SNAPSHOT</version>
     </parent>
 
     <artifactId>jboss-as-build</artifactId>
@@ -53,7 +53,7 @@
                         <phase>package</phase>
                         <configuration>
                             <target>
-                                <ant antfile="build.xml"  inheritRefs="true">
+                                <ant antfile="build.xml" inheritRefs="true">
                                     <target name="all"/>
                                 </ant>
                             </target>
@@ -65,6 +65,16 @@
                         <groupId>org.jboss</groupId>
                         <artifactId>jandex</artifactId>
                         <version>${version.org.jboss.jandex}</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>org.apache.ant</groupId>
+                        <artifactId>ant-apache-bsf</artifactId>
+                        <version>${version.org.apache.ant.bsf}</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>rhino</groupId>
+                        <artifactId>js</artifactId>
+                        <version>${version.rhino.js}</version>
                     </dependency>
                 </dependencies>
             </plugin>
@@ -204,6 +214,11 @@
         </dependency>
 
         <dependency>
+            <groupId>jaxen</groupId>
+            <artifactId>jaxen</artifactId>
+        </dependency>
+
+        <dependency>
             <groupId>jboss.jaxbintros</groupId>
             <artifactId>jboss-jaxb-intros</artifactId>
         </dependency>
@@ -216,6 +231,11 @@
         <dependency>
             <groupId>joda-time</groupId>
             <artifactId>joda-time</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>juddi</groupId>
+            <artifactId>juddi</artifactId>
         </dependency>
 
         <dependency>
@@ -442,7 +462,7 @@
             <groupId>org.apache.felix</groupId>
             <artifactId>org.apache.felix.scr</artifactId>
         </dependency>
-            
+
         <dependency>
             <groupId>org.apache.felix</groupId>
             <artifactId>org.apache.felix.webconsole</artifactId>
@@ -476,6 +496,11 @@
         <dependency>
             <groupId>org.apache.santuario</groupId>
             <artifactId>xmlsec</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.ws.scout</groupId>
+            <artifactId>scout</artifactId>
         </dependency>
 
         <dependency>
@@ -533,7 +558,7 @@
         </dependency>
 
         <dependency>
-            <groupId>org.hibernate</groupId>
+            <groupId>org.hibernate.common</groupId>
             <artifactId>hibernate-commons-annotations</artifactId>
         </dependency>
 
@@ -550,6 +575,11 @@
         <dependency>
             <groupId>org.hibernate</groupId>
             <artifactId>hibernate-validator</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.hibernate</groupId>
+            <artifactId>hibernate-envers</artifactId>
         </dependency>
 
         <dependency>
@@ -604,42 +634,52 @@
 
         <dependency>
             <groupId>org.jboss.as</groupId>
+            <artifactId>jboss-as-appclient</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jboss.as</groupId>
             <artifactId>jboss-as-cli</artifactId>
         </dependency>
 
         <dependency>
-           <groupId>org.jboss.as</groupId>
-           <artifactId>jboss-as-clustering-api</artifactId>
+            <groupId>org.jboss.as</groupId>
+            <artifactId>jboss-as-clustering-api</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jboss.as</groupId>
+            <artifactId>jboss-as-clustering-common</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jboss.as</groupId>
+            <artifactId>jboss-as-clustering-impl</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jboss.as</groupId>
+            <artifactId>jboss-as-clustering-infinispan</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jboss.as</groupId>
+            <artifactId>jboss-as-clustering-jgroups</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jboss.as</groupId>
+            <artifactId>jboss-as-clustering-web-infinispan</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jboss.as</groupId>
+            <artifactId>jboss-as-clustering-web-spi</artifactId>
         </dependency>
 
         <dependency>
            <groupId>org.jboss.as</groupId>
-           <artifactId>jboss-as-clustering-common</artifactId>
-        </dependency>
-
-        <dependency>
-           <groupId>org.jboss.as</groupId>
-           <artifactId>jboss-as-clustering-impl</artifactId>
-        </dependency>
-
-        <dependency>
-           <groupId>org.jboss.as</groupId>
-           <artifactId>jboss-as-clustering-infinispan</artifactId>
-        </dependency>
-
-        <dependency>
-           <groupId>org.jboss.as</groupId>
-           <artifactId>jboss-as-clustering-jgroups</artifactId>
-        </dependency>
-
-        <dependency>
-           <groupId>org.jboss.as</groupId>
-           <artifactId>jboss-as-clustering-web-infinispan</artifactId>
-        </dependency>
-
-        <dependency>
-           <groupId>org.jboss.as</groupId>
-           <artifactId>jboss-as-clustering-web-spi</artifactId>
+           <artifactId>jboss-as-cmp</artifactId>
         </dependency>
 
         <dependency>
@@ -680,7 +720,7 @@
 
         <dependency>
             <groupId>org.jboss.as</groupId>
-            <artifactId>jboss-as-domain-http-api</artifactId>
+            <artifactId>jboss-as-domain-http-interface</artifactId>
         </dependency>
 
         <dependency>
@@ -691,6 +731,11 @@
         <dependency>
             <groupId>org.jboss.as</groupId>
             <artifactId>jboss-as-ee</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jboss.as</groupId>
+            <artifactId>jboss-as-ee-deployment</artifactId>
         </dependency>
 
         <dependency>
@@ -710,6 +755,11 @@
 
         <dependency>
             <groupId>org.jboss.as</groupId>
+            <artifactId>jboss-as-jdr</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jboss.as</groupId>
             <artifactId>jboss-as-jmx</artifactId>
         </dependency>
 
@@ -725,7 +775,17 @@
 
         <dependency>
             <groupId>org.jboss.as</groupId>
+            <artifactId>jboss-as-jaxr</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jboss.as</groupId>
             <artifactId>jboss-as-logging</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jboss.as</groupId>
+            <artifactId>jboss-as-mail</artifactId>
         </dependency>
 
         <dependency>
@@ -750,6 +810,16 @@
 
         <dependency>
             <groupId>org.jboss.as</groupId>
+            <artifactId>jboss-as-platform-mbean</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jboss.as</groupId>
+            <artifactId>jboss-as-pojo</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jboss.as</groupId>
             <artifactId>jboss-as-osgi-configadmin</artifactId>
         </dependency>
 
@@ -761,6 +831,11 @@
         <dependency>
             <groupId>org.jboss.as</groupId>
             <artifactId>jboss-as-security</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jboss.as</groupId>
+            <artifactId>jboss-as-sos</artifactId>
         </dependency>
 
         <dependency>
@@ -829,78 +904,13 @@
         </dependency>
 
         <dependency>
-            <groupId>org.jboss.ejb3</groupId>
-            <artifactId>jboss-ejb3-cache</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.jboss.ejb3</groupId>
-            <artifactId>jboss-ejb3-core-pool</artifactId>
+            <groupId>org.jboss</groupId>
+            <artifactId>jboss-ejb-client</artifactId>
         </dependency>
 
         <dependency>
             <groupId>org.jboss.ejb3</groupId>
             <artifactId>jboss-ejb3-ext-api</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.jboss.ejb3.concurrency</groupId>
-            <artifactId>jboss-ejb3-concurrency-impl</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.jboss.ejb3.concurrency</groupId>
-            <artifactId>jboss-ejb3-concurrency-spi</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.jboss.ejb3.context</groupId>
-            <artifactId>jboss-ejb3-context-base</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.jboss.ejb3.context</groupId>
-            <artifactId>jboss-ejb3-context-spi</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.jboss.ejb3.effigy</groupId>
-            <artifactId>jboss-ejb3-effigy-api</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.jboss.ejb3.effigy</groupId>
-            <artifactId>jboss-ejb3-effigy-common</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.jboss.ejb3.effigy</groupId>
-            <artifactId>jboss-ejb3-effigy-int2</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.jboss.ejb3.timerservice</groupId>
-            <artifactId>ejb31-calendar-expr-parser</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.jboss.ejb3.timerservice</groupId>
-            <artifactId>jboss-ejb3-timerservice-api</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.jboss.ejb3.timerservice</groupId>
-            <artifactId>jboss-ejb3-timerservice-mk2</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.jboss.ejb3.tx2</groupId>
-            <artifactId>jboss-ejb3-tx2-impl</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.jboss.ejb3.tx2</groupId>
-            <artifactId>jboss-ejb3-tx2-spi</artifactId>
         </dependency>
 
         <dependency>
@@ -924,8 +934,8 @@
         </dependency>
 
         <dependency>
-            <groupId>org.jboss.integration</groupId>
-            <artifactId>jboss-jca-spi</artifactId>
+            <groupId>org.jboss.as</groupId>
+            <artifactId>jboss-as-jpa-util</artifactId>
         </dependency>
 
         <dependency>
@@ -1004,6 +1014,21 @@
         </dependency>
 
         <dependency>
+            <groupId>org.jboss.jbossts</groupId>
+            <artifactId>jbosstxbridge</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jboss.jbossts</groupId>
+            <artifactId>jbossxts</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jboss.jbossts</groupId>
+            <artifactId>jbossxts-api</artifactId>
+        </dependency>
+
+        <dependency>
             <groupId>org.jboss.jsfunit</groupId>
             <artifactId>jboss-jsfunit-core</artifactId>
         </dependency>
@@ -1031,6 +1056,11 @@
         <dependency>
             <groupId>org.jboss.marshalling</groupId>
             <artifactId>jboss-marshalling-river</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jboss.metadata</groupId>
+            <artifactId>jboss-metadata-appclient</artifactId>
         </dependency>
 
         <dependency>
@@ -1090,7 +1120,7 @@
 
         <dependency>
             <groupId>org.jboss.osgi.http</groupId>
-            <artifactId>jboss-osgi-http</artifactId>
+            <artifactId>jbosgi-http</artifactId>
         </dependency>
 
         <dependency>
@@ -1214,6 +1244,11 @@
         </dependency>
 
         <dependency>
+            <groupId>org.jboss.security</groupId>
+            <artifactId>jbossxacml</artifactId>
+        </dependency>
+
+        <dependency>
             <groupId>org.jboss.shrinkwrap</groupId>
             <artifactId>shrinkwrap-api</artifactId>
         </dependency>
@@ -1255,7 +1290,7 @@
 
         <dependency>
             <groupId>org.jboss.spec.javax.faces</groupId>
-            <artifactId>jboss-jsf-api_2.0_spec</artifactId>
+            <artifactId>jboss-jsf-api_2.1_spec</artifactId>
         </dependency>
 
         <dependency>
@@ -1266,6 +1301,11 @@
         <dependency>
             <groupId>org.jboss.spec.javax.jms</groupId>
             <artifactId>jboss-jms-api_1.1_spec</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jboss.spec.javax.management.j2ee</groupId>
+            <artifactId>jboss-j2eemgmt-api_1.1_spec</artifactId>
         </dependency>
 
         <dependency>
@@ -1425,6 +1465,26 @@
         </dependency>
 
         <dependency>
+            <groupId>org.jboss.ws.native</groupId>
+            <artifactId>jbossws-native-core</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jboss.ws.native</groupId>
+            <artifactId>jbossws-native-factories</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jboss.ws.native</groupId>
+            <artifactId>jbossws-native-services</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jboss</groupId>
+            <artifactId>jbossxb</artifactId>
+        </dependency>
+
+        <dependency>
             <groupId>org.jboss.xnio</groupId>
             <artifactId>xnio-api</artifactId>
         </dependency>
@@ -1432,6 +1492,11 @@
         <dependency>
             <groupId>org.jboss.xnio</groupId>
             <artifactId>xnio-nio</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jdom</groupId>
+            <artifactId>jdom</artifactId>
         </dependency>
 
         <dependency>
@@ -1465,8 +1530,38 @@
         </dependency>
 
         <dependency>
+            <groupId>org.picketlink</groupId>
+            <artifactId>picketlink-fed</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.picketlink</groupId>
+            <artifactId>picketlink-bindings</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.picketlink</groupId>
+            <artifactId>picketlink-bindings-jboss</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.picketlink</groupId>
+            <artifactId>picketlink-trust-jbossws</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.projectodd.stilts</groupId>
+            <artifactId>stilts-stomplet-server-bundle</artifactId>
+        </dependency>
+
+        <dependency>
             <groupId>org.scannotation</groupId>
             <artifactId>scannotation</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.python</groupId>
+            <artifactId>jython-standalone</artifactId>
         </dependency>
 
         <dependency>
@@ -1509,6 +1604,10 @@
             <artifactId>xercesImpl</artifactId>
         </dependency>
 
+        <dependency>
+            <groupId>xom</groupId>
+            <artifactId>xom</artifactId>
+        </dependency>
     </dependencies>
 
     <profiles>
@@ -1533,8 +1632,12 @@
                                 </goals>
                                 <phase>package</phase>
                                 <configuration>
-                                    <licensesOutputDirectory>${project.build.directory}/jboss-as-${jboss.as.release.version}/docs/licenses</licensesOutputDirectory>
-                                    <licensesOutputFile>${project.build.directory}/jboss-as-${jboss.as.release.version}/docs/licenses/licenses.xml</licensesOutputFile>
+                                    <licensesOutputDirectory>
+                                        ${project.build.directory}/jboss-as-${jboss.as.release.version}/docs/licenses
+                                    </licensesOutputDirectory>
+                                    <licensesOutputFile>
+                                        ${project.build.directory}/jboss-as-${jboss.as.release.version}/docs/licenses/licenses.xml
+                                    </licensesOutputFile>
                                 </configuration>
                             </execution>
                         </executions>

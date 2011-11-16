@@ -23,26 +23,35 @@
 package org.jboss.as.messaging;
 
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADD;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SOCKET_BINDING;
 
-import java.util.ArrayList;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
 import org.hornetq.api.core.DiscoveryGroupConfiguration;
-import org.hornetq.core.config.BroadcastGroupConfiguration;
 import org.hornetq.core.config.Configuration;
 import org.jboss.as.controller.AbstractAddStepHandler;
-import org.jboss.as.controller.AttributeDefinition;
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
+import org.jboss.as.controller.PathAddress;
 import org.jboss.as.controller.ServiceVerificationHandler;
 import org.jboss.as.controller.descriptions.DescriptionProvider;
+import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
+import org.jboss.as.network.NetworkInterfaceBinding;
+import org.jboss.as.network.SocketBinding;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.Property;
 import org.jboss.msc.service.ServiceController;
+import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.service.ServiceRegistry;
+import org.jboss.msc.service.ServiceTarget;
+import org.jboss.msc.value.ImmediateValue;
 
 /**
  * Handler for adding a discovery group.
@@ -51,13 +60,13 @@ import org.jboss.msc.service.ServiceRegistry;
  */
 public class DiscoveryGroupAdd extends AbstractAddStepHandler implements DescriptionProvider {
 
+    private static final OperationValidator VALIDATOR = new OperationValidator.AttributeDefinitionOperationValidator(CommonAttributes.DISCOVERY_GROUP_ATTRIBUTES);
+
     /**
      * Create an "add" operation using the existing model
      */
     public static ModelNode getAddOperation(final ModelNode address, ModelNode subModel) {
-
         final ModelNode operation = org.jboss.as.controller.operations.common.Util.getOperation(ADD, address, subModel);
-
         return operation;
     }
 
@@ -68,23 +77,53 @@ public class DiscoveryGroupAdd extends AbstractAddStepHandler implements Descrip
 
     @Override
     protected void populateModel(ModelNode operation, ModelNode model) throws OperationFailedException {
-
         model.setEmptyObject();
-
-        for (final AttributeDefinition attributeDefinition : CommonAttributes.DISCOVERY_GROUP_ATTRIBUTES) {
-            attributeDefinition.validateAndSet(operation, model);
-        }
+        VALIDATOR.validateAndSet(operation, model);
     }
 
     @Override
     protected void performRuntime(OperationContext context, ModelNode operation, ModelNode model, ServiceVerificationHandler verificationHandler, List<ServiceController<?>> newControllers) throws OperationFailedException {
 
+        final PathAddress address = PathAddress.pathAddress(operation.require(OP_ADDR));
+        final String name = address.getLastElement().getValue();
         ServiceRegistry registry = context.getServiceRegistry(false);
-        ServiceController<?> hqService = registry.getService(MessagingServices.JBOSS_MESSAGING);
+        final ServiceName hqServiceName = MessagingServices.getHornetQServiceName(PathAddress.pathAddress(operation.get(ModelDescriptionConstants.OP_ADDR)));
+        ServiceController<?> hqService = registry.getService(hqServiceName);
         if (hqService != null) {
             context.reloadRequired();
+        } else {
+            final ServiceTarget target = context.getServiceTarget();
+            if(model.hasDefined(CommonAttributes.SOCKET_BINDING.getName())) {
+                final GroupBindingService bindingService = new GroupBindingService();
+                target.addService(GroupBindingService.getDiscoveryBaseServiceName(hqServiceName).append(name), bindingService)
+                        .addDependency(SocketBinding.JBOSS_BINDING_NAME.append(model.get(SOCKET_BINDING).asString()), SocketBinding.class, bindingService.getBindingRef())
+                        .install();
+            } else {
+
+                final ModelNode localAddrNode = CommonAttributes.LOCAL_BIND_ADDRESS.resolveModelAttribute(context, model);
+                final String localAddress = localAddrNode.isDefined() ? localAddrNode.asString() : null;
+                final String groupAddress = CommonAttributes.GROUP_ADDRESS.resolveModelAttribute(context, model).asString();
+                final int groupPort = CommonAttributes.GROUP_PORT.resolveModelAttribute(context, model).asInt();
+
+                try {
+
+                    final InetAddress inet = localAddress != null ? InetAddress.getByName(localAddress) : InetAddress.getLocalHost();
+                    final NetworkInterface intf = NetworkInterface.getByInetAddress(inet);
+                    final NetworkInterfaceBinding b = new NetworkInterfaceBinding(Collections.singleton(intf), inet);
+                    final InetAddress group = InetAddress.getByName(groupAddress);
+
+                    final SocketBinding socketBinding = new SocketBinding(name, -1, false, group, groupPort, b, null);
+
+                    final GroupBindingService bindingService = new GroupBindingService();
+                    target.addService(GroupBindingService.getDiscoveryBaseServiceName(hqServiceName).append(name), bindingService)
+                            .addInjectionValue(bindingService.getBindingRef(), new ImmediateValue<SocketBinding>(socketBinding))
+                            .install();
+
+                } catch (Exception e) {
+                    throw new OperationFailedException(new ModelNode().set(e.getLocalizedMessage()));
+                }
+            }
         }
-        // else MessagingSubsystemAdd will add a handler that calls addBroadcastGroupConfigs
     }
 
     @Override
@@ -92,7 +131,7 @@ public class DiscoveryGroupAdd extends AbstractAddStepHandler implements Descrip
         return MessagingDescriptions.getDiscoveryGroupAdd(locale);
     }
 
-    static void addDiscoveryGroupConfigs(final Configuration configuration, final ModelNode model)  throws OperationFailedException {
+    static void addDiscoveryGroupConfigs(final OperationContext context, final Configuration configuration, final ModelNode model)  throws OperationFailedException {
         if (model.hasDefined(CommonAttributes.DISCOVERY_GROUP)) {
             Map<String, DiscoveryGroupConfiguration> configs = configuration.getDiscoveryGroupConfigurations();
             if (configs == null) {
@@ -100,21 +139,29 @@ public class DiscoveryGroupAdd extends AbstractAddStepHandler implements Descrip
                 configuration.setDiscoveryGroupConfigurations(configs);
             }
             for (Property prop : model.get(CommonAttributes.DISCOVERY_GROUP).asPropertyList()) {
-                configs.put(prop.getName(), createDiscoveryGroupConfiguration(prop.getName(), prop.getValue()));
+                configs.put(prop.getName(), createDiscoveryGroupConfiguration(context, prop.getName(), prop.getValue()));
 
             }
         }
     }
 
-    static DiscoveryGroupConfiguration createDiscoveryGroupConfiguration(final String name, final ModelNode model) throws OperationFailedException {
+    static DiscoveryGroupConfiguration createDiscoveryGroupConfiguration(final OperationContext context, final String name, final ModelNode model) throws OperationFailedException {
 
-        final ModelNode localAddrNode = CommonAttributes.LOCAL_BIND_ADDRESS.validateResolvedOperation(model);
-        final String localAddress = localAddrNode.isDefined() ? localAddrNode.asString() : null;
-        final String groupAddress = CommonAttributes.GROUP_ADDRESS.validateResolvedOperation(model).asString();
-        final int groupPort = CommonAttributes.GROUP_ADDRESS.validateResolvedOperation(model).asInt();
-        final long refreshTimeout = CommonAttributes.REFRESH_TIMEOUT.validateResolvedOperation(model).asLong();
-        final long initialWaitTimeout = CommonAttributes.INITIAL_WAIT_TIMEOUT.validateResolvedOperation(model).asLong();
+        final long refreshTimeout = CommonAttributes.REFRESH_TIMEOUT.resolveModelAttribute(context, model).asLong();
+        final long initialWaitTimeout = CommonAttributes.INITIAL_WAIT_TIMEOUT.resolveModelAttribute(context, model).asLong();
+        // Requires runtime service
+        return new DiscoveryGroupConfiguration(name, null, null, 0, refreshTimeout, initialWaitTimeout);
+    }
+
+    static DiscoveryGroupConfiguration createDiscoveryGroupConfiguration(final String name, final DiscoveryGroupConfiguration config, final SocketBinding socketBinding) {
+
+        final String localAddress = socketBinding.getAddress().getHostAddress();
+        final String groupAddress = socketBinding.getMulticastAddress().getHostAddress();
+        final int groupPort = socketBinding.getMulticastPort();
+        final long refreshTimeout = config.getRefreshTimeout();
+        final long initialWaitTimeout = config.getDiscoveryInitialWaitTimeout();
 
         return new DiscoveryGroupConfiguration(name, localAddress, groupAddress, groupPort, refreshTimeout, initialWaitTimeout);
     }
+
 }

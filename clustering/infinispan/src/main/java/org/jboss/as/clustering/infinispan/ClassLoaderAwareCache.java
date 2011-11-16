@@ -27,6 +27,7 @@ import java.lang.ref.WeakReference;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.security.AccessController;
+import java.security.PrivilegedAction;
 import java.util.EnumMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -35,6 +36,7 @@ import java.util.Map;
 import org.infinispan.AbstractDelegatingAdvancedCache;
 import org.infinispan.AdvancedCache;
 import org.infinispan.commands.VisitableCommand;
+import org.infinispan.config.ConfigurationException;
 import org.infinispan.context.InvocationContext;
 import org.infinispan.interceptors.base.CommandInterceptor;
 import org.infinispan.notifications.Listener;
@@ -47,7 +49,6 @@ import org.infinispan.notifications.cachelistener.annotation.CacheEntryPassivate
 import org.infinispan.notifications.cachelistener.annotation.CacheEntryRemoved;
 import org.infinispan.notifications.cachelistener.annotation.CacheEntryVisited;
 import org.infinispan.notifications.cachelistener.event.Event;
-import org.jboss.util.loading.ContextClassLoaderSwitcher;
 
 /**
  * AdvancedCache decorator that gracefully handle TCCL switching for cache commands and events.
@@ -55,16 +56,28 @@ import org.jboss.util.loading.ContextClassLoaderSwitcher;
  */
 public class ClassLoaderAwareCache<K, V> extends AbstractDelegatingAdvancedCache<K, V> {
 
-    @SuppressWarnings("unchecked")
-    static final ContextClassLoaderSwitcher switcher = (ContextClassLoaderSwitcher) AccessController.doPrivileged(ContextClassLoaderSwitcher.INSTANTIATOR);
-
     final WeakReference<ClassLoader> classLoaderRef;
 
-    public ClassLoaderAwareCache(AdvancedCache<K, V> cache, ClassLoader loader) {
+    public ClassLoaderAwareCache(AdvancedCache<K, V> cache, ClassLoader classLoader) {
         super(cache);
-        this.classLoaderRef = new WeakReference<ClassLoader>(loader);
-        cache.removeInterceptor(ClassLoaderAwareCommandInterceptor.class);
-        cache.addInterceptor(new ClassLoaderAwareCommandInterceptor(this), 0);
+        this.classLoaderRef = new WeakReference<ClassLoader>(classLoader);
+        try {
+            cache.addInterceptor(new ClassLoaderAwareCommandInterceptor(this), 0);
+        } catch (ConfigurationException e) {
+            // This means the ClassLoaderAwareCommandInterceptor is already in the interceptor chain
+        }
+    }
+
+    @Override
+    public AdvancedCache<K, V> with(ClassLoader classLoader) {
+        // This ain't gonna work twice...
+        return this;
+    }
+
+    @Override
+    public void addInterceptor(CommandInterceptor interceptor, int position) {
+        // Don't let some other interceptor step in front of the ClassLoaderAwareCommandInterceptor
+        super.addInterceptor(interceptor, (position > 0) ? position : 1);
     }
 
     @Override
@@ -75,12 +88,6 @@ public class ClassLoaderAwareCache<K, V> extends AbstractDelegatingAdvancedCache
     @Override
     public AdvancedCache<K, V> getAdvancedCache() {
         return this;
-    }
-
-    @Override
-    public void stop() {
-        super.stop();
-        this.classLoaderRef.clear();
     }
 
     @Override
@@ -95,11 +102,17 @@ public class ClassLoaderAwareCache<K, V> extends AbstractDelegatingAdvancedCache
         }
         @Override
         protected Object handleDefault(InvocationContext ctx, VisitableCommand command) throws Throwable {
-            ContextClassLoaderSwitcher.SwitchContext context = switcher.getSwitchContext(this.cache.getClassLoader());
+            ClassLoader cacheLoader = this.cache.getClassLoader();
+            ClassLoader contextLoader = getContextClassLoader();
+            if (cacheLoader != null) {
+                setContextClassLoader(cacheLoader);
+            }
             try {
                 return super.handleDefault(ctx, command);
             } finally {
-                context.reset();
+                if (cacheLoader != null) {
+                    setContextClassLoader(contextLoader);
+                }
             }
         }
     }
@@ -152,7 +165,11 @@ public class ClassLoaderAwareCache<K, V> extends AbstractDelegatingAdvancedCache
         public <K, V> void event(Event<K, V> event) throws Throwable {
             List<Method> methods = this.methods.get(event.getType());
             if (methods != null) {
-                ContextClassLoaderSwitcher.SwitchContext context = switcher.getSwitchContext(this.cache.getClassLoader());
+                ClassLoader cacheLoader = this.cache.getClassLoader();
+                ClassLoader contextLoader = getContextClassLoader();
+                if (cacheLoader != null) {
+                    setContextClassLoader(cacheLoader);
+                }
                 try {
                     for (Method method : this.methods.get(event.getType())) {
                         try {
@@ -162,7 +179,9 @@ public class ClassLoaderAwareCache<K, V> extends AbstractDelegatingAdvancedCache
                         }
                     }
                 } finally {
-                    context.reset();
+                    if (cacheLoader != null) {
+                        setContextClassLoader(contextLoader);
+                    }
                 }
             }
         }
@@ -180,5 +199,26 @@ public class ClassLoaderAwareCache<K, V> extends AbstractDelegatingAdvancedCache
             }
             return this.listener.equals(object);
         }
+    }
+
+    static ClassLoader getContextClassLoader() {
+        PrivilegedAction<ClassLoader> action = new PrivilegedAction<ClassLoader>() {
+            @Override
+            public ClassLoader run() {
+                return Thread.currentThread().getContextClassLoader();
+            }
+        };
+        return AccessController.doPrivileged(action);
+    }
+
+    static void setContextClassLoader(final ClassLoader loader) {
+        PrivilegedAction<Void> action = new PrivilegedAction<Void>() {
+            @Override
+            public Void run() {
+                Thread.currentThread().setContextClassLoader(loader);
+                return null;
+            }
+        };
+        AccessController.doPrivileged(action);
     }
 }

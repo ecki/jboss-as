@@ -34,7 +34,7 @@ import org.jboss.as.controller.descriptions.DescriptionProvider;
 /**
  * {@link ImmutableManagementResourceRegistration} implementation that simply delegates to another
  * {@link ImmutableManagementResourceRegistration} (typically a mutable implementation of sub-interface
- * {@link ManagementResourceRegistration}.
+ * {@link ManagementResourceRegistration}).
  *
  * @author Brian Stansberry (c) 2011 Red Hat Inc.
  */
@@ -43,7 +43,7 @@ public class DelegatingImmutableManagementResourceRegistration implements Immuta
     private final ImmutableManagementResourceRegistration delegate;
 
     /**
-     * creates a new ImmutableManagementResourceRegistration.
+     * Creates a new ImmutableManagementResourceRegistration.
      *
      * @param delegate the delegate. Cannot be {@code null}
      */
@@ -59,6 +59,11 @@ public class DelegatingImmutableManagementResourceRegistration implements Immuta
     @Override
     public boolean isRemote() {
         return delegate.isRemote();
+    }
+
+    @Override
+    public OperationEntry getOperationEntry(PathAddress address, String operationName) {
+        return delegate.getOperationEntry(address, operationName);
     }
 
     @Override

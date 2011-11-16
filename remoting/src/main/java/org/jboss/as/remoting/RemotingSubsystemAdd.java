@@ -23,18 +23,13 @@
 package org.jboss.as.remoting;
 
 import static org.jboss.as.remoting.CommonAttributes.CONNECTOR;
-import static org.jboss.as.remoting.CommonAttributes.THREAD_POOL;
 
 import java.util.List;
-import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
 
 import org.jboss.as.controller.AbstractAddStepHandler;
 import org.jboss.as.controller.OperationContext;
-import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.ServiceVerificationHandler;
 import org.jboss.dmr.ModelNode;
-import org.jboss.msc.inject.Injector;
 import org.jboss.msc.service.ServiceController;
 import org.xnio.OptionMap;
 
@@ -46,7 +41,10 @@ import org.xnio.OptionMap;
  */
 class RemotingSubsystemAdd extends AbstractAddStepHandler {
 
-    static final OperationStepHandler INSTANCE = new RemotingSubsystemAdd();
+    static final RemotingSubsystemAdd INSTANCE = new RemotingSubsystemAdd();
+
+    private RemotingSubsystemAdd() {
+    }
 
     protected void populateModel(ModelNode operation, ModelNode model) {
         // initialize the connectors
@@ -55,16 +53,13 @@ class RemotingSubsystemAdd extends AbstractAddStepHandler {
 
     protected void performRuntime(OperationContext context, ModelNode operation, ModelNode model, ServiceVerificationHandler verificationHandler, List<ServiceController<?>> newControllers) {
         // create endpoint
-        final EndpointService endpointService = new EndpointService();
+        final EndpointService endpointService = new EndpointService(RemotingExtension.NODE_NAME, EndpointService.EndpointType.SUBSYSTEM);
         // todo configure option map
         endpointService.setOptionMap(OptionMap.EMPTY);
-        final Injector<Executor> executorInjector = endpointService.getExecutorInjector();
-        //TODO inject this from somewhere?
-        executorInjector.inject(Executors.newCachedThreadPool());
 
         newControllers.add(context
                 .getServiceTarget()
-                .addService(RemotingServices.ENDPOINT, endpointService)
+                .addService(RemotingServices.SUBSYSTEM_ENDPOINT, endpointService)
                 .addListener(verificationHandler)
                 .install());
     }

@@ -24,7 +24,8 @@ package org.jboss.as.remoting;
 import java.net.BindException;
 import java.net.InetSocketAddress;
 
-import org.jboss.as.network.NetworkInterfaceBinding;
+import org.jboss.as.network.ManagedBinding;
+import org.jboss.as.network.SocketBindingManager;
 import org.jboss.logging.Logger;
 import org.jboss.msc.service.Service;
 import org.jboss.msc.service.StartContext;
@@ -54,13 +55,12 @@ public abstract class AbstractStreamServerService implements Service<AcceptingCh
     private final InjectedValue<ServerAuthenticationProvider> authenticationProviderValue = new InjectedValue<ServerAuthenticationProvider>();
     private final InjectedValue<OptionMap> optionMapInjectedValue = new InjectedValue<OptionMap>();
     private final InjectedValue<Endpoint> endpointValue = new InjectedValue<Endpoint>();
-
-    private final int port;
+    private final InjectedValue<SocketBindingManager> socketBindingManagerValue = new InjectedValue<SocketBindingManager>();
 
     private volatile AcceptingChannel<? extends ConnectedStreamChannel> streamServer;
+    private volatile ManagedBinding managedBinding;
 
-    AbstractStreamServerService(final int port) {
-        this.port = port;
+    AbstractStreamServerService() {
     }
 
     @Override
@@ -85,13 +85,21 @@ public abstract class AbstractStreamServerService implements Service<AcceptingCh
         return endpointValue;
     }
 
+    public InjectedValue<SocketBindingManager> getSocketBindingManagerInjector() {
+        return socketBindingManagerValue;
+    }
+
     @Override
     public void start(final StartContext context) throws StartException {
         try {
             NetworkServerProvider networkServerProvider = endpointValue.getValue().getConnectionProviderInterface("remote", NetworkServerProvider.class);
             ServerAuthenticationProvider sap = authenticationProviderValue.getValue();
             OptionMap options = optionMapInjectedValue.getValue();
-            streamServer = networkServerProvider.createServer(getSocketAddress(), options, sap);
+            streamServer = networkServerProvider.createServer(getSocketAddress(), options, sap, null);
+            SocketBindingManager sbm = socketBindingManagerValue.getOptionalValue();
+            if (sbm != null) {
+                managedBinding = registerSocketBinding(sbm);
+            }
             log.infof("Listening on %s", getSocketAddress());
 
         } catch (BindException e) {
@@ -105,12 +113,15 @@ public abstract class AbstractStreamServerService implements Service<AcceptingCh
     @Override
     public void stop(StopContext context) {
         IoUtils.safeClose(streamServer);
+        SocketBindingManager sbm = socketBindingManagerValue.getOptionalValue();
+        if (sbm != null && managedBinding != null) {
+            unregisterSocketBinding(managedBinding, sbm);
+        }
     }
 
-    abstract NetworkInterfaceBinding getNetworkInterfaceBinding();
+    abstract InetSocketAddress getSocketAddress();
 
-    InetSocketAddress getSocketAddress() {
-        return new InetSocketAddress(getNetworkInterfaceBinding().getAddress(), port);
-    }
+    abstract ManagedBinding registerSocketBinding(SocketBindingManager socketBindingManager);
 
+    abstract void unregisterSocketBinding(ManagedBinding managedBinding, SocketBindingManager socketBindingManager);
 }

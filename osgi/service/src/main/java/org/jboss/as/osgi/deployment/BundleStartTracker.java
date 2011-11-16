@@ -22,14 +22,6 @@
 
 package org.jboss.as.osgi.deployment;
 
-import static org.jboss.as.osgi.service.FrameworkBootstrapService.FRAMEWORK_BASE_NAME;
-import static org.osgi.service.packageadmin.PackageAdmin.BUNDLE_TYPE_FRAGMENT;
-
-import java.util.HashMap;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-
-import org.jboss.logging.Logger;
 import org.jboss.msc.service.AbstractServiceListener;
 import org.jboss.msc.service.Service;
 import org.jboss.msc.service.ServiceBuilder;
@@ -49,6 +41,14 @@ import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleException;
 import org.osgi.service.packageadmin.PackageAdmin;
 
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
+import static org.jboss.as.osgi.OSGiLogger.ROOT_LOGGER;
+import static org.jboss.as.osgi.service.FrameworkBootstrapService.FRAMEWORK_BASE_NAME;
+import static org.osgi.service.packageadmin.PackageAdmin.BUNDLE_TYPE_FRAGMENT;
+
 /**
  * A service that collects installed bundle services and starts them when all collected bundles were installed in the framework.
  *
@@ -57,14 +57,12 @@ import org.osgi.service.packageadmin.PackageAdmin;
  */
 public class BundleStartTracker implements Service<BundleStartTracker> {
 
-    private static final Logger log = Logger.getLogger("org.jboss.as.osgi");
-
     public static final ServiceName SERVICE_NAME = FRAMEWORK_BASE_NAME.append("starttracker");
 
     private final InjectedValue<PackageAdmin> injectedPackageAdmin = new InjectedValue<PackageAdmin>();
     private final Map<ServiceName, Tuple> pendingServices = new ConcurrentHashMap<ServiceName, Tuple>();
     private final Map<ServiceName, Tuple> startedServices = new ConcurrentHashMap<ServiceName, Tuple>();
-    private ServiceContainer serviceContainer;
+    private volatile ServiceContainer serviceContainer;
 
     public static final ServiceController<?> addService(ServiceTarget serviceTarget) {
         BundleStartTracker service = new BundleStartTracker();
@@ -80,14 +78,14 @@ public class BundleStartTracker implements Service<BundleStartTracker> {
     @Override
     public void start(StartContext context) throws StartException {
         ServiceController<?> controller = context.getController();
-        log.debugf("Starting: %s in mode %s", controller.getName(), controller.getMode());
+        ROOT_LOGGER.debugf("Starting: %s in mode %s", controller.getName(), controller.getMode());
         serviceContainer = context.getController().getServiceContainer();
     }
 
     @Override
     public void stop(StopContext context) {
         ServiceController<?> controller = context.getController();
-        log.debugf("Stopping: %s in mode %s", controller.getName(), controller.getMode());
+        ROOT_LOGGER.debugf("Stopping: %s in mode %s", controller.getName(), controller.getMode());
     }
 
     @Override
@@ -146,7 +144,7 @@ public class BundleStartTracker implements Service<BundleStartTracker> {
                                     bundle.start(Bundle.START_TRANSIENT | Bundle.START_ACTIVATION_POLICY);
                                 }
                             } catch (BundleException ex) {
-                                log.errorf(ex, "Cannot start bundle: %s", bundle);
+                                ROOT_LOGGER.cannotStart(ex, bundle);
                             }
                         }
                     }

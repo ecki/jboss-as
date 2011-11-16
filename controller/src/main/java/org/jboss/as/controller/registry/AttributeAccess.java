@@ -21,7 +21,13 @@
  */
 package org.jboss.as.controller.registry;
 
+import java.util.EnumSet;
+import java.util.Set;
+
+import org.jboss.as.controller.AttributeDefinition;
 import org.jboss.as.controller.OperationStepHandler;
+
+import static org.jboss.as.controller.ControllerMessages.MESSAGES;
 
 /**
  * Information about handling an attribute in a sub-model.
@@ -81,20 +87,61 @@ public final class AttributeAccess {
 
     }
 
+    /** Flags to indicate special characteristics of an attribute */
+    public enum Flag {
+        /** A modification to the attribute can be applied to the runtime without requiring a restart */
+        RESTART_NONE,
+        /** A modification to the attribute can only be applied to the runtime via a full jvm restart */
+        RESTART_JVM,
+        /** A modification to the attribute can only be applied to the runtime via a restart of all services,
+         *  but does not require a full jvm restart */
+        RESTART_ALL_SERVICES,
+        /** A modification to the attribute can only be applied to the runtime via a restart of services,
+         *  associated with the attribute's resource, but does not require a restart of all services or a full jvm restart */
+        RESTART_RESOURCE_SERVICES,
+        /**
+         * An attribute whose value is stored in the persistent configuration.
+         * The value may also be stored in runtime services.
+         */
+        STORAGE_CONFIGURATION,
+        /**
+         * An attribute whose value is only stored in runtime services, and
+         * isn't stored in the persistent configuration.
+         */
+        STORAGE_RUNTIME
+    }
+
     private final AccessType access;
     private final Storage storage;
     private final OperationStepHandler readHandler;
     private final OperationStepHandler writeHandler;
+    private final EnumSet<Flag> flags;
+    private final AttributeDefinition definition;
 
-    public AttributeAccess(final AccessType access, final Storage storage, final OperationStepHandler readHandler, final OperationStepHandler writeHandler) {
-        assert access != null : "access is null";
-        assert storage != null : "storage is null";
+    AttributeAccess(final AccessType access, final Storage storage, final OperationStepHandler readHandler,
+                    final OperationStepHandler writeHandler, AttributeDefinition definition, final EnumSet<Flag> flags) {
+        assert access != null : MESSAGES.nullVar("access").getLocalizedMessage();
+        assert storage != null : MESSAGES.nullVar("storage").getLocalizedMessage();
         this.access = access;
         this.readHandler = readHandler;
         this.writeHandler = writeHandler;
         this.storage = storage;
+        this.definition = definition;
         if(access == AccessType.READ_WRITE && writeHandler == null) {
-            throw new IllegalArgumentException("writeHandler is null");
+            throw MESSAGES.nullVar("writeHandler");
+        }
+        this.flags = flags == null ? EnumSet.noneOf(Flag.class) : EnumSet.copyOf(flags);
+        switch (storage) {
+            case CONFIGURATION:
+                this.flags.add(Flag.STORAGE_CONFIGURATION);
+                this.flags.remove(Flag.STORAGE_RUNTIME);
+                break;
+            case RUNTIME:
+                this.flags.add(Flag.STORAGE_RUNTIME);
+                this.flags.remove(Flag.STORAGE_CONFIGURATION);
+                break;
+            default:
+                throw MESSAGES.unexpectedStorage(storage);
         }
     }
 
@@ -132,6 +179,18 @@ public final class AttributeAccess {
      */
     public OperationStepHandler getWriteHandler() {
         return writeHandler;
+    }
+
+    public AttributeDefinition getAttributeDefinition() {
+        return definition;
+    }
+
+    /**
+     * Gets the flags associated with this attribute.
+     * @return the flags. Will not return {@code null}
+     */
+    public Set<Flag> getFlags() {
+        return EnumSet.copyOf(flags);
     }
 
 }

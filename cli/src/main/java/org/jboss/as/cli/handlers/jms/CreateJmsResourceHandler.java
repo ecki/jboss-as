@@ -48,7 +48,7 @@ public class CreateJmsResourceHandler extends BatchModeCommandHandler {
     public ModelNode buildRequest(CommandContext ctx) throws OperationFormatException {
 
         try {
-            if(!ctx.getParsedArguments().hasArguments()) {
+            if(!ctx.getParsedCommandLine().hasProperties()) {
                 throw new OperationFormatException("Arguments are missing");
             }
         } catch (CommandFormatException e) {
@@ -100,6 +100,7 @@ public class CreateJmsResourceHandler extends BatchModeCommandHandler {
         }
 
         String name = null;
+        String serverName = "default"; // TODO read server name from props
         final Map<String, String> props;
         if(propsStr != null) {
             props = new HashMap<String, String>();
@@ -134,6 +135,7 @@ public class CreateJmsResourceHandler extends BatchModeCommandHandler {
 
             DefaultOperationRequestBuilder builder = new DefaultOperationRequestBuilder();
             builder.addNode("subsystem", "messaging");
+            builder.addNode("hornetq-server", serverName);
             builder.addNode("jms-queue", name);
             builder.setOperationName("add");
             builder.getModelNode().get("entries").add(jndiName);
@@ -148,6 +150,7 @@ public class CreateJmsResourceHandler extends BatchModeCommandHandler {
 
             DefaultOperationRequestBuilder builder = new DefaultOperationRequestBuilder();
             builder.addNode("subsystem", "messaging");
+            builder.addNode("hornetq-server", serverName);
             builder.addNode("jms-topic", name);
             builder.setOperationName("add");
             builder.getModelNode().get("entries").add(jndiName);
@@ -164,6 +167,7 @@ public class CreateJmsResourceHandler extends BatchModeCommandHandler {
 
             DefaultOperationRequestBuilder builder = new DefaultOperationRequestBuilder();
             builder.addNode("subsystem", "messaging");
+            builder.addNode("hornetq-server", serverName);
             builder.addNode("connection-factory", name);
             builder.setOperationName("add");
             builder.getModelNode().get("entries").add(jndiName);

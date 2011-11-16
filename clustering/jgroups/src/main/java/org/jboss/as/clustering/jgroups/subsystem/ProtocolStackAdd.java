@@ -21,6 +21,8 @@
  */
 package org.jboss.as.clustering.jgroups.subsystem;
 
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
+
 import java.lang.reflect.Field;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -31,9 +33,10 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
+
 import javax.management.MBeanServer;
+
 import org.jboss.as.clustering.jgroups.ChannelFactory;
-import org.jboss.as.clustering.jgroups.JChannelFactory;
 import org.jboss.as.clustering.jgroups.ProtocolConfiguration;
 import org.jboss.as.clustering.jgroups.ProtocolDefaults;
 import org.jboss.as.clustering.jgroups.ProtocolStackConfiguration;
@@ -44,9 +47,10 @@ import org.jboss.as.controller.PathAddress;
 import org.jboss.as.controller.ServiceVerificationHandler;
 import org.jboss.as.controller.descriptions.DescriptionProvider;
 import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
 import org.jboss.as.controller.operations.common.Util;
 import org.jboss.as.network.SocketBinding;
+import org.jboss.as.server.ServerEnvironment;
+import org.jboss.as.server.ServerEnvironmentService;
 import org.jboss.as.threads.ThreadsServices;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.Property;
@@ -55,8 +59,6 @@ import org.jboss.msc.service.ServiceBuilder;
 import org.jboss.msc.service.ServiceBuilder.DependencyType;
 import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceName;
-import org.jboss.msc.service.ValueService;
-import org.jboss.msc.value.ImmediateValue;
 import org.jboss.msc.value.InjectedValue;
 import org.jboss.threads.JBossExecutors;
 
@@ -83,7 +85,7 @@ public class ProtocolStackAdd extends AbstractAddStepHandler implements Descript
 
     @Override
     public ModelNode getModelDescription(Locale locale) {
-        return LocalDescriptions.getProtocolStackAddDescription(locale);
+        return JGroupsDescriptions.getProtocolStackAddDescription(locale);
     }
 
     protected void populateModel(ModelNode operation, ModelNode model) {
@@ -98,9 +100,14 @@ public class ProtocolStackAdd extends AbstractAddStepHandler implements Descript
         ProtocolStack stackConfig = new ProtocolStack(name, transportConfig);
 
         ServiceBuilder<ChannelFactory> builder = context.getServiceTarget()
-                .addService(ChannelFactoryService.getServiceName(name), new ValueService<ChannelFactory>(new ImmediateValue<ChannelFactory>(new JChannelFactory(stackConfig))))
+                .addService(ChannelFactoryService.getServiceName(name), new ChannelFactoryService(stackConfig))
                 .addDependency(ProtocolDefaultsService.SERVICE_NAME, ProtocolDefaults.class, stackConfig.getDefaultsInjector())
-                .addDependency(DependencyType.OPTIONAL, ServiceName.JBOSS.append("mbean", "server"), MBeanServer.class, stackConfig.getMBeanServerInjector());
+                .addDependency(DependencyType.OPTIONAL, ServiceName.JBOSS.append("mbean", "server"), MBeanServer.class, stackConfig.getMBeanServerInjector())
+                .addDependency(ServerEnvironmentService.SERVICE_NAME, ServerEnvironment.class, stackConfig.getEnvironmentInjector())
+                ;
+        if (transport.hasDefined(ModelKeys.SHARED)) {
+            transportConfig.setShared(transport.get(ModelKeys.SHARED).asBoolean());
+        }
         build(builder, transport, transportConfig);
         addSocketBindingDependency(builder, transport, ModelKeys.DIAGNOSTICS_SOCKET_BINDING, transportConfig.getDiagnosticsSocketBindingInjector());
         addExecutorDependency(builder, transport, ModelKeys.DEFAULT_EXECUTOR, transportConfig.getDefaultExecutorInjector());
@@ -119,7 +126,6 @@ public class ProtocolStackAdd extends AbstractAddStepHandler implements Descript
         builder.setInitialMode(ServiceController.Mode.ON_DEMAND);
 
         newControllers.add(builder.install());
-
     }
 
     private void build(ServiceBuilder<ChannelFactory> builder, ModelNode protocol, Protocol protocolConfig) {
@@ -151,6 +157,7 @@ public class ProtocolStackAdd extends AbstractAddStepHandler implements Descript
     static class ProtocolStack implements ProtocolStackConfiguration {
         private final InjectedValue<ProtocolDefaults> defaults = new InjectedValue<ProtocolDefaults>();
         private final InjectedValue<MBeanServer> mbeanServer = new InjectedValue<MBeanServer>();
+        private final InjectedValue<ServerEnvironment> environment = new InjectedValue<ServerEnvironment>();
 
         private final String name;
         private final TransportConfiguration transport;
@@ -167,6 +174,10 @@ public class ProtocolStackAdd extends AbstractAddStepHandler implements Descript
 
         Injector<MBeanServer> getMBeanServerInjector() {
             return this.mbeanServer;
+        }
+
+        Injector<ServerEnvironment> getEnvironmentInjector() {
+            return this.environment;
         }
 
         @Override
@@ -192,6 +203,11 @@ public class ProtocolStackAdd extends AbstractAddStepHandler implements Descript
         @Override
         public MBeanServer getMBeanServer() {
             return this.mbeanServer.getOptionalValue();
+        }
+
+        @Override
+        public ServerEnvironment getEnvironment() {
+            return this.environment.getValue();
         }
     }
 

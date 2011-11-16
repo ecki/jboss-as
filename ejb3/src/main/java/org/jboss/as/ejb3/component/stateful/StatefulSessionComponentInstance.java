@@ -21,26 +21,31 @@
  */
 package org.jboss.as.ejb3.component.stateful;
 
-import org.jboss.as.ee.component.Component;
-import org.jboss.as.ee.component.ComponentInstance;
-import org.jboss.as.ejb3.component.session.SessionBeanComponentInstance;
-import org.jboss.as.naming.ManagedReference;
-import org.jboss.ejb3.cache.Identifiable;
-import org.jboss.invocation.Interceptor;
-import org.jboss.invocation.InterceptorContext;
-import org.jboss.util.id.GUID;
+import java.lang.reflect.Method;
+import java.nio.ByteBuffer;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 import javax.ejb.EJBException;
-import java.io.Serializable;
-import java.lang.reflect.Method;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicReference;
+
+import org.jboss.as.ee.component.Component;
+import org.jboss.as.ee.component.ComponentInstance;
+import org.jboss.as.ejb3.cache.Identifiable;
+import org.jboss.as.ejb3.component.session.SessionBeanComponentInstance;
+import org.jboss.as.naming.ManagedReference;
+import org.jboss.ejb.client.SessionID;
+import org.jboss.invocation.Interceptor;
+import org.jboss.invocation.InterceptorContext;
 
 /**
  * @author <a href="mailto:cdewolf@redhat.com">Carlo de Wolf</a>
  */
 public class StatefulSessionComponentInstance extends SessionBeanComponentInstance implements Identifiable {
-    private final GUID id;
+
+    private final SessionID id;
 
     private final Interceptor afterBegin;
     private final Interceptor afterCompletion;
@@ -54,24 +59,30 @@ public class StatefulSessionComponentInstance extends SessionBeanComponentInstan
      * @param component the component
      */
     protected StatefulSessionComponentInstance(final StatefulSessionComponent component, final AtomicReference<ManagedReference> instanceReference, final Interceptor preDestroyInterceptor, final Map<Method, Interceptor> methodInterceptors) {
-        super(component, instanceReference, preDestroyInterceptor, methodInterceptors);
-        this.id = new GUID();
+        super(component, instanceReference, preDestroyInterceptor, methodInterceptors, Collections.<Method, Interceptor>emptyMap());
 
-        this.afterBegin = component.createInterceptor(component.afterBegin);
-        this.afterCompletion = component.createInterceptor(component.afterCompletion);
-        this.beforeCompletion = component.createInterceptor(component.beforeCompletion);
+
+        final UUID uuid = UUID.randomUUID();
+        ByteBuffer bb = ByteBuffer.wrap(new byte[16]);
+        bb.putLong(uuid.getMostSignificantBits());
+        bb.putLong(uuid.getLeastSignificantBits());
+        this.id = SessionID.createSessionID(bb.array());
+
+        this.afterBegin = component.createInterceptor(component.getAfterBegin());
+        this.afterCompletion = component.createInterceptor(component.getAfterCompletion());
+        this.beforeCompletion = component.createInterceptor(component.getBeforeCompletion());
     }
 
     protected void afterBegin() {
-        execute(afterBegin);
+        execute(afterBegin, getComponent().getAfterBeginMethod());
     }
 
     protected void afterCompletion(boolean committed) {
-        execute(afterCompletion, committed);
+        execute(afterCompletion, getComponent().getAfterCompletionMethod(), committed);
     }
 
     protected void beforeCompletion() {
-        execute(beforeCompletion);
+        execute(beforeCompletion, getComponent().getBeforeCompletionMethod());
     }
 
     protected void discard() {
@@ -81,13 +92,16 @@ public class StatefulSessionComponentInstance extends SessionBeanComponentInstan
         }
     }
 
-    protected Object execute(final Interceptor interceptor, final Object... parameters) {
+    private Object execute(final Interceptor interceptor, final Method method, final Object ... parameters) {
         if (interceptor == null)
             return null;
         final InterceptorContext interceptorContext = new InterceptorContext();
+        //we need the method so this does not count as a lifecycle invocation
+        interceptorContext.setMethod(method);
         interceptorContext.putPrivateData(Component.class, getComponent());
         interceptorContext.putPrivateData(ComponentInstance.class, this);
         interceptorContext.putPrivateData(InvokeMethodOnTargetInterceptor.PARAMETERS_KEY, parameters);
+        interceptorContext.setContextData(new HashMap<String, Object>());
         try {
             return interceptor.processInvocation(interceptorContext);
         } catch (Error e) {
@@ -104,7 +118,12 @@ public class StatefulSessionComponentInstance extends SessionBeanComponentInstan
         return (StatefulSessionComponent) super.getComponent();
     }
 
-    public Serializable getId() {
+    public SessionID getId() {
         return id;
+    }
+
+    @Override
+    public String toString() {
+        return " Instance of " + getComponent().getComponentName() + " {" + id + "}";
     }
 }

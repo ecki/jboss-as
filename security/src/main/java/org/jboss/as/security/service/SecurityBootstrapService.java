@@ -22,12 +22,13 @@
 
 package org.jboss.as.security.service;
 
+import java.lang.reflect.Constructor;
+import java.security.Policy;
 import java.util.Enumeration;
 import java.util.Properties;
 import java.util.Set;
 
 import javax.security.jacc.PolicyContext;
-import javax.security.jacc.PolicyContextException;
 
 import org.jboss.as.security.SecurityExtension;
 import org.jboss.logging.Logger;
@@ -52,40 +53,63 @@ public class SecurityBootstrapService implements Service<Void> {
 
     private static final Logger log = Logger.getLogger("org.jboss.as.security");
 
-    protected Properties securityProperty;
+    protected volatile Properties securityProperty;
+
+    private Policy oldPolicy;
+
+    private Policy jaccPolicy;
+
+    private static final String JACC_POLICY_PROVIDER = "javax.security.jacc.policy.provider";
 
     public SecurityBootstrapService() {
-    }
-
-    public void setSecurityProperties(Properties securityProperty) {
-        this.securityProperty = securityProperty;
     }
 
     /** {@inheritDoc} */
     @Override
     public void start(StartContext context) throws StartException {
-        if (log.isDebugEnabled())
-            log.debug("Starting SecurityBootstrapService");
+        log.debugf("Starting SecurityBootstrapService");
         try {
+            //Print out the current version of PicketBox
+            log.info("Picketbox version="+org.picketbox.Version.VERSION);
+
+            // Get the current Policy impl
+            oldPolicy = Policy.getPolicy();
+            String provider = SecurityActions.getSystemProperty(JACC_POLICY_PROVIDER,
+                    "org.jboss.security.jacc.DelegatingPolicy");
+            Class<?> providerClass = SecurityActions.loadClass(provider);
+            try {
+                // Look for a ctor(Policy) signature
+                Class<?>[] ctorSig = { Policy.class };
+                Constructor<?> ctor = providerClass.getConstructor(ctorSig);
+                Object[] ctorArgs = { oldPolicy };
+                jaccPolicy = (Policy) ctor.newInstance(ctorArgs);
+            } catch (NoSuchMethodException e) {
+                log.debugf("Provider does not support ctor(Policy)");
+                try {
+                    jaccPolicy = (Policy) providerClass.newInstance();
+                } catch (Exception e1) {
+                    throw new StartException(e1);
+                }
+            } catch (Exception e) {
+                throw new StartException(e);
+            }
+
+            // Install the JACC policy provider
+            Policy.setPolicy(jaccPolicy);
+
+            // Have the policy load/update itself
+            jaccPolicy.refresh();
+
             // Register the default active Subject PolicyContextHandler
             SubjectPolicyContextHandler handler = new SubjectPolicyContextHandler();
             PolicyContext.registerHandler(SecurityConstants.SUBJECT_CONTEXT_KEY, handler, true);
 
             // Register the JAAS CallbackHandler JACC PolicyContextHandlers
             CallbackHandlerPolicyContextHandler chandler = new CallbackHandlerPolicyContextHandler();
-            PolicyContext.registerHandler(CallbackHandlerPolicyContextHandler.CALLBACK_HANDLER_KEY, chandler, true);
+            PolicyContext.registerHandler(SecurityConstants.CALLBACK_HANDLER_KEY, chandler, true);
 
-            // Handle the Security Properties
-            if (securityProperty != null) {
-                Enumeration<Object> keys = securityProperty.keys();
-                while (keys.hasMoreElements()) {
-                    String key = (String) keys.nextElement();
-                    String value = securityProperty.getProperty(key);
-                    SecurityActions.setSecurityProperty(key, value);
-                }
-            }
-        } catch (PolicyContextException pce) {
-            throw new StartException(pce);
+        } catch (Exception e) {
+            throw new StartException(e);
         }
     }
 
@@ -95,8 +119,12 @@ public class SecurityBootstrapService implements Service<Void> {
     public void stop(StopContext context) {
         // remove handlers
         Set handlerKeys = PolicyContext.getHandlerKeys();
-        handlerKeys.remove(CallbackHandlerPolicyContextHandler.CALLBACK_HANDLER_KEY);
+        handlerKeys.remove(SecurityConstants.CALLBACK_HANDLER_KEY);
         handlerKeys.remove(SecurityConstants.SUBJECT_CONTEXT_KEY);
+
+        // Install the policy provider that existed on startup
+        if (jaccPolicy != null)
+            Policy.setPolicy(oldPolicy);
     }
 
     /** {@inheritDoc} */

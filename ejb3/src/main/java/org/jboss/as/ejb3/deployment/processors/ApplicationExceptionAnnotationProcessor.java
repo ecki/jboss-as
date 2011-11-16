@@ -22,8 +22,13 @@
 
 package org.jboss.as.ejb3.deployment.processors;
 
+import java.util.List;
+
+import javax.ejb.ApplicationException;
+
+import org.jboss.as.ee.metadata.MetadataCompleteMarker;
+import org.jboss.as.ejb3.deployment.ApplicationExceptionDescriptions;
 import org.jboss.as.ejb3.deployment.EjbDeploymentAttachmentKeys;
-import org.jboss.as.ejb3.deployment.EjbJarDescription;
 import org.jboss.as.server.deployment.Attachments;
 import org.jboss.as.server.deployment.DeploymentPhaseContext;
 import org.jboss.as.server.deployment.DeploymentUnit;
@@ -36,9 +41,6 @@ import org.jboss.jandex.AnnotationValue;
 import org.jboss.jandex.ClassInfo;
 import org.jboss.jandex.DotName;
 
-import javax.ejb.ApplicationException;
-import java.util.List;
-
 /**
  * User: jpai
  */
@@ -46,11 +48,12 @@ public class ApplicationExceptionAnnotationProcessor implements DeploymentUnitPr
 
     @Override
     public void deploy(DeploymentPhaseContext phaseContext) throws DeploymentUnitProcessingException {
-        DeploymentUnit deploymentUnit = phaseContext.getDeploymentUnit();
-        EjbJarDescription ejbJarDescription = deploymentUnit.getAttachment(EjbDeploymentAttachmentKeys.EJB_JAR_DESCRIPTION);
-        if (ejbJarDescription == null) {
+        final DeploymentUnit deploymentUnit = phaseContext.getDeploymentUnit();
+
+        if(MetadataCompleteMarker.isMetadataComplete(deploymentUnit)) {
             return;
         }
+
         final CompositeIndex compositeIndex = deploymentUnit.getAttachment(Attachments.COMPOSITE_ANNOTATION_INDEX);
         if (compositeIndex == null) {
             return;
@@ -59,6 +62,8 @@ public class ApplicationExceptionAnnotationProcessor implements DeploymentUnitPr
         if (applicationExceptionAnnotations == null || applicationExceptionAnnotations.isEmpty()) {
             return;
         }
+        ApplicationExceptionDescriptions descriptions = new ApplicationExceptionDescriptions();
+        deploymentUnit.putAttachment(EjbDeploymentAttachmentKeys.APPLICATION_EXCEPTION_DESCRIPTIONS, descriptions);
         for (AnnotationInstance annotationInstance : applicationExceptionAnnotations) {
             AnnotationTarget target = annotationInstance.target();
             if (!(target instanceof ClassInfo)) {
@@ -76,7 +81,7 @@ public class ApplicationExceptionAnnotationProcessor implements DeploymentUnitPr
             if (inheritedAnnValue != null) {
                 inherited = inheritedAnnValue.asBoolean();
             }
-            ejbJarDescription.addApplicationException(exceptionClassName, rollback, inherited);
+            descriptions.addApplicationException(exceptionClassName, rollback, inherited);
         }
     }
 
