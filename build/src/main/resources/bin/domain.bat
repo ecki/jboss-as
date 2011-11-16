@@ -97,8 +97,6 @@ echo.
     -jboss-home "%JBOSS_HOME%" ^
     -jvm "%JAVA%" ^
     -- ^
-    -Dorg.jboss.boot.log.file="%JBOSS_HOME%\domain\log\host-controller\boot.log" ^
-    -Dlogging.configuration="file:%JBOSS_HOME%/domain/configuration/logging.properties" ^
     %HOST_CONTROLLER_JAVA_OPTS% ^
     -- ^
     -default-jvm "%JAVA%" ^
