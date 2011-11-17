@@ -21,6 +21,7 @@
 */
 package org.jboss.as.test.smoke.embedded.parse;
 
+import org.jboss.as.controller.ProxyController;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.AUTO_START;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.BOOT_TIME;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.CORE_SERVICE;
@@ -103,8 +104,10 @@ import org.jboss.as.controller.registry.AttributeAccess;
 import org.jboss.as.controller.registry.ManagementResourceRegistration;
 import org.jboss.as.controller.registry.OperationEntry;
 import org.jboss.as.controller.registry.Resource;
+import org.jboss.as.domain.controller.DomainController;
 import org.jboss.as.domain.controller.DomainModelUtil;
 import org.jboss.as.domain.controller.FileRepository;
+import org.jboss.as.domain.controller.LocalHostControllerInfo;
 import org.jboss.as.domain.management.operations.ConnectionAddHandler;
 import org.jboss.as.domain.management.operations.SecurityRealmAddHandler;
 import org.jboss.as.host.controller.descriptions.HostDescriptionProviders;
@@ -460,7 +463,7 @@ public class ParseAndMarshalModelsTestCase {
         final ModelController controller = createController(model, new Setup() {
             public void setup(Resource resource, ManagementResourceRegistration rootRegistration) {
                 ServerControllerModelUtil.updateCoreModel(model);
-                ServerControllerModelUtil.initOperations(rootRegistration, null, persister, null, null, null);
+                ServerControllerModelUtil.initOperations(rootRegistration, null, persister, null, null, null, false);
             }
         });
 
@@ -529,7 +532,7 @@ public class ParseAndMarshalModelsTestCase {
                 //Extensions
                 ManagementResourceRegistration extensions = hostRegistration.registerSubModel(PathElement.pathElement(EXTENSION), CommonProviders.EXTENSION_PROVIDER);
                 ExtensionContext extensionContext = new ExtensionContextImpl(hostRegistration, null, persister, ExtensionContext.ProcessType.STANDALONE_SERVER);
-                ExtensionAddHandler addExtensionHandler = new ExtensionAddHandler(extensionContext);
+                ExtensionAddHandler addExtensionHandler = new ExtensionAddHandler(extensionContext, false);
                 extensions.registerOperationHandler(ExtensionAddHandler.OPERATION_NAME, addExtensionHandler, addExtensionHandler, false);
 
                 // Jvms
@@ -605,7 +608,7 @@ public class ParseAndMarshalModelsTestCase {
         final ModelController controller = createController(model, new Setup() {
             public void setup(Resource resource, ManagementResourceRegistration rootRegistration) {
                 DomainModelUtil.updateCoreModel(resource.getModel());
-                DomainModelUtil.initializeMasterDomainRegistry(rootRegistration, persister, null, new MockFileRepository(), null, null);
+                DomainModelUtil.initializeMasterDomainRegistry(rootRegistration, persister, null, new MockFileRepository(), new MockDomainController(), null);
             }
         });
 
@@ -863,6 +866,39 @@ public class ParseAndMarshalModelsTestCase {
         @Override
         public File getDeploymentRoot(byte[] deploymentHash) {
             return null;
+        }
+    }
+
+    private static class MockDomainController implements DomainController {
+        public LocalHostControllerInfo getLocalHostInfo() {
+            return null;
+        }
+
+        public void registerRemoteHost(ProxyController hostControllerClient) {
+        }
+
+        public void unregisterRemoteHost(String id) {
+        }
+
+        public void registerRunningServer(ProxyController serverControllerClient) {
+        }
+
+        public void unregisterRunningServer(String serverName) {
+        }
+
+        public ModelNode getProfileOperations(String profileName) {
+            return null;
+        }
+
+        public FileRepository getLocalFileRepository() {
+            return null;
+        }
+
+        public FileRepository getRemoteFileRepository() {
+            return null;
+        }
+
+        public void stopLocalHost() {
         }
     }
 }

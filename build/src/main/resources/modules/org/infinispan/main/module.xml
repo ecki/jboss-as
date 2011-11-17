@@ -30,10 +30,11 @@
         <module name="javax.transaction.api"/>
         <module name="javax.xml.bind.api"/>
         <module name="org.apache.xerces" services="import"/>
+        <module name="org.infinispan.commons" export="true" />
         <module name="org.jboss.jandex"/>
         <module name="org.jboss.logging"/>
         <module name="org.jboss.marshalling"/>
         <module name="org.jboss.marshalling.river" services="import"/>
-        <module name="org.jgroups" optional="true"/>
+        <module name="org.jgroups"/>
     </dependencies>
 </module>

@@ -1,6 +1,6 @@
 /*
  * JBoss, Home of Professional Open Source.
- * Copyright 2010, Red Hat, Inc., and individual contributors
+ * Copyright 2011, Red Hat, Inc., and individual contributors
  * as indicated by the @author tags. See the copyright.txt file in the
  * distribution for a full listing of individual contributors.
  *
@@ -20,24 +20,14 @@
  * 02110-1301 USA, or see the FSF site: http://www.fsf.org.
  */
 
-package org.jboss.as.remoting;
-
-import org.jboss.as.controller.AbstractRemoveStepHandler;
-import org.jboss.as.controller.OperationContext;
-import org.jboss.dmr.ModelNode;
+package org.jboss.as.test.integration.ws.serviceref;
 
 /**
- * Removes a connector from the remoting container.
- *
- * @author Kabir Khan
+ * @author <a href="mailto:ropalka@redhat.com">Richard Opalka</a>
  */
-public class PropertyRemove extends AbstractRemoveStepHandler {
-
-    static final PropertyRemove INSTANCE = new PropertyRemove();
-
-    protected void performRuntime(OperationContext context, ModelNode operation, ModelNode model) {
-    }
-
-    protected void recoverServices(OperationContext context, ModelNode operation, ModelNode model) {
-    }
+public interface StatelessRemote {
+    String echo1(String string) throws Exception;
+    String echo2(String string) throws Exception;
+    String echo3(String string) throws Exception;
+    String echo4(String string) throws Exception;
 }

@@ -24,12 +24,13 @@ package org.jboss.as.ejb3.component.stateful;
 
 
 import java.lang.reflect.Method;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
-import java.util.Set;
 
+import javax.ejb.EJBLocalObject;
+import javax.ejb.EJBObject;
 import javax.ejb.TransactionManagementType;
 
 import org.jboss.as.ee.component.Component;
@@ -71,7 +72,7 @@ public class StatefulComponentDescription extends SessionBeanComponentDescriptio
     private Method afterBegin;
     private Method afterCompletion;
     private Method beforeCompletion;
-    private final Set<StatefulRemoveMethod> removeMethods = new HashSet<StatefulRemoveMethod>();
+    private final Map<MethodIdentifier, StatefulRemoveMethod> removeMethods = new HashMap<MethodIdentifier, StatefulRemoveMethod>();
     private StatefulTimeoutInfo statefulTimeout;
 
     private DefaultAccessTimeoutService defaultAccessTimeoutProvider;
@@ -273,11 +274,11 @@ public class StatefulComponentDescription extends SessionBeanComponentDescriptio
         if (removeMethod == null) {
             throw new IllegalArgumentException("@Remove method identifier cannot be null");
         }
-        this.removeMethods.add(new StatefulRemoveMethod(removeMethod, retainIfException));
+        this.removeMethods.put(removeMethod, new StatefulRemoveMethod(removeMethod, retainIfException));
     }
 
-    public Set<StatefulRemoveMethod> getRemoveMethods() {
-        return Collections.unmodifiableSet(this.removeMethods);
+    public Collection<StatefulRemoveMethod> getRemoveMethods() {
+        return this.removeMethods.values();
     }
 
     public StatefulTimeoutInfo getStatefulTimeout() {
@@ -291,7 +292,7 @@ public class StatefulComponentDescription extends SessionBeanComponentDescriptio
     private void addStatefulInstanceAssociatingInterceptor(final ViewDescription view) {
         view.getConfigurators().add(new ViewConfigurator() {
             @Override
-            public void configure(DeploymentPhaseContext context, ComponentConfiguration componentConfiguration, ViewDescription description, ViewConfiguration viewConfiguration) throws DeploymentUnitProcessingException {
+            public void configure(final DeploymentPhaseContext context, final ComponentConfiguration componentConfiguration, ViewDescription description, ViewConfiguration viewConfiguration) throws DeploymentUnitProcessingException {
                 // interceptor factory return an interceptor which sets up the session id on component view instance creation
                 InterceptorFactory sessionIdGeneratingInterceptorFactory = StatefulComponentSessionIdGeneratingInterceptorFactory.INSTANCE;
 
@@ -325,7 +326,7 @@ public class StatefulComponentDescription extends SessionBeanComponentDescriptio
             @Override
             public void configure(DeploymentPhaseContext context, ComponentConfiguration componentConfiguration, ViewDescription description, ViewConfiguration configuration) throws DeploymentUnitProcessingException {
                 final StatefulComponentDescription statefulComponentDescription = (StatefulComponentDescription) componentConfiguration.getComponentDescription();
-                final Set<StatefulRemoveMethod> removeMethods = statefulComponentDescription.getRemoveMethods();
+                final Collection<StatefulRemoveMethod> removeMethods = statefulComponentDescription.getRemoveMethods();
                 if (removeMethods.isEmpty()) {
                     return;
                 }
@@ -333,7 +334,12 @@ public class StatefulComponentDescription extends SessionBeanComponentDescriptio
                     final MethodIdentifier viewMethodIdentifier = MethodIdentifier.getIdentifierForMethod(viewMethod);
                     for (final StatefulRemoveMethod removeMethod : removeMethods) {
                         if (removeMethod.methodIdentifier.equals(viewMethodIdentifier)) {
-                            configuration.addViewInterceptor(viewMethod, new ImmediateInterceptorFactory(new StatefulRemoveInterceptor(removeMethod.retainIfException)), InterceptorOrder.View.SESSION_REMOVE_INTERCEPTOR);
+
+                            //we do not want to add this if it is the Ejb(Local)Object.remove() method, as that is handed elsewhere
+                            final boolean object = EJBObject.class.isAssignableFrom(configuration.getViewClass()) || EJBLocalObject.class.isAssignableFrom(configuration.getViewClass());
+                            if(!object || !viewMethodIdentifier.getName().equals("remove") || viewMethodIdentifier.getParameterTypes().length != 0) {
+                                configuration.addViewInterceptor(viewMethod, new ImmediateInterceptorFactory(new StatefulRemoveInterceptor(removeMethod.retainIfException)), InterceptorOrder.View.SESSION_REMOVE_INTERCEPTOR);
+                            }
                             break;
                         }
                     }
