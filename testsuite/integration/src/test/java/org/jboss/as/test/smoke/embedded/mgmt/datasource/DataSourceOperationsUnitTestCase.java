@@ -22,22 +22,6 @@
 
 package org.jboss.as.test.smoke.embedded.mgmt.datasource;
 
-import static org.jboss.as.arquillian.container.Authentication.getCallbackHandler;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OUTCOME;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RECURSIVE;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RESULT;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SUCCESS;
-import static org.jboss.as.test.smoke.embedded.mgmt.datasource.DataSourceOperationTestUtil.getChildren;
-import static org.jboss.as.test.smoke.embedded.mgmt.datasource.DataSourceOperationTestUtil.testConnection;
-import static org.jboss.as.test.smoke.embedded.mgmt.datasource.DataSourceOperationTestUtil.testConnectionXA;
-
-import javax.xml.namespace.QName;
-import javax.xml.stream.XMLInputFactory;
-import javax.xml.stream.XMLOutputFactory;
-import javax.xml.stream.XMLStreamReader;
-import javax.xml.transform.stream.StreamSource;
 import java.io.IOException;
 import java.io.StringReader;
 import java.io.StringWriter;
@@ -48,15 +32,27 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
+import javax.management.MBeanServerConnection;
+import javax.management.ObjectName;
+import javax.xml.namespace.QName;
+import javax.xml.stream.XMLInputFactory;
+import javax.xml.stream.XMLOutputFactory;
+import javax.xml.stream.XMLStreamReader;
+import javax.xml.transform.stream.StreamSource;
+
 import junit.framework.Assert;
 import org.jboss.arquillian.container.test.api.Deployment;
 import org.jboss.arquillian.container.test.api.RunAsClient;
 import org.jboss.arquillian.junit.Arquillian;
+import org.jboss.as.arquillian.container.TunneledMBeanServerConnection;
 import org.jboss.as.connector.subsystems.datasources.DataSourcesExtension.NewDataSourceSubsystemParser;
+import org.jboss.as.connector.subsystems.datasources.ModifiableXaDataSource;
 import org.jboss.as.connector.subsystems.datasources.Namespace;
 import org.jboss.as.controller.client.ModelControllerClient;
 import org.jboss.as.controller.persistence.SubsystemMarshallingContext;
 import org.jboss.as.protocol.StreamUtils;
+import org.jboss.as.test.smoke.embedded.demos.fakejndi.FakeJndi;
+import org.jboss.as.test.smoke.modular.utils.PollingUtils;
 import org.jboss.as.test.smoke.modular.utils.ShrinkWrapUtils;
 import org.jboss.dmr.ModelNode;
 import org.jboss.shrinkwrap.api.Archive;
@@ -64,14 +60,20 @@ import org.jboss.staxmapper.XMLExtendedStreamWriter;
 import org.jboss.staxmapper.XMLExtendedStreamWriterFactory;
 import org.jboss.staxmapper.XMLMapper;
 import org.junit.After;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.jboss.as.arquillian.container.MBeanServerConnectionProvider;
-import org.jboss.as.test.smoke.modular.utils.PollingUtils;
-import org.jboss.as.test.smoke.embedded.demos.fakejndi.FakeJndi;
-import org.jboss.as.connector.subsystems.datasources.ModifiableXaDataSource;
-import javax.management.MBeanServerConnection;
-import javax.management.ObjectName;
+
+import static org.jboss.as.arquillian.container.Authentication.getCallbackHandler;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OUTCOME;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RECURSIVE;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RESULT;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SUCCESS;
+import static org.jboss.as.test.smoke.embedded.mgmt.datasource.DataSourceOperationTestUtil.getChildren;
+import static org.jboss.as.test.smoke.embedded.mgmt.datasource.DataSourceOperationTestUtil.testConnection;
+import static org.jboss.as.test.smoke.embedded.mgmt.datasource.DataSourceOperationTestUtil.testConnectionXA;
 
 
 /**
@@ -94,8 +96,8 @@ public class DataSourceOperationsUnitTestCase {
 
     @Deployment
     public static Archive<?> getDeployment() {
-    	//TODO Don't do this FakeJndi stuff once we have remote JNDI working
-    	return ShrinkWrapUtils.createJavaArchive("demos/fakejndi.sar", FakeJndi.class.getPackage());
+        //TODO Don't do this FakeJndi stuff once we have remote JNDI working
+        return ShrinkWrapUtils.createJavaArchive("demos/fakejndi.sar", FakeJndi.class.getPackage());
     }
 
     // [ARQ-458] @Before not called with @RunAsClient
@@ -451,6 +453,7 @@ public class DataSourceOperationsUnitTestCase {
      * @throws Exception
      */
     @Test
+    @Ignore("AS7-2786")
     public void DisableAndReEnableXaDs() throws Exception {
         final String dsName = "XaDsNameDisEn";
         final String jndiDsName = "XaJndiDsNameDisEn";
@@ -585,25 +588,24 @@ public class DataSourceOperationsUnitTestCase {
         final Map<String, ModelNode> parseChildren = getChildren(newList.get(1));
         Assert.assertFalse(parseChildren.isEmpty());
         Assert.assertEquals(xaDsJndi, parseChildren.get("jndi-name").asString());
-        
+
         remove(address);
-        
+
         ModifiableXaDataSource jxaDS = null;
-    	try{
-        	jxaDS = lookup(xaDsJndi ,ModifiableXaDataSource .class);
-        	
-    		Assert.fail("found datasource after it was unbounded");
+        try{
+            jxaDS = lookup(client, xaDsJndi ,ModifiableXaDataSource .class);
+
+            Assert.fail("found datasource after it was unbounded");
         }
         catch (Exception e){
-        	// must be thrown NameNotFound exception - datasource is unbounded	
-        	
+            // must be thrown NameNotFound exception - datasource is unbounded
+
         }
     }
-    private static <T> T lookup(String name, Class<T> expected) throws Exception {
+    private static <T> T lookup(ModelControllerClient client, String name, Class<T> expected) throws Exception {
         //TODO Don't do this FakeJndi stuff once we have remote JNDI working
-    	
-        MBeanServerConnectionProvider provider = MBeanServerConnectionProvider.defaultProvider();
-        MBeanServerConnection mbeanServer = provider.getConnection();
+
+        MBeanServerConnection mbeanServer = new TunneledMBeanServerConnection(client);
         ObjectName objectName = new ObjectName("jboss:name=test,type=fakejndi");
         PollingUtils.retryWithTimeout(10000, new PollingUtils.WaitForMBeanTask(mbeanServer, objectName));
         Object o = mbeanServer.invoke(objectName, "lookup", new Object[] {name}, new String[] {"java.lang.String"});

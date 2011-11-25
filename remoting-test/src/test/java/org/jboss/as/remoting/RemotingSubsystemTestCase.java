@@ -49,6 +49,7 @@ import org.jboss.dmr.ModelNode;
 import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.service.ServiceNotFoundException;
+import org.junit.Ignore;
 import org.junit.Test;
 
 /**
@@ -98,7 +99,7 @@ public class RemotingSubsystemTestCase extends AbstractSubsystemBaseTest {
         assertEquals(1, connector.require(CommonAttributes.PROPERTY).require("org.xnio.Options.WORKER_ACCEPT_THREADS").require(CommonAttributes.VALUE).asInt());
     }
 
-    @Test
+    @Test @Ignore("AS7-2717")
     public void testSubsystemWithThreadAttributeChange() throws Exception {
         final int port = 12345;
         KernelServices services = installInController(new AdditionalInitialization(){
@@ -137,7 +138,7 @@ public class RemotingSubsystemTestCase extends AbstractSubsystemBaseTest {
     }
 
 
-    @Test
+    @Test @Ignore("AS7-2717")
     public void testSubsystemWithConnectorPropertyChange() throws Exception {
         final int port = 12345;
         KernelServices services = installInController(new AdditionalInitialization(){
@@ -185,7 +186,7 @@ public class RemotingSubsystemTestCase extends AbstractSubsystemBaseTest {
         current.updateCurrentConnector(false);
     }
 
-    @Test
+    @Test @Ignore("AS7-2717")
     public void testSubsystemWithBadConnectorProperty() throws Exception {
         final int port = 12345;
         KernelServices services = installInController(new AdditionalInitialization(){
@@ -209,6 +210,41 @@ public class RemotingSubsystemTestCase extends AbstractSubsystemBaseTest {
         }
     }
 
+    /**
+     * Tests that the outbound connections configured in the remoting subsytem are processed and services
+     * are created for them
+     * 
+     * @throws Exception
+     */
+    @Test
+    public void testOutboundConnections() throws Exception {
+        final int outboundSocketBindingPort = 6799;
+        final int socketBindingPort = 1234;
+        KernelServices services = installInController(new AdditionalInitialization(){
+                @Override
+                protected void setupController(ControllerInitializer controllerInitializer) {
+                    controllerInitializer.addSocketBinding("test", socketBindingPort);
+                    controllerInitializer.addRemoteOutboundSocketBinding("dummy-outbound-socket", "localhost", outboundSocketBindingPort);
+                    controllerInitializer.addRemoteOutboundSocketBinding("other-outbound-socket", "localhost", outboundSocketBindingPort);
+                }
+
+            },readResource("remoting-with-outbound-connections.xml"));
+
+        ServiceController<?> endPointService = services.getContainer().getRequiredService(RemotingServices.SUBSYSTEM_ENDPOINT);
+        assertNotNull("Endpoint service was null", endPointService);
+
+        final String remoteOutboundConnectionName = "remote-conn1";
+        ServiceName remoteOutboundConnectionServiceName = RemoteOutboundConnectionService.REMOTE_OUTBOUND_CONNECTION_BASE_SERVICE_NAME.append(remoteOutboundConnectionName);
+        ServiceController<?> remoteOutboundConnectionService = services.getContainer().getRequiredService(remoteOutboundConnectionServiceName);
+        assertNotNull("Remote outbound connection service for outbound connection:" + remoteOutboundConnectionName + " was null", remoteOutboundConnectionService);
+
+
+        final String localOutboundConnectionName = "local-conn1";
+        ServiceName localOutboundConnectionServiceName = LocalOutboundConnectionService.LOCAL_OUTBOUND_CONNECTION_BASE_SERVICE_NAME.append(localOutboundConnectionName);
+        ServiceController<?> localOutboundConnectionService = services.getContainer().getRequiredService(localOutboundConnectionServiceName);
+        assertNotNull("Local outbound connection service for outbound connection:" + localOutboundConnectionName + " was null", localOutboundConnectionService);
+    }
+
     @Override
     protected String getSubsystemXml() throws IOException {
         return readResource("remoting.xml");
@@ -221,7 +257,12 @@ public class RemotingSubsystemTestCase extends AbstractSubsystemBaseTest {
 
     @Override
     protected void validateXml(String original, String marshalled) throws Exception {
-        assertEquals(original, marshalled);
+        // TODO: Can't and shouldn't rely on string equality check because if the original subsystem xml had a
+        // namespace of 1.0 and the current is 1.1, then the marshalled subsystem xml will have the current == 1.1
+        // value. So string equality won't work out here
+        //assertEquals(original, marshalled);
+        // let's just delegate it to the base class
+        super.validateXml(original, marshalled);
     }
 
     private static class CurrentConnectorAndController {

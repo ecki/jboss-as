@@ -60,6 +60,9 @@ import org.jboss.logging.Logger;
 import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceName;
 
+import static org.jboss.as.ejb3.EjbLogger.ROOT_LOGGER;
+import static org.jboss.as.ejb3.EjbMessages.MESSAGES;
+
 /**
  * @author <a href="mailto:cdewolf@redhat.com">Carlo de Wolf</a>
  */
@@ -144,7 +147,13 @@ public abstract class EJBComponent extends BasicComponent {
     protected <T> T createViewInstanceProxy(final Class<T> viewInterface, final Map<Object, Object> contextData, final ServiceName serviceName) {
         final ServiceController<?> serviceController = CurrentServiceContainer.getServiceContainer().getRequiredService(serviceName);
         final ComponentView view = (ComponentView) serviceController.getValue();
-        final ManagedReference instance = view.createInstance(contextData);
+        final ManagedReference instance;
+        try {
+            instance = view.createInstance(contextData);
+        } catch (Exception e) {
+            //TODO: do we need to let the exception propagate here?
+            throw new RuntimeException(e);
+        }
         return viewInterface.cast(instance.getInstance());
     }
 
@@ -193,22 +202,26 @@ public abstract class EJBComponent extends BasicComponent {
     }
 
     protected TransactionAttributeType getCurrentTransactionAttribute() {
-        final InterceptorContext currentInvocationContext = CurrentInvocationContext.get();
-        if (currentInvocationContext == null) {
-            return null;
+
+        final InterceptorContext invocation = CurrentInvocationContext.get();
+        //for timer invocations there is no view, so the methodInf is attached directly
+        //to the context. Otherwise we retrive it from the invoked view
+        MethodIntf methodIntf = invocation.getPrivateData(MethodIntf.class);
+        if (methodIntf == null) {
+            final ComponentView componentView = invocation.getPrivateData(ComponentView.class);
+            if (componentView != null) {
+                methodIntf = componentView.getPrivateData(MethodIntf.class);
+            } else {
+                methodIntf = MethodIntf.BEAN;
+            }
         }
-        final Method invokedMethod = currentInvocationContext.getMethod();
-        // if method is null, then it's a lifecycle invocation
-        if (invokedMethod == null) {
-            return null;
-        }
-        // get the tx attribute of the invoked method
-        return this.getTransactionAttributeType(invokedMethod);
+
+        return getTransactionAttributeType(methodIntf, invocation.getMethod());
     }
 
     public EJBHome getEJBHome() throws IllegalStateException {
         if (ejbHome == null) {
-            throw new IllegalStateException("Bean " + getComponentName() + " does not have a Home interface");
+            throw MESSAGES.beanHomeInterfaceIsNull(getComponentName());
         }
         final ServiceController<?> serviceController = CurrentServiceContainer.getServiceContainer().getRequiredService(ejbHome);
         final ComponentView view = (ComponentView) serviceController.getValue();
@@ -236,22 +249,21 @@ public abstract class EJBComponent extends BasicComponent {
 
     public EJBLocalHome getEJBLocalHome() throws IllegalStateException {
         if (ejbLocalHome == null) {
-            throw new IllegalStateException("Bean " + getComponentName() + " does not have a Local Home interface");
+            throw MESSAGES.beanLocalHomeInterfaceIsNull(getComponentName());
         }
         return createViewInstanceProxy(EJBLocalHome.class, Collections.emptyMap(), ejbLocalHome);
     }
 
     public boolean getRollbackOnly() throws IllegalStateException {
         if (isBeanManagedTransaction()) {
-            throw new IllegalStateException("EJB 3.1 FR 13.6.1 Only beans with container-managed transaction demarcation " +
-                    "can use getRollbackOnly.");
+            throw MESSAGES.failToCallgetRollbackOnly();
         }
         try {
             TransactionManager tm = this.getTransactionManager();
 
             // The getRollbackOnly method should be used only in the context of a transaction.
             if (tm.getTransaction() == null) {
-                throw new IllegalStateException("getRollbackOnly() not allowed without a transaction.");
+                throw MESSAGES.failToCallgetRollbackOnlyOnNoneTransaction();
             }
 
             // EJBTHREE-805, consider an asynchronous rollback due to timeout
@@ -259,19 +271,19 @@ public abstract class EJBComponent extends BasicComponent {
 
             int status = tm.getStatus();
             if (log.isTraceEnabled()) {
-                log.trace("Current transaction status is " + status);
+                ROOT_LOGGER.trace("Current transaction status is " + status);
             }
             switch (status) {
                 case Status.STATUS_COMMITTED:
                 case Status.STATUS_ROLLEDBACK:
-                    throw new IllegalStateException("getRollbackOnly() not allowed after transaction is completed (EJBTHREE-1445)");
+                    throw MESSAGES.failToCallgetRollbackOnlyAfterTxcompleted();
                 case Status.STATUS_MARKED_ROLLBACK:
                 case Status.STATUS_ROLLING_BACK:
                     return true;
             }
             return false;
         } catch (SystemException se) {
-            log.warn("failed to get tx manager status; ignoring", se);
+            ROOT_LOGGER.getTxManagerStatusFailed(se);
             return true;
         }
     }
@@ -284,13 +296,12 @@ public abstract class EJBComponent extends BasicComponent {
         return timerService;
     }
 
-    @Deprecated
-    public TransactionAttributeType getTransactionAttributeType(Method method) {
-        return getTransactionAttributeType(MethodIntf.BEAN, method);
-    }
-
-    public TransactionAttributeType getTransactionAttributeType(MethodIntf methodIntf, Method method) {
+    public TransactionAttributeType getTransactionAttributeType(final MethodIntf methodIntf, final Method method) {
         TransactionAttributeType txAttr = txAttrs.get(new MethodTransactionAttributeKey(methodIntf, MethodIdentifier.getIdentifierForMethod(method)));
+        //fall back to type bean if not found
+        if(txAttr == null && methodIntf != MethodIntf.BEAN) {
+            txAttr = txAttrs.get(new MethodTransactionAttributeKey(MethodIntf.BEAN, MethodIdentifier.getIdentifierForMethod(method)));
+        }
         if (txAttr == null)
             return TransactionAttributeType.REQUIRED;
         return txAttr;
@@ -310,7 +321,7 @@ public abstract class EJBComponent extends BasicComponent {
 
     public UserTransaction getUserTransaction() throws IllegalStateException {
         if (!isBeanManagedTransaction())
-            throw new IllegalStateException("EJB 3.1 FR 4.3.3 & 5.4.5 Only beans with bean-managed transaction demarcation can use this method.");
+            throw MESSAGES.failToCallIsBeanManagedTransaction();
         return utilities.getUserTransaction();
     }
 
@@ -324,11 +335,11 @@ public abstract class EJBComponent extends BasicComponent {
 
     public Object lookup(String name) throws IllegalArgumentException {
         if (name == null) {
-            throw new IllegalArgumentException("jndi name cannot be null during lookup");
+            throw MESSAGES.jndiNameCannotBeNull();
         }
         final NamespaceContextSelector namespaceContextSelector = NamespaceContextSelector.getCurrentSelector();
         if (namespaceContextSelector == null) {
-            throw new IllegalStateException("No NamespaceContextSelector available, cannot lookup " + name);
+            throw MESSAGES.noNamespaceContextSelectorAvailable(name);
         }
         Context jndiContext = null;
         String namespaceStrippedJndiName = name;
@@ -355,36 +366,34 @@ public abstract class EJBComponent extends BasicComponent {
             try {
                 jndiContext = new InitialContext();
             } catch (NamingException ne) {
-                throw new RuntimeException("Could not lookup jndi name: " + name, ne);
+                throw MESSAGES.failToLookupJNDI(name,ne);
             }
         } else {
-            throw new IllegalArgumentException("Cannot lookup jndi name: " + name + " since it" +
-                    " doesn't belong to java:app, java:module, java:comp or java:global namespace");
+            throw MESSAGES.failToLookupJNDINameSpace(name);
         }
-        log.debug("Looking up " + namespaceStrippedJndiName + " in jndi context: " + jndiContext);
+        ROOT_LOGGER.debug("Looking up " + namespaceStrippedJndiName + " in jndi context: " + jndiContext);
         try {
             return jndiContext.lookup(namespaceStrippedJndiName);
         } catch (NamingException ne) {
-            throw new IllegalArgumentException("Could not lookup jndi name: " + namespaceStrippedJndiName + " in context: " + jndiContext, ne);
+            throw MESSAGES.failToLookupStrippedJNDI(namespaceContextSelector,jndiContext,ne);
         }
     }
 
     public void setRollbackOnly() throws IllegalStateException {
         if (isBeanManagedTransaction()) {
-            throw new IllegalStateException("EJB 3.1 FR 13.6.1 Only beans with container-managed transaction demarcation " +
-                    "can use setRollbackOnly.");
+            throw MESSAGES.failToCallSetRollbackOnlyOnNoneCMB();
         }
         try {
             // get the transaction manager
             TransactionManager tm = getTransactionManager();
             // check if there's a tx in progress. If not, then it's an error to call setRollbackOnly()
             if (tm.getTransaction() == null) {
-                throw new IllegalStateException("setRollbackOnly() not allowed without a transaction.");
+                throw MESSAGES.failToCallSetRollbackOnlyWithNoTx();
             }
             // set rollback
             tm.setRollbackOnly();
         } catch (SystemException se) {
-            log.warn("failed to set rollback only; ignoring", se);
+            ROOT_LOGGER.setRollbackOnlyFailed(se);
         }
     }
 

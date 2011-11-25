@@ -43,9 +43,12 @@ import org.jboss.invocation.proxy.MethodIdentifier;
 import org.jboss.metadata.ejb.spec.AroundInvokeMetaData;
 import org.jboss.metadata.ejb.spec.AroundInvokesMetaData;
 import org.jboss.metadata.ejb.spec.EnterpriseBeanMetaData;
+import org.jboss.metadata.ejb.spec.MessageDrivenBeanMetaData;
 import org.jboss.metadata.ejb.spec.SessionBeanMetaData;
 import org.jboss.metadata.javaee.spec.LifecycleCallbackMetaData;
 import org.jboss.metadata.javaee.spec.LifecycleCallbacksMetaData;
+
+import static org.jboss.as.ejb3.EjbMessages.MESSAGES;
 
 /**
  * Deployment descriptor that resolves interceptor methods definined in ejb-jar.xml that could not be resolved at
@@ -71,7 +74,7 @@ public class DeploymentDescriptorMethodProcessor implements DeploymentUnitProces
                             handleStatelessSessionBean((EJBComponentDescription) component, classIndex, reflectionIndex);
                         }
                     } catch (ClassNotFoundException e) {
-                        throw new DeploymentUnitProcessingException("Could not load component class", e);
+                        throw MESSAGES.failToLoadComponentClass(e);
                     }
                 }
             }
@@ -115,21 +118,24 @@ public class DeploymentDescriptorMethodProcessor implements DeploymentUnitProces
 
         final EnterpriseBeanMetaData metaData = component.getDescriptorData();
 
+        AroundInvokesMetaData aroundInvokes = null;
         if (metaData instanceof SessionBeanMetaData) {
+            aroundInvokes = ((SessionBeanMetaData) metaData).getAroundInvokes();
+        } else if (metaData instanceof MessageDrivenBeanMetaData) {
+            aroundInvokes = ((MessageDrivenBeanMetaData) metaData).getAroundInvokes();
+        }
 
-            AroundInvokesMetaData aroundInvokes = ((SessionBeanMetaData) metaData).getAroundInvokes();
-            if (aroundInvokes != null) {
-                for (AroundInvokeMetaData aroundInvoke : aroundInvokes) {
-                    final InterceptorClassDescription.Builder builder = InterceptorClassDescription.builder();
-                    String methodName = aroundInvoke.getMethodName();
-                    MethodIdentifier methodIdentifier = MethodIdentifier.getIdentifier(Object.class, methodName, InvocationContext.class);
-                    builder.setAroundInvoke(methodIdentifier);
-                    if (aroundInvoke.getClassName() == null || aroundInvoke.getClassName().isEmpty()) {
-                        final String className = ClassReflectionIndexUtil.findRequiredMethod(reflectionIndex, componentClass.getModuleClass(), methodIdentifier).getDeclaringClass().getName();
-                        component.addInterceptorMethodOverride(className, builder.build());
-                    } else {
-                        component.addInterceptorMethodOverride(aroundInvoke.getClassName(), builder.build());
-                    }
+        if (aroundInvokes != null) {
+            for (AroundInvokeMetaData aroundInvoke : aroundInvokes) {
+                final InterceptorClassDescription.Builder builder = InterceptorClassDescription.builder();
+                String methodName = aroundInvoke.getMethodName();
+                MethodIdentifier methodIdentifier = MethodIdentifier.getIdentifier(Object.class, methodName, InvocationContext.class);
+                builder.setAroundInvoke(methodIdentifier);
+                if (aroundInvoke.getClassName() == null || aroundInvoke.getClassName().isEmpty()) {
+                    final String className = ClassReflectionIndexUtil.findRequiredMethod(reflectionIndex, componentClass.getModuleClass(), methodIdentifier).getDeclaringClass().getName();
+                    component.addInterceptorMethodOverride(className, builder.build());
+                } else {
+                    component.addInterceptorMethodOverride(aroundInvoke.getClassName(), builder.build());
                 }
             }
         }

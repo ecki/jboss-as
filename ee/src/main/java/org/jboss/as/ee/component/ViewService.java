@@ -22,9 +22,6 @@
 
 package org.jboss.as.ee.component;
 
-import static org.jboss.as.ee.EeLogger.ROOT_LOGGER;
-import static org.jboss.as.ee.EeMessages.MESSAGES;
-
 import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.HashMap;
@@ -48,6 +45,9 @@ import org.jboss.msc.service.StartException;
 import org.jboss.msc.service.StopContext;
 import org.jboss.msc.value.InjectedValue;
 
+import static org.jboss.as.ee.EeLogger.ROOT_LOGGER;
+import static org.jboss.as.ee.EeMessages.MESSAGES;
+
 /**
  * @author <a href="mailto:david.lloyd@redhat.com">David M. Lloyd</a>
  */
@@ -62,6 +62,7 @@ public final class ViewService implements Service<ComponentView> {
     private final Class<?> viewClass;
     private final Set<Method> asyncMethods;
     private final ViewInstanceFactory viewInstanceFactory;
+    private final Map<Class<?>, Object> privateData;
     private volatile ComponentView view;
 
 
@@ -75,7 +76,7 @@ public final class ViewService implements Service<ComponentView> {
         clientPreDestroy = Interceptors.getChainedInterceptorFactory(viewConfiguration.getClientPreDestroyInterceptors());
         final IdentityHashMap<Method, InterceptorFactory> viewInterceptorFactories = new IdentityHashMap<Method, InterceptorFactory>(methodCount);
         final IdentityHashMap<Method, InterceptorFactory> clientInterceptorFactories = new IdentityHashMap<Method, InterceptorFactory>(methodCount);
-        for (Method method : methods) {
+        for (final Method method : methods) {
             if (method.getName().equals("finalize") && method.getParameterTypes().length == 0) {
                 viewInterceptorFactories.put(method, Interceptors.getTerminalInterceptorFactory());
             } else {
@@ -91,11 +92,16 @@ public final class ViewService implements Service<ComponentView> {
         } else {
             viewInstanceFactory = viewConfiguration.getViewInstanceFactory();
         }
+        if(viewConfiguration.getPrivateData().isEmpty()) {
+            privateData = Collections.emptyMap();
+        } else {
+            privateData = viewConfiguration.getPrivateData();
+        }
     }
 
     public void start(final StartContext context) throws StartException {
         // Construct the view
-        View view = new View();
+        View view = new View(privateData);
         view.initializeInterceptors();
         this.view = view;
     }
@@ -117,8 +123,10 @@ public final class ViewService implements Service<ComponentView> {
         private final Component component;
         private final Map<Method, Interceptor> viewInterceptors;
         private final Map<MethodDescription, Method> methods;
+        private final Map<Class<?>, Object> privateData;
 
-        View() {
+        View(final Map<Class<?>, Object> privateData) {
+            this.privateData = privateData;
             component = componentInjector.getValue();
             //we need to build the view interceptor chain
             this.viewInterceptors = new IdentityHashMap<Method, Interceptor>();
@@ -141,11 +149,11 @@ public final class ViewService implements Service<ComponentView> {
 
         }
 
-        public ManagedReference createInstance() {
+        public ManagedReference createInstance() throws Exception {
             return createInstance(Collections.<Object, Object>emptyMap());
         }
 
-        public ManagedReference createInstance(Map<Object, Object> contextData) {
+        public ManagedReference createInstance(Map<Object, Object> contextData) throws Exception {
             return viewInstanceFactory.createViewInstance(this, contextData);
         }
 
@@ -183,6 +191,11 @@ public final class ViewService implements Service<ComponentView> {
                 throw MESSAGES.viewMethodNotFound(name, descriptor, viewClass, component.getComponentClass());
             }
             return method;
+        }
+
+        @Override
+        public <T> T getPrivateData(final Class<T> clazz) {
+            return (T) privateData.get(clazz);
         }
 
         @Override
@@ -229,7 +242,7 @@ public final class ViewService implements Service<ComponentView> {
 
     private class DefaultViewInstanceFactory implements ViewInstanceFactory {
 
-        public ManagedReference createViewInstance(final ComponentView componentView, final Map<Object, Object> contextData) {
+        public ManagedReference createViewInstance(final ComponentView componentView, final Map<Object, Object> contextData) throws Exception {
             final SimpleInterceptorFactoryContext factoryContext = new SimpleInterceptorFactoryContext();
             final Component component = componentView.getComponent();
             factoryContext.getContextData().put(Component.class, component);
@@ -260,16 +273,12 @@ public final class ViewService implements Service<ComponentView> {
                 throw error;
             }
 
-            try {
-                InterceptorContext context = new InterceptorContext();
-                context.putPrivateData(ComponentView.class, componentView);
-                context.putPrivateData(Component.class, component);
-                context.setContextData(new HashMap<String, Object>());
-                clientPostConstructInterceptor.processInvocation(context);
-            } catch (Exception e) {
-                // TODO: What is the best exception type to throw here?
-                throw MESSAGES.componentViewConstructionFailure(e);
-            }
+            InterceptorContext context = new InterceptorContext();
+            context.putPrivateData(ComponentView.class, componentView);
+            context.putPrivateData(Component.class, component);
+            context.setContextData(new HashMap<String, Object>());
+            clientPostConstructInterceptor.processInvocation(context);
+
             return new ManagedReference() {
 
                 @Override

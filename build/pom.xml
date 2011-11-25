@@ -30,7 +30,7 @@
     <parent>
         <groupId>org.jboss.as</groupId>
         <artifactId>jboss-as-parent</artifactId>
-        <version>7.1.0.Alpha2-SNAPSHOT</version>
+        <version>7.1.0.CR1-SNAPSHOT</version>
     </parent>
 
     <artifactId>jboss-as-build</artifactId>
@@ -236,11 +236,6 @@
         <dependency>
             <groupId>joda-time</groupId>
             <artifactId>joda-time</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>juddi</groupId>
-            <artifactId>juddi</artifactId>
         </dependency>
 
         <dependency>
@@ -740,6 +735,11 @@
 
         <dependency>
             <groupId>org.jboss.as</groupId>
+            <artifactId>jboss-as-domain-http-error-context</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jboss.as</groupId>
             <artifactId>jboss-as-domain-http-interface</artifactId>
         </dependency>
 
@@ -791,11 +791,6 @@
         <dependency>
             <groupId>org.jboss.as</groupId>
             <artifactId>jboss-as-jacorb</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.jboss.as</groupId>
-            <artifactId>jboss-as-jaxr</artifactId>
         </dependency>
 
         <dependency>

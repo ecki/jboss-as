@@ -43,9 +43,10 @@ public class
         public static final int TIMEOUT_INVOCATION_CONTEXT_INTERCEPTOR                      = 0x310;
         public static final int CDI_REQUEST_SCOPE                                           = 0x320;
         public static final int BMT_TRANSACTION_INTERCEPTOR                                 = 0x400;
-        public static final int TIMEOUT_CMT_INTERCEPTOR                                     = 0x410;
+        public static final int COMPONENT_CMT_INTERCEPTOR                                   = 0x410;
         public static final int SYNCHRONIZATION_INTERCEPTOR                                 = 0x500;
         public static final int REENTRANCY_INTERCEPTOR                                      = 0x501;
+        public static final int ENTITY_BEAN_REMOVE_INTERCEPTOR                              = 0x502;
         public static final int JPA_SESSION_BEAN_INTERCEPTOR                                = 0x600;
         public static final int SINGLETON_CONTAINER_MANAGED_CONCURRENCY_INTERCEPTOR         = 0x700;
         public static final int CMP_RELATIONSHIP_INTERCEPTOR                                = 0x800;
@@ -111,7 +112,8 @@ public class
     }
 
     public static final class View {
-        public static final int TCCL_INTERCEPTOR                                        = 0x000;
+        public static final int EJB_EXCEPTION_LOGGING_INTERCEPTOR                       = 0x000;
+        public static final int TCCL_INTERCEPTOR                                        = 0x001;
         public static final int JNDI_NAMESPACE_INTERCEPTOR                              = 0x050;
         public static final int NOT_BUSINESS_METHOD_EXCEPTION                           = 0x100;
         public static final int REMOTE_EXCEPTION_TRANSFORMER                            = 0x200;

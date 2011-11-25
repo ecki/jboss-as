@@ -30,7 +30,7 @@
     <parent>
         <groupId>org.jboss.as</groupId>
         <artifactId>jboss-as-parent</artifactId>
-        <version>7.1.0.Alpha2-SNAPSHOT</version>
+        <version>7.1.0.CR1-SNAPSHOT</version>
     </parent>
 
     <groupId>org.jboss.as</groupId>
@@ -41,5 +41,6 @@
 
     <modules>
         <module>interface</module>
+        <module>error-context</module>
     </modules>
 </project>

@@ -28,9 +28,10 @@ import java.util.Collections;
 import org.jboss.as.server.deployment.DeploymentUnitProcessingException;
 import org.jboss.as.server.deployment.reflect.ClassReflectionIndex;
 import org.jboss.as.server.deployment.reflect.DeploymentReflectionIndex;
+import org.jboss.metadata.ejb.spec.MethodMetaData;
 import org.jboss.metadata.ejb.spec.MethodParametersMetaData;
 import org.jboss.metadata.ejb.spec.NamedMethodMetaData;
-
+import static org.jboss.as.ejb3.EjbMessages.MESSAGES;
 /**
  * @author Stuart Douglas
  */
@@ -38,6 +39,10 @@ public class MethodResolutionUtils {
 
 
     public static Method resolveMethod(final NamedMethodMetaData methodData, final Class<?> componentClass, final DeploymentReflectionIndex reflectionIndex) throws DeploymentUnitProcessingException {
+        return resolveMethod(methodData.getMethodName(), methodData.getMethodParams(), componentClass, reflectionIndex);
+    }
+
+    public static Method resolveMethod(final MethodMetaData methodData, final Class<?> componentClass, final DeploymentReflectionIndex reflectionIndex) throws DeploymentUnitProcessingException {
         return resolveMethod(methodData.getMethodName(), methodData.getMethodParams(), componentClass, reflectionIndex);
     }
 
@@ -61,7 +66,9 @@ public class MethodResolutionUtils {
             final ClassReflectionIndex<?> classIndex = reflectionIndex.getClassIndex(clazz);
             if (parameters == null) {
                 final Collection<Method> methods = classIndex.getAllMethods(methodName);
-                return methods;
+                if(!methods.isEmpty()) {
+                    return methods;
+                }
             } else {
                 final Collection<Method> methods = classIndex.getAllMethods(methodName, parameters.size());
                 for (final Method method : methods) {
@@ -79,7 +86,7 @@ public class MethodResolutionUtils {
             }
             clazz = clazz.getSuperclass();
         }
-        throw new DeploymentUnitProcessingException("Could not find method" + componentClass.getName() + "." + methodName + " referenced in ejb-jar.xml");
+        throw MESSAGES.failToFindMethodInEjbJarXml(componentClass.getName(),methodName);
 
     }
 }

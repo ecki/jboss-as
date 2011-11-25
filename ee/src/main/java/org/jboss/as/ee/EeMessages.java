@@ -24,6 +24,9 @@ package org.jboss.as.ee;
 
 import java.lang.reflect.Method;
 import java.util.Collection;
+import java.util.Set;
+
+import javax.xml.namespace.QName;
 import javax.xml.stream.Location;
 import javax.xml.stream.XMLStreamException;
 
@@ -802,4 +805,64 @@ public interface EeMessages {
      */
     @Message(id = 11092, value = "Could not find method %s %s on view %s of %s")
     IllegalArgumentException viewMethodNotFound(String name, String descriptor, Class<?> viewClass, Class<?> component);
+
+
+    @Message(id = 11093, value = "Could not load component class %s")
+    DeploymentUnitProcessingException couldNotLoadComponentClass(@Cause Throwable cause, final String className);
+
+    /**
+     * Creates an exception indicating an unexpected element, represented by the {@code name} parameter, was
+     * encountered.
+     *
+     * @param name     the unexpected element name.
+     * @param location the location of the error.
+     *
+     * @return a {@link XMLStreamException} for the error.
+     */
+    @Message(id = 11094, value = "Unexpected element '%s' encountered")
+    XMLStreamException unexpectedElement(QName name, @Param Location location);
+
+    /**
+     * Creates an exception indicating that the jboss-ejb-client.xml couldn't be processed
+     *
+     * @return a {@link DeploymentUnitProcessingException} for the error.
+     */
+    @Message(id = 11095, value = "Failed to process jboss-ejb-client.xml")
+    DeploymentUnitProcessingException failedToProcessEJBClientDescriptor(@Cause Throwable cause);
+
+    /**
+     * Creates an exception indicating that there was a exception while parsing a jboss-ejb-client.xml
+     *
+     *
+     * @param fileLocation the location of jboss-ejb-client.xml
+     *
+     * @return a {@link DeploymentUnitProcessingException} for the error.
+     */
+    @Message(id = 11096, value = "Exception while parsing jboss-ejb-client.xml file found at %s")
+    DeploymentUnitProcessingException xmlErrorParsingEJBClientDescriptor(@Cause XMLStreamException cause, String fileLocation);
+
+    /**
+     * Creates an exception indicating that there was a exception while parsing a jboss-ejb-client.xml
+     *
+     * @param message The error message
+     * @param location The location of the error
+     *
+     * @return a {@link XMLStreamException} for the error.
+     */
+    @Message(id = 11097, value = "%s")
+    XMLStreamException errorParsingEJBClientDescriptor(String message, @Param Location location);
+
+    /**
+     * If a message destination could not be resolved
+     */
+    @Message(id = 11098, value = "No message destination with name %s for binding %s")
+    String noMessageDestination(String name, String binding);
+
+
+    /**
+     * If a message destination could not be resolved
+     */
+    @Message(id = 11099, value = "More than one message destination with name %s for binding %s destinations: %s")
+    String moreThanOneMessageDestination(String name, String binding, Set<String> jndiNames);
+
 }

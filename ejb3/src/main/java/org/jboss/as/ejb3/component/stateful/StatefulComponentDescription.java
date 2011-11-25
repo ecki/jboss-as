@@ -61,7 +61,7 @@ import org.jboss.invocation.InterceptorFactoryContext;
 import org.jboss.invocation.proxy.MethodIdentifier;
 import org.jboss.logging.Logger;
 import org.jboss.msc.service.ServiceName;
-
+import static org.jboss.as.ejb3.EjbMessages.MESSAGES;
 /**
  * User: jpai
  */
@@ -89,7 +89,7 @@ public class StatefulComponentDescription extends SessionBeanComponentDescriptio
 
         StatefulRemoveMethod(final MethodIdentifier method, final boolean retainIfException) {
             if (method == null) {
-                throw new IllegalArgumentException("@Remove method cannot be null");
+                throw MESSAGES.removeMethodIsNull();
             }
             this.methodIdentifier = method;
             this.retainIfException = retainIfException;
@@ -163,9 +163,9 @@ public class StatefulComponentDescription extends SessionBeanComponentDescriptio
     }
 
     @Override
-    public ComponentConfiguration createConfiguration(final ClassIndex classIndex) {
+    public ComponentConfiguration createConfiguration(final ClassIndex classIndex, final ClassLoader moduleClassLoder) {
 
-        final ComponentConfiguration statefulComponentConfiguration = new ComponentConfiguration(this, classIndex);
+        final ComponentConfiguration statefulComponentConfiguration = new ComponentConfiguration(this, classIndex, moduleClassLoder);
         // setup the component create service
         statefulComponentConfiguration.setComponentCreateServiceFactory(new StatefulComponentCreateServiceFactory());
 
@@ -177,8 +177,7 @@ public class StatefulComponentDescription extends SessionBeanComponentDescriptio
                         @Override
                         protected Interceptor create(Component component, InterceptorFactoryContext context) {
                             if (!(component instanceof StatefulSessionComponent)) {
-                                throw new IllegalArgumentException("Component " + component + " with component class: " + component.getComponentClass() +
-                                        " isn't a stateful component");
+                                throw MESSAGES.componentNotInstanceOfSessionComponent(component, component.getComponentClass(),"stateful");
                             }
                             return new StatefulBMTInterceptor((StatefulSessionComponent) component);
                         }
@@ -272,7 +271,7 @@ public class StatefulComponentDescription extends SessionBeanComponentDescriptio
 
     public void addRemoveMethod(final MethodIdentifier removeMethod, final boolean retainIfException) {
         if (removeMethod == null) {
-            throw new IllegalArgumentException("@Remove method identifier cannot be null");
+            throw MESSAGES.removeMethodIsNull();
         }
         this.removeMethods.put(removeMethod, new StatefulRemoveMethod(removeMethod, retainIfException));
     }
@@ -294,11 +293,10 @@ public class StatefulComponentDescription extends SessionBeanComponentDescriptio
             @Override
             public void configure(final DeploymentPhaseContext context, final ComponentConfiguration componentConfiguration, ViewDescription description, ViewConfiguration viewConfiguration) throws DeploymentUnitProcessingException {
                 // interceptor factory return an interceptor which sets up the session id on component view instance creation
-                InterceptorFactory sessionIdGeneratingInterceptorFactory = StatefulComponentSessionIdGeneratingInterceptorFactory.INSTANCE;
+                final InterceptorFactory sessionIdGeneratingInterceptorFactory = StatefulComponentSessionIdGeneratingInterceptorFactory.INSTANCE;
 
                 // add the session id generating interceptor to the start of the *post-construct interceptor chain of the ComponentViewInstance*
                 viewConfiguration.addClientPostConstructInterceptor(sessionIdGeneratingInterceptorFactory, InterceptorOrder.ClientPostConstruct.INSTANCE_CREATE);
-                viewConfiguration.addClientPreDestroyInterceptor(StatefulComponentInstanceDestroyInterceptorFactory.INSTANCE, InterceptorOrder.ClientPreDestroy.INSTANCE_DESTROY);
 
                 for (Method method : viewConfiguration.getProxyFactory().getCachedMethods()) {
                     if ((method.getName().equals("hashCode") && method.getParameterTypes().length == 0) ||
