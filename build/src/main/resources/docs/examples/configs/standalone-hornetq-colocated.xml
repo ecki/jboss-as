@@ -12,6 +12,7 @@
         <extension module="org.jboss.as.jaxrs"/>
         <extension module="org.jboss.as.jmx"/>
         <extension module="org.jboss.as.jpa"/>
+        <extension module="org.jboss.as.jsr77"/>
         <extension module="org.jboss.as.logging"/>
         <extension module="org.jboss.as.mail"/>
         <extension module="org.jboss.as.messaging"/>
@@ -83,7 +84,7 @@
         <subsystem xmlns="urn:jboss:domain:datasources:1.0">
             <datasources>
                 <datasource jndi-name="java:jboss/datasources/ExampleDS" enabled="true" use-java-context="true"
-                            pool-name="H2DS">
+                            pool-name="java:jboss/datasources/ExampleDS">
                     <connection-url>jdbc:h2:mem:test;DB_CLOSE_DELAY=-1</connection-url>
                     <driver>h2</driver>
                     <pool></pool>
@@ -178,6 +179,7 @@
         <subsystem xmlns="urn:jboss:domain:jpa:1.0">
             <jpa default-datasource=""/>
         </subsystem>
+        <subsystem xmlns="urn:jboss:domain:jsr77:1.0"/>
         <subsystem xmlns="urn:jboss:domain:mail:1.0">
             <mail-session jndi-name="java:jboss/mail/Default">
                 <smtp-server address="localhost" port="25"/>

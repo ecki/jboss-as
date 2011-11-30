@@ -27,13 +27,13 @@ import java.util.Collections;
 import java.util.Map;
 
 import javax.ejb.EJBHome;
+import javax.ejb.EJBMetaData;
 import javax.rmi.PortableRemoteObject;
 
 import org.jacorb.ssl.SSLPolicyValue;
 import org.jacorb.ssl.SSLPolicyValueHelper;
 import org.jboss.as.ee.component.ComponentView;
 import org.jboss.as.ejb3.component.EJBComponent;
-import org.jboss.as.ejb3.component.EJBMetaDataImp;
 import org.jboss.as.ejb3.component.entity.EntityBeanComponent;
 import org.jboss.as.ejb3.component.stateless.StatelessSessionComponent;
 import org.jboss.as.ejb3.deployment.DeploymentRepository;
@@ -45,6 +45,8 @@ import org.jboss.ejb.client.EJBLocator;
 import org.jboss.ejb.client.EntityEJBLocator;
 import org.jboss.ejb.client.StatefulEJBLocator;
 import org.jboss.ejb.client.StatelessEJBLocator;
+import org.jboss.ejb.iiop.EJBMetaDataImplIIOP;
+import org.jboss.ejb.iiop.HomeHandleImplIIOP;
 import org.jboss.logging.Logger;
 import org.jboss.marshalling.Marshaller;
 import org.jboss.marshalling.MarshallerFactory;
@@ -54,6 +56,7 @@ import org.jboss.marshalling.OutputStreamByteOutput;
 import org.jboss.marshalling.river.RiverMarshallerFactory;
 import org.jboss.metadata.ejb.jboss.IORSecurityConfigMetaData;
 import org.jboss.metadata.ejb.jboss.IORTransportConfigMetaData;
+import org.jboss.modules.Module;
 import org.jboss.msc.service.Service;
 import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.service.StartContext;
@@ -144,7 +147,7 @@ public class EjbIIOPService implements Service<EjbIIOPService> {
     /**
      * <code>EJBMetaData</code> the enterprise bean in the container.
      */
-    private EJBMetaDataImp ejbMetaData;
+    private EJBMetaData ejbMetaData;
 
     /**
      * Mapping from bean methods to <code>SkeletonStrategy</code> instances.
@@ -167,6 +170,10 @@ public class EjbIIOPService implements Service<EjbIIOPService> {
      * home (<code>EJBHome</code> instance).
      */
     private final String[] homeRepositoryIds;
+
+    private final boolean useQualifiedName;
+
+    private final Module module;
 
     /**
      * <code>ServantRegistry</code> for the container's <code>EJBHome</code>.
@@ -221,7 +228,9 @@ public class EjbIIOPService implements Service<EjbIIOPService> {
      */
     private String name = null;
 
-    public EjbIIOPService(final Map<String, SkeletonStrategy> beanMethodMap, final String[] beanRepositoryIds, final Map<String, SkeletonStrategy> homeMethodMap, final String[] homeRepositoryIds) {
+    public EjbIIOPService(final Map<String, SkeletonStrategy> beanMethodMap, final String[] beanRepositoryIds, final Map<String, SkeletonStrategy> homeMethodMap, final String[] homeRepositoryIds, final boolean useQualifiedName, final Module module) {
+        this.useQualifiedName = useQualifiedName;
+        this.module = module;
         this.beanMethodMap = Collections.unmodifiableMap(beanMethodMap);
         this.beanRepositoryIds = beanRepositoryIds;
         this.homeMethodMap = Collections.unmodifiableMap(homeMethodMap);
@@ -246,12 +255,16 @@ public class EjbIIOPService implements Service<EjbIIOPService> {
 
             final EJBComponent component = ejbComponentInjectedValue.getValue();
             final String earApplicationName = component.getEarApplicationName();
-            if (component.getDistinctName() == null || component.getDistinctName().isEmpty()) {
-                name = earApplicationName == null  || earApplicationName.isEmpty() ? "" : earApplicationName + "/";
-                name = name + component.getModuleName() + "/" + component.getComponentName();
+            if (useQualifiedName) {
+                if (component.getDistinctName() == null || component.getDistinctName().isEmpty()) {
+                    name = earApplicationName == null || earApplicationName.isEmpty() ? "" : earApplicationName + "/";
+                    name = name + component.getModuleName() + "/" + component.getComponentName();
+                } else {
+                    name = earApplicationName == null || earApplicationName.isEmpty() ? "" : earApplicationName + "/";
+                    name = name + component.getModuleName() + "/" + component.getDistinctName() + "/" + component.getComponentName();
+                }
             } else {
-                name = earApplicationName == null || earApplicationName.isEmpty() ? "" : earApplicationName + "/";
-                name = name + component.getModuleName() + "/" + component.getDistinctName() + "/" + component.getComponentName();
+                name = component.getComponentName();
             }
             name = name.replace(".", "_");
             final ORB orb = this.orb.getValue();
@@ -320,13 +333,14 @@ public class EjbIIOPService implements Service<EjbIIOPService> {
             // create CORBA reference to the EJBHome.
             homeServantRegistry = poaRegistry.getValue().getRegistryWithPersistentPOAPerServant();
 
-            final EjbHomeCorbaServant homeServant = new EjbHomeCorbaServant(homeMethodMap, homeRepositoryIds, homeInterfaceDef, orb, homeView.getValue(), deploymentRepository.getValue(), component.getTransactionManager());
+            final EjbHomeCorbaServant homeServant = new EjbHomeCorbaServant(homeMethodMap, homeRepositoryIds, homeInterfaceDef, orb, homeView.getValue(), deploymentRepository.getValue(), component.getTransactionManager(), module.getClassLoader());
 
             homeReferenceFactory = homeServantRegistry.bind(homeServantName(name), homeServant, policies);
 
             final org.omg.CORBA.Object corbaRef = homeReferenceFactory.createReference(homeRepositoryIds[0]);
             ejbHome = (EJBHome) PortableRemoteObject.narrow(corbaRef, EJBHome.class);
-            homeServant.setHomeHandle(new HomeHandleImplIIOP(corbaRef));
+            final HomeHandleImplIIOP homeHandle = new HomeHandleImplIIOP(orb.object_to_string(corbaRef));
+            homeServant.setHomeHandle(homeHandle);
 
             // Initialize beanPOA and create metadata depending on the kind of bean
             if (component instanceof EntityBeanComponent) {
@@ -335,18 +349,19 @@ public class EjbIIOPService implements Service<EjbIIOPService> {
                 beanServantRegistry = poaRegistry.getValue().getRegistryWithPersistentPOAPerServant();
                 final EntityBeanComponent entityBeanComponent = (EntityBeanComponent) component;
                 final Class pkClass = entityBeanComponent.getPrimaryKeyClass();
-                ejbMetaData = new EJBMetaDataImp(entityBeanComponent.getRemoteClass(), entityBeanComponent.getHomeClass(), pkClass, false, false, ejbHome);
+                ejbMetaData = new EJBMetaDataImplIIOP(entityBeanComponent.getRemoteClass(), entityBeanComponent.getHomeClass(), pkClass, false, false, homeHandle);
             } else {
                 // This is a session bean (lifespan: transient)
                 beanServantRegistry = poaRegistry.getValue().getRegistryWithTransientPOAPerServant();
                 if (component instanceof StatelessSessionComponent) {
                     // Stateless session bean
-                    ejbMetaData = new EJBMetaDataImp(remoteView.getValue().getViewClass(), homeView.getValue().getViewClass(), null, true, true, ejbHome);
+                    ejbMetaData = new EJBMetaDataImplIIOP(remoteView.getValue().getViewClass(), homeView.getValue().getViewClass(), null, true, true, homeHandle);
                 } else {
                     // Stateful session bean
-                    ejbMetaData = new EJBMetaDataImp(remoteView.getValue().getViewClass(), homeView.getValue().getViewClass(), null, true, false, ejbHome);
+                    ejbMetaData = new EJBMetaDataImplIIOP(remoteView.getValue().getViewClass(), homeView.getValue().getViewClass(), null, true, false, homeHandle);
                 }
             }
+            homeServant.setEjbMetaData(ejbMetaData);
 
             // If there is an interface repository, then get
             // the beanInterfaceDef from the IR
@@ -357,7 +372,7 @@ public class EjbIIOPService implements Service<EjbIIOPService> {
             }
 
 
-            final EjbObjectCorbaServant beanServant = new EjbObjectCorbaServant(poaCurrent, beanMethodMap, beanRepositoryIds, beanInterfaceDef, orb, remoteView.getValue(), factory, configuration, component.getTransactionManager());
+            final EjbObjectCorbaServant beanServant = new EjbObjectCorbaServant(poaCurrent, beanMethodMap, beanRepositoryIds, beanInterfaceDef, orb, remoteView.getValue(), factory, configuration, component.getTransactionManager(), module.getClassLoader());
 
             beanReferenceFactory = beanServantRegistry.bind(beanServantName(name), beanServant, policies);
 
@@ -452,10 +467,9 @@ public class EjbIIOPService implements Service<EjbIIOPService> {
     /**
      * (Re)binds an object to a name in a given CORBA naming context, creating
      * any non-existent intermediate contexts along the way.
-     *
+     * <p/>
      * This method is synchronized on the class object, if multiple services attempt to bind the
      * same context name at once it will fail
-     *
      */
     public static synchronized void rebind(final NamingContextExt ctx, final String strName, final org.omg.CORBA.Object obj) throws Exception {
         final NameComponent[] name = ctx.to_name(strName);

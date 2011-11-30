@@ -530,10 +530,6 @@
             <maven-resource group="org.jboss.as" artifact="jboss-as-domain-http-interface"/>
         </module-def>
 
-        <module-def name="org.jboss.as.domain-controller">
-            <maven-resource group="org.jboss.as" artifact="jboss-as-domain-controller"/>
-        </module-def>
-
         <module-def name="org.jboss.as.domain-management">
             <maven-resource group="org.jboss.as" artifact="jboss-as-domain-management"/>
         </module-def>
@@ -556,6 +552,10 @@
 
         <module-def name="org.jboss.as.host-controller">
             <maven-resource group="org.jboss.as" artifact="jboss-as-host-controller"/>
+        </module-def>
+
+        <module-def name="org.jboss.as.jsr77">
+            <maven-resource group="org.jboss.as" artifact="jboss-as-jsr77"/>
         </module-def>
 
         <module-def name="org.jboss.as.jacorb">
@@ -585,6 +585,10 @@
 
         <module-def name="org.jboss.as.jpa.hibernate" slot="4">
             <maven-resource group="org.jboss.as" artifact="jboss-as-jpa-hibernate4"/>
+        </module-def>
+
+        <module-def name="org.jboss.as.jpa.openjpa">
+            <maven-resource group="org.jboss.as" artifact="jboss-as-jpa-openjpa"/>
         </module-def>
 
         <module-def name="org.jboss.as.jpa.spi">
@@ -724,6 +728,10 @@
 
         <module-def name="org.jboss.jboss-transaction-spi">
             <maven-resource group="org.jboss" artifact="jboss-transaction-spi"/>
+        </module-def>
+
+        <module-def name="org.jboss.iiop-client">
+            <maven-resource group="org.jboss" artifact="jboss-iiop-client"/>
         </module-def>
 
         <module-def name="org.jboss.interceptor">

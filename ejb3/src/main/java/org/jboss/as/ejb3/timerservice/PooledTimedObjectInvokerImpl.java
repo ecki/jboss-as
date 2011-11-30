@@ -27,7 +27,6 @@ import java.rmi.RemoteException;
 
 import javax.ejb.ConcurrentAccessException;
 import javax.ejb.ConcurrentAccessTimeoutException;
-import javax.ejb.Timer;
 
 import org.jboss.as.ejb3.component.EJBComponent;
 import org.jboss.as.ejb3.component.EjbComponentInstance;
@@ -57,7 +56,7 @@ public class PooledTimedObjectInvokerImpl implements MultiTimeoutMethodTimedObje
     }
 
     @Override
-    public void callTimeout(final Timer timer, final Method timeoutMethod) throws Exception {
+    public void callTimeout(final TimerImpl timer, final Method timeoutMethod) throws Exception {
         final EjbComponentInstance instance = acquireInstance();
         boolean discarded = false;
         try {
@@ -113,13 +112,8 @@ public class PooledTimedObjectInvokerImpl implements MultiTimeoutMethodTimedObje
     }
 
     @Override
-    public void callTimeout(final Timer timer) throws Exception {
-        final EjbComponentInstance instance = acquireInstance();
-        try {
-            instance.invokeTimeoutMethod(timer);
-        } finally {
-            releaseInstance(instance);
-        }
+    public void callTimeout(final TimerImpl timer) throws Exception {
+        callTimeout(timer, ejbComponent.getTimeoutMethod());
     }
 
     private void releaseInstance(final EjbComponentInstance instance) {

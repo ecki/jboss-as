@@ -44,16 +44,15 @@ import org.jboss.as.ejb3.deployment.processors.EjbClientContextParsingProcessor;
 import org.jboss.as.ejb3.deployment.processors.EjbClientContextSetupProcessor;
 import org.jboss.as.ejb3.deployment.processors.EjbContextJndiBindingProcessor;
 import org.jboss.as.ejb3.deployment.processors.EjbDependencyDeploymentUnitProcessor;
-import org.jboss.as.ejb3.deployment.processors.EjbIIOPDeploymentUnitProcessor;
 import org.jboss.as.ejb3.deployment.processors.EjbInjectionResolutionProcessor;
 import org.jboss.as.ejb3.deployment.processors.EjbJarParsingDeploymentUnitProcessor;
 import org.jboss.as.ejb3.deployment.processors.EjbJndiBindingsDeploymentUnitProcessor;
 import org.jboss.as.ejb3.deployment.processors.EjbManagementDeploymentUnitProcessor;
 import org.jboss.as.ejb3.deployment.processors.EjbRefProcessor;
 import org.jboss.as.ejb3.deployment.processors.EjbResourceInjectionAnnotationProcessor;
+import org.jboss.as.ejb3.deployment.processors.IIOPJndiBindingProcessor;
 import org.jboss.as.ejb3.deployment.processors.ImplicitLocalViewProcessor;
 import org.jboss.as.ejb3.deployment.processors.MessageDrivenComponentDescriptionFactory;
-import org.jboss.as.ejb3.deployment.processors.IIOPJndiBindingProcessor;
 import org.jboss.as.ejb3.deployment.processors.SessionBeanComponentDescriptionFactory;
 import org.jboss.as.ejb3.deployment.processors.SessionBeanHomeProcessor;
 import org.jboss.as.ejb3.deployment.processors.TimerServiceJndiBindingProcessor;
@@ -82,11 +81,13 @@ import org.jboss.as.ejb3.deployment.processors.merging.StartupMergingProcessor;
 import org.jboss.as.ejb3.deployment.processors.merging.StatefulTimeoutMergingProcessor;
 import org.jboss.as.ejb3.deployment.processors.merging.TransactionAttributeMergingProcessor;
 import org.jboss.as.ejb3.deployment.processors.merging.TransactionManagementMergingProcessor;
-import org.jboss.as.ejb3.iiop.POARegistry;
 import org.jboss.as.ejb3.deployment.processors.security.JaccEjbDeploymentProcessor;
+import org.jboss.as.ejb3.iiop.POARegistry;
+import org.jboss.as.ejb3.iiop.stub.DynamicStubFactoryFactory;
 import org.jboss.as.ejb3.remote.DefaultEjbClientContextService;
 import org.jboss.as.ejb3.remote.LocalEjbReceiver;
 import org.jboss.as.ejb3.remote.TCCLBasedEJBClientContextSelector;
+import org.jboss.as.jacorb.rmi.DelegatingStubFactoryFactory;
 import org.jboss.as.jacorb.service.CorbaPOAService;
 import org.jboss.as.naming.InitialContext;
 import org.jboss.as.security.service.SimpleSecurityManager;
@@ -140,6 +141,8 @@ class EJB3SubsystemAdd extends AbstractBoottimeAddStepHandler {
 
     protected void performBoottime(final OperationContext context, ModelNode operation, final ModelNode model, ServiceVerificationHandler verificationHandler, List<ServiceController<?>> newControllers) throws OperationFailedException {
 
+        //setup our dynamic stub factory
+        DelegatingStubFactoryFactory.setOverridenDynamicFactory(new DynamicStubFactoryFactory());
         //setup ejb: namespace
         EjbNamingContextSetup.setupEjbNamespace();
         //TODO: this is a bit of a hack
@@ -203,7 +206,6 @@ class EJB3SubsystemAdd extends AbstractBoottimeAddStepHandler {
                     processorTarget.addDeploymentProcessor(Phase.POST_MODULE, Phase.POST_MODULE_EJB_SESSION_SYNCHRONIZATION, new SessionSynchronizationMergingProcessor());
                     processorTarget.addDeploymentProcessor(Phase.POST_MODULE, Phase.POST_MODULE_EJB_INIT_METHOD, new InitMethodMergingProcessor());
                     processorTarget.addDeploymentProcessor(Phase.POST_MODULE, Phase.POST_MODULE_LOCAL_HOME, new SessionBeanHomeProcessor());
-                    processorTarget.addDeploymentProcessor(Phase.POST_MODULE, Phase.POST_MODULE_EJB_IIOP, new EjbIIOPDeploymentUnitProcessor());
 
                     processorTarget.addDeploymentProcessor(Phase.INSTALL, Phase.INSTALL_DEPENDS_ON_ANNOTATION, new EjbDependsOnMergingProcessor());
                     processorTarget.addDeploymentProcessor(Phase.INSTALL, Phase.INSTALL_DEPLOYMENT_REPOSITORY, new DeploymentRepositoryProcessor());
