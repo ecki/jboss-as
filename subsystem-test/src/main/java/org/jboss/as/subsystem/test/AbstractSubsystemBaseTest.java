@@ -23,12 +23,14 @@
 package org.jboss.as.subsystem.test;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 import junit.framework.Assert;
 
 import org.jboss.as.controller.Extension;
-import org.jboss.as.controller.OperationContext;
+import org.jboss.as.controller.PathAddress;
 import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
 import org.jboss.dmr.ModelNode;
 import org.junit.Test;
@@ -68,17 +70,6 @@ public abstract class AbstractSubsystemBaseTest extends AbstractSubsystemTest {
         return readResource(configId);
     }
 
-    /**
-     * Validate the marshalled xml.
-     *
-     * @param original the original subsystem xml
-     * @param marshalled the marshalled subsystem xml
-     * @throws Exception
-     */
-    protected void validateXml(final String original, final String marshalled) throws Exception {
-        // TODO check if the marshalled xml can be validated against the schema
-    }
-
     @Test
     public void testSubsystem() throws Exception {
         standardSubsystemTest(null);
@@ -96,6 +87,25 @@ public abstract class AbstractSubsystemBaseTest extends AbstractSubsystemTest {
      * @throws Exception
      */
     protected void standardSubsystemTest(final String configId) throws Exception {
+        standardSubsystemTest(configId, true);
+    }
+
+    /**
+     * Tests the ability to create a model from an xml configuration, marshal the model back to xml,
+     * re-read that marshalled model into a new model that matches the first one, execute a "describe"
+     * operation for the model, create yet another model from executing the results of that describe
+     * operation, and compare that model to first model.
+     *
+     * @param configId  id to pass to {@link #getSubsystemXml(String)} to get the configuration; if {@code null}
+     *                  {@link #getSubsystemXml()} will be called
+     *
+     * @param compareXml if {@code true} a comparison of xml output to original input is performed. This can be
+     *                   set to {@code false} if the original input is from an earlier xsd and the current
+     *                   schema has a different output
+     *
+     * @throws Exception
+     */
+    protected void standardSubsystemTest(final String configId, boolean compareXml) throws Exception {
         final AdditionalInitialization additionalInit = createAdditionalInitialization();
 
         // Parse the subsystem xml and install into the first controller
@@ -104,7 +114,7 @@ public abstract class AbstractSubsystemBaseTest extends AbstractSubsystemTest {
         Assert.assertNotNull(servicesA);
         //Get the model and the persisted xml from the first controller
         final ModelNode modelA = servicesA.readWholeModel();
-        Assert.assertNotNull(modelA);
+        validateModel(modelA);
 
         // Test marshaling
         final String marshalled = servicesA.getPersistedSubsystemXml();
@@ -113,14 +123,17 @@ public abstract class AbstractSubsystemBaseTest extends AbstractSubsystemTest {
 
         // validate the the normalized xmls
         String normalizedSubsystem = normalizeXML(subsystemXml);
-        validateXml(normalizedSubsystem, normalizeXML(marshalled));
+
+        if (compareXml) {
+            compareXml(configId, normalizedSubsystem, normalizeXML(marshalled));
+        }
 
         //Install the persisted xml from the first controller into a second controller
         final KernelServices servicesB = super.installInController(additionalInit, marshalled);
         final ModelNode modelB = servicesB.readWholeModel();
 
         //Make sure the models from the two controllers are identical
-        super.compare(modelA, modelB);
+        compare(modelA, modelB);
 
         // Test the describe operation
         final ModelNode operation = createDescribeOperation();
@@ -133,7 +146,13 @@ public abstract class AbstractSubsystemBaseTest extends AbstractSubsystemTest {
         final KernelServices servicesC = super.installInController(additionalInit, operations);
         final ModelNode modelC = servicesC.readWholeModel();
 
-        super.compare(modelA, modelC);
+        compare(modelA, modelC);
+
+        assertRemoveSubsystemResources(servicesA, getIgnoredChildResourcesForRemovalTest());
+    }
+
+    protected void validateModel(ModelNode model) {
+        Assert.assertNotNull(model);
     }
 
     protected ModelNode createDescribeOperation() {
@@ -147,11 +166,26 @@ public abstract class AbstractSubsystemBaseTest extends AbstractSubsystemTest {
     }
 
     protected AdditionalInitialization createAdditionalInitialization() {
-        return new AdditionalInitialization(){
-            @Override
-            protected OperationContext.Type getType() {
-                return OperationContext.Type.MANAGEMENT;
-            }
-        };
+        return AdditionalInitialization.MANAGEMENT;
+    }
+
+    /**
+     * Returns a set of child resources addresses that should not be removed directly. Rather they should be managed
+     * by their parent resource
+     *
+     * @return the set of child resource addresses
+     * @see AbstractSubsystemTest#assertRemoveSubsystemResources(KernelServices, Set)
+     */
+    protected Set<PathAddress> getIgnoredChildResourcesForRemovalTest() {
+        return Collections.<PathAddress>emptySet();
+    }
+
+    protected void testConverter(final ModelNode expected, int major, int minor) throws Exception {
+        KernelServices service = super.installInController(AdditionalInitialization.MANAGEMENT, getSubsystemXml());
+        ModelNode transformed = service.readTransformedModel(major,minor).get(ModelDescriptionConstants.SUBSYSTEM, mainSubsystemName);
+        /*SubsystemTransformer transformer = controllerExtensionRegistry.getTransformerRegistry().getSubsystemTransformer(super.mainSubsystemName, major, minor);
+        ModelNode original = service.readWholeModel().get(ModelDescriptionConstants.SUBSYSTEM, mainSubsystemName);
+        ModelNode transformed = transformer.transformModel(null, original);*/
+        compare(expected, transformed);
     }
 }

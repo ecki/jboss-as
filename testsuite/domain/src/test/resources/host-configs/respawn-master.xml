@@ -20,9 +20,9 @@
   ~ 02110-1301 USA, or see the FSF site: http://www.fsf.org.
   -->
 
-<host xmlns="urn:jboss:domain:1.1"
+<host xmlns="urn:jboss:domain:1.3"
       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-      xsi:schemaLocation="urn:jboss:domain:1.1 jboss-as-config_1_1.xsd"
+      xsi:schemaLocation="urn:jboss:domain:1.3 jboss-as-config_1_3.xsd"
       name="master">
 
     <paths>
@@ -33,6 +33,7 @@
         <security-realms>
             <security-realm name="ManagementRealm">
                 <authentication>
+                     <local default-user="$local"/>
                      <properties path="mgmt-users.properties" relative-to="jboss.domain.config.dir" />
                 </authentication>
             </security-realm>
@@ -52,6 +53,9 @@
     </domain-controller>
 
     <interfaces>
+        <interface name="management">
+            <inet-address value="${jboss.test.host.master.address}"/>
+        </interface>
         <interface name="public">
             <inet-address value="${jboss.test.host.master.address}"/>
         </interface>
@@ -66,7 +70,7 @@
     <servers>
         <server name="respawn-one" group="main-server-group">
             <paths>
-                <path name="domainTestPath" path="main-one" relative-to="jboss.domain.temp.dir" />
+                <path name="domainTestPath" path="main-one" relative-to="jboss.server.temp.dir" />
             </paths>
             <!-- server-one inherits the default socket-group declared in the server-group -->
             <jvm name="default"/>
@@ -74,7 +78,7 @@
         <server name="respawn-two" group="main-server-group">
             <!-- server-two avoids port conflicts by incrementing the ports in
                  the default socket-group declared in the server-group -->
-            <socket-binding-group ref="standard-sockets" port-offset="150"/>
+            <socket-bindings port-offset="150"/>
             <jvm name="default">
                 <heap size="64m" max-size="256m"/>
             </jvm>

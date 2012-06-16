@@ -21,10 +21,16 @@
  */
 package org.jboss.as.server.deployment;
 
-import org.jboss.as.server.deployment.module.ResourceRoot;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.CONTENT;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.HASH;
 
 import java.util.ArrayList;
 import java.util.List;
+
+import org.jboss.as.controller.registry.Resource;
+import org.jboss.as.server.ServerMessages;
+import org.jboss.as.server.deployment.module.ResourceRoot;
+import org.jboss.dmr.ModelNode;
 
 /**
  * Helper class with static methods related to deployment
@@ -63,7 +69,7 @@ public final class DeploymentUtils {
      */
     public static DeploymentUnit getTopDeploymentUnit(DeploymentUnit unit) {
         if (unit == null)
-            throw new IllegalArgumentException("Null initial unit");
+            throw ServerMessages.MESSAGES.nullInitialDeploymentUnit();
 
         DeploymentUnit parent = unit.getParent();
         while (parent != null) {
@@ -71,6 +77,23 @@ public final class DeploymentUtils {
             parent = unit.getParent();
         }
         return unit;
+    }
+
+    public static List<byte[]> getDeploymentHash(Resource deployment) {
+        return getDeploymentHash(deployment.getModel());
+    }
+
+    public static List<byte[]> getDeploymentHash(ModelNode deployment){
+        List<byte[]> hashes = new ArrayList<byte[]>();
+        if (deployment.hasDefined(CONTENT)) {
+            for (ModelNode contentElement : deployment.get(CONTENT).asList()) {
+                if (contentElement.hasDefined(HASH)) {
+                    final byte[] hash = contentElement.get(HASH).asBytes();
+                    hashes.add(hash);
+                }
+            }
+        }
+        return hashes;
     }
 
     private DeploymentUtils() {

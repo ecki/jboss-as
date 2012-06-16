@@ -19,8 +19,11 @@
 package org.jboss.as.host.controller;
 
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADD;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.AUTHENTICATION;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.AUTHORIZATION;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.BOOT_TIME;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.CONTENT;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.CORE_SERVICE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.DEFAULT_INTERFACE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.DEPLOYMENT;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ENABLED;
@@ -30,24 +33,33 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.HAS
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.INCLUDES;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.INTERFACE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.JVM;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.LDAP_CONNECTION;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.LOCAL_DESTINATION_OUTBOUND_SOCKET_BINDING;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.MANAGEMENT;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.MANAGEMENT_SUBSYSTEM_ENDPOINT;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.NAME;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.NAMESPACES;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PATH;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PORT_OFFSET;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PROFILE;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PROFILE_NAME;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RELATIVE_TO;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.REMOTE_DESTINATION_OUTBOUND_SOCKET_BINDING;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RUNTIME_NAME;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SCHEMA_LOCATIONS;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SECURITY_REALM;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SERVER_CONFIG;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SERVER_GROUP;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SERVER_IDENTITY;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SOCKET_BINDING;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SOCKET_BINDING_GROUP;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SOCKET_BINDING_PORT_OFFSET;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SYSTEM_PROPERTY;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.VALUE;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.VAULT;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.VAULT_OPTIONS;
+import static org.jboss.as.host.controller.HostControllerMessages.MESSAGES;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -63,18 +75,21 @@ import java.util.Set;
 import org.jboss.as.controller.PathAddress;
 import org.jboss.as.controller.PathElement;
 import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
-import org.jboss.as.controller.operations.common.ExtensionAddHandler;
+import org.jboss.as.controller.extension.ExtensionAddHandler;
 import org.jboss.as.controller.operations.common.InterfaceAddHandler;
 import org.jboss.as.controller.operations.common.NamespaceAddHandler;
-import org.jboss.as.controller.operations.common.PathAddHandler;
 import org.jboss.as.controller.operations.common.SchemaLocationAddHandler;
 import org.jboss.as.controller.operations.common.SocketBindingAddHandler;
 import org.jboss.as.controller.operations.common.SystemPropertyAddHandler;
 import org.jboss.as.controller.operations.common.Util;
+import org.jboss.as.controller.parsing.Attribute;
+import org.jboss.as.controller.services.path.PathAddHandler;
 import org.jboss.as.domain.controller.DomainController;
-import org.jboss.as.domain.controller.FileRepository;
 import org.jboss.as.host.controller.ManagedServer.ManagedServerBootConfiguration;
+import org.jboss.as.host.controller.model.jvm.JvmElement;
+import org.jboss.as.host.controller.model.jvm.JvmOptionsBuilderFactory;
 import org.jboss.as.process.DefaultJvmUtils;
+import org.jboss.as.repository.HostFileRepository;
 import org.jboss.as.server.ServerEnvironment;
 import org.jboss.as.server.services.net.BindingGroupAddHandler;
 import org.jboss.as.server.services.net.LocalDestinationOutboundSocketBindingAddHandler;
@@ -88,8 +103,13 @@ import org.jboss.dmr.Property;
  * an application server instance.
  *
  * @author <a href="kabir.khan@jboss.com">Kabir Khan</a>
+ * @author <a href="mailto:jperkins@redhat.com">James R. Perkins</a>
  */
 class ModelCombiner implements ManagedServerBootConfiguration {
+
+    private static final String RMI_CLIENT_INTERVAL = "sun.rmi.dgc.client.gcInterval";
+    private static final String RMI_SERVER_INTERVAL = "sun.rmi.dgc.server.gcInterval";
+    private static final String DEFAULT_RMI_INTERVAL = "3600000";
 
     private static final ModelNode EMPTY = new ModelNode();
     static {
@@ -151,6 +171,16 @@ class ModelCombiner implements ManagedServerBootConfiguration {
         this.jvmElement = new JvmElement(jvmName, hostVM, groupVM, serverVM);
     }
 
+    /**
+     * Create and verify the configuration before trying to start the process.
+     *
+     * @return the process boot configuration
+     */
+    public ManagedServerBootConfiguration createConfiguration() {
+        return new ProcessedBootConfiguration(getServerLaunchCommand(), getBootUpdates(),
+                 getServerLaunchEnvironment(), isManagementSubsystemEndpoint(), environment);
+    }
+
     @Override
     public List<ModelNode> getBootUpdates() {
 
@@ -170,17 +200,20 @@ class ModelCombiner implements ManagedServerBootConfiguration {
             portOffSet = serverModel.get(SOCKET_BINDING_PORT_OFFSET).asInt();
         }
         if(socketBindingRef == null) {
-            throw new IllegalArgumentException("undefined socket binding group for server " + serverName);
+            throw MESSAGES.undefinedSocketBinding(serverName);
         }
 
         List<ModelNode> updates = new ArrayList<ModelNode>();
 
         addNamespaces(updates);
-        addServerName(updates);
+        addProfileName(updates);
         addSchemaLocations(updates);
         addExtensions(updates);
         addPaths(updates);
         addSystemProperties(updates);
+        addVault(updates);
+        addManagementSecurityRealms(updates);
+        addManagementConnections(updates);
         addInterfaces(updates);
         addSocketBindings(updates, portOffSet, socketBindingRef);
         addSubsystems(updates);
@@ -202,32 +235,53 @@ class ModelCombiner implements ManagedServerBootConfiguration {
 
         command.add(getJavaCommand());
 
+        command.add("-D[" + ManagedServer.getServerProcessName(serverName) + "]");
+
         JvmOptionsBuilderFactory.getInstance().addOptions(jvmElement, command);
+
+        //These need to go in on the command-line
+        command.add("-D" + RMI_CLIENT_INTERVAL + "=" + SecurityActions.getSystemProperty(RMI_CLIENT_INTERVAL, DEFAULT_RMI_INTERVAL));
+        command.add("-D" + RMI_SERVER_INTERVAL + "=" + SecurityActions.getSystemProperty(RMI_SERVER_INTERVAL, DEFAULT_RMI_INTERVAL));
 
         Map<String, String> bootTimeProperties = getAllSystemProperties(true);
         // Add in properties passed in to the ProcessController command line
-        bootTimeProperties.putAll(environment.getHostSystemProperties());
-        for (Entry<String, String> entry : bootTimeProperties.entrySet()) {
-            final StringBuilder sb = new StringBuilder("-D");
-            sb.append(entry.getKey());
-            sb.append('=');
-            sb.append(entry.getValue() == null ? "true" : entry.getValue());
-            command.add(sb.toString());
+        for (Map.Entry<String, String> hostProp : environment.getHostSystemProperties().entrySet()) {
+            if (!bootTimeProperties.containsKey(hostProp.getKey())) {
+                bootTimeProperties.put(hostProp.getKey(), hostProp.getValue());
+            }
         }
+        for (Entry<String, String> entry : bootTimeProperties.entrySet()) {
+            String property = entry.getKey();
+            if (!"org.jboss.boot.log.file".equals(property) && !"logging.configuration".equals(property)) {
+                final StringBuilder sb = new StringBuilder("-D");
+                sb.append(property);
+                sb.append('=');
+                sb.append(entry.getValue() == null ? "true" : entry.getValue());
+                command.add(sb.toString());
+            }
+        }
+        // Determine the directory grouping type and use it to set props controlling the server data/log/tmp dirs
+        final DirectoryGrouping directoryGrouping = DirectoryGrouping.fromModel(hostModel);
+        String serverDirProp = bootTimeProperties.get(ServerEnvironment.SERVER_BASE_DIR);
+        File serverDir = serverDirProp == null ? new File(environment.getDomainServersDir(), serverName) : new File(serverDirProp);
+        final String logDir = addPathProperty(command, "log", ServerEnvironment.SERVER_LOG_DIR, bootTimeProperties,
+                directoryGrouping, environment.getDomainLogDir(), serverDir);
+        addPathProperty(command, "tmp", ServerEnvironment.SERVER_TEMP_DIR, bootTimeProperties,
+                directoryGrouping, environment.getDomainTempDir(), serverDir);
+        addPathProperty(command, "data", ServerEnvironment.SERVER_DATA_DIR, bootTimeProperties,
+                directoryGrouping, environment.getDomainDataDir(), serverDir);
 
-        command.add("-Dorg.jboss.boot.log.file=" + environment.getDomainBaseDir().getAbsolutePath() + "/servers/" + serverName + "/log/boot.log");
+        command.add("-Dorg.jboss.boot.log.file=" + getAbsolutePath(new File(logDir), "boot.log"));
         // TODO: make this better
         String loggingConfiguration = System.getProperty("logging.configuration");
         if (loggingConfiguration == null) {
-            loggingConfiguration = "file:" + environment.getDomainConfigurationDir().getAbsolutePath() + "/logging.properties";
+            loggingConfiguration = "file:" + getAbsolutePath(environment.getDomainConfigurationDir(), "logging.properties");
         }
         command.add("-Dlogging.configuration=" + loggingConfiguration);
         command.add("-jar");
-        command.add("jboss-modules.jar");
+        command.add(getAbsolutePath(environment.getHomeDir(), "jboss-modules.jar"));
         command.add("-mp");
-        command.add("modules");
-        command.add("-logmodule");
-        command.add("org.jboss.logmanager");
+        command.add(environment.getModulePath());
         command.add("-jaxpmodule");
         command.add("javax.xml.jaxp-provider");
         command.add("org.jboss.as.server");
@@ -259,7 +313,6 @@ class ModelCombiner implements ManagedServerBootConfiguration {
     @Override
     public Map<String, String> getServerLaunchEnvironment() {
         final Map<String, String> env = new HashMap<String, String>();
-        addStandardProperties(serverName, environment, env);
         for(final Entry<String, String> property : jvmElement.getEnvironmentVariables().entrySet()) {
             env.put(property.getKey(), property.getValue());
         }
@@ -281,8 +334,8 @@ class ModelCombiner implements ManagedServerBootConfiguration {
         }
     }
 
-    private void addServerName(List<ModelNode> updates) {
-        updates.add(Util.getWriteAttributeOperation(EMPTY, NAME, serverName));
+    private void addProfileName(List<ModelNode> updates) {
+        updates.add(Util.getWriteAttributeOperation(EMPTY, PROFILE_NAME, profileName));
     }
 
     private void addSchemaLocations(List<ModelNode> updates) {
@@ -374,6 +427,94 @@ class ModelCombiner implements ManagedServerBootConfiguration {
         }
     }
 
+    private void addVault(List<ModelNode> updates) {
+        if (hostModel.get(CORE_SERVICE).isDefined()) {
+            addVault(updates, hostModel.get(CORE_SERVICE).get(VAULT));
+        }
+    }
+
+    private void addVault(List<ModelNode> updates, ModelNode vaultNode) {
+        if (vaultNode.isDefined()) {
+            ModelNode vault = new ModelNode();
+            ModelNode codeNode = vaultNode.get(Attribute.CODE.getLocalName());
+            if (codeNode.isDefined()) {
+                vault.get(Attribute.CODE.getLocalName()).set(codeNode.asString());
+            }
+            vault.get(OP).set(ADD);
+            ModelNode vaultAddress = new ModelNode();
+            vaultAddress.add(CORE_SERVICE, VAULT);
+            vault.get(OP_ADDR).set(vaultAddress);
+
+            ModelNode optionsNode = vaultNode.get(VAULT_OPTIONS);
+            if (optionsNode.isDefined()) {
+                vault.get(VAULT_OPTIONS).set(optionsNode);
+            }
+            updates.add(vault);
+        }
+    }
+
+    private void addManagementSecurityRealms(List<ModelNode> updates) {
+        if (hostModel.get(CORE_SERVICE, MANAGEMENT, SECURITY_REALM).isDefined()) {
+            ModelNode securityRealms = hostModel.get(CORE_SERVICE, MANAGEMENT, SECURITY_REALM);
+            Set<String> keys = securityRealms.keys();
+            for (String current : keys) {
+                ModelNode addOp = new ModelNode();
+                ModelNode realmAddress = new ModelNode();
+                realmAddress.add(CORE_SERVICE, MANAGEMENT).add(SECURITY_REALM, current);
+                addOp.get(OP).set(ADD);
+                addOp.get(OP_ADDR).set(realmAddress);
+                updates.add(addOp);
+
+                ModelNode currentRealm = securityRealms.get(current);
+                if (currentRealm.hasDefined(SERVER_IDENTITY)) {
+                    addManagementComponentComponent(currentRealm, realmAddress, SERVER_IDENTITY, updates);
+                }
+                if (currentRealm.hasDefined(AUTHENTICATION)) {
+                    addManagementComponentComponent(currentRealm, realmAddress, AUTHENTICATION, updates);
+                }
+                if (currentRealm.hasDefined(AUTHORIZATION)) {
+                    addManagementComponentComponent(currentRealm, realmAddress, AUTHORIZATION, updates);
+                }
+            }
+        }
+    }
+
+    private void addManagementComponentComponent(ModelNode realm, ModelNode parentAddress, String key, List<ModelNode> updates) {
+        for (String currentComponent : realm.get(key).keys()) {
+            ModelNode addComponent = new ModelNode();
+            // First take the properties to pass over.
+            addComponent.set(realm.get(key, currentComponent));
+
+            // Now convert it to an operation by adding a name and address.
+            ModelNode identityAddress = parentAddress.clone().add(key, currentComponent);
+            addComponent.get(OP).set(ADD);
+            addComponent.get(OP_ADDR).set(identityAddress);
+
+            updates.add(addComponent);
+        }
+    }
+
+    private void addManagementConnections(List<ModelNode> updates) {
+        if (hostModel.get(CORE_SERVICE, MANAGEMENT, LDAP_CONNECTION).isDefined()) {
+            ModelNode baseAddress = new ModelNode();
+            baseAddress.add(CORE_SERVICE, MANAGEMENT);
+
+            ModelNode connections = hostModel.get(CORE_SERVICE, MANAGEMENT, LDAP_CONNECTION);
+            for (String connectionName : connections.keys()) {
+                ModelNode addConnection = new ModelNode();
+                // First take the properties to pass over.
+                addConnection.set(connections.get(connectionName));
+
+                // Now convert it to an operation by adding a name and address.
+                ModelNode identityAddress = baseAddress.clone().add(LDAP_CONNECTION, connectionName);
+                addConnection.get(OP).set(ADD);
+                addConnection.get(OP_ADDR).set(identityAddress);
+
+                updates.add(addConnection);
+            }
+        }
+    }
+
     private void addInterfaces(List<ModelNode> updates) {
         final Map<String, ModelNode> interfaces = new LinkedHashMap<String, ModelNode>();
         addInterfaces(interfaces, domainModel.get(INTERFACE));
@@ -407,7 +548,7 @@ class ModelCombiner implements ManagedServerBootConfiguration {
         }
         final ModelNode group = groups.get(bindingRef);
         if(group == null) {
-            throw new IllegalStateException(String.format("Included socket binding group %s is not defined", bindingRef));
+            throw MESSAGES.undefinedSocketBindingGroup(bindingRef);
         }
         final ModelNode groupAddress = pathAddress(PathElement.pathElement(SOCKET_BINDING_GROUP, bindingRef));
         final ModelNode groupAdd = BindingGroupAddHandler.getOperation(groupAddress, group);
@@ -424,7 +565,7 @@ class ModelCombiner implements ManagedServerBootConfiguration {
                 if(processed.add(ref)) {
                     final ModelNode includedGroup = groups.get(ref);
                     if(group == null) {
-                        throw new IllegalStateException(String.format("Included socket binding group %s is not defined", ref));
+                        throw MESSAGES.undefinedSocketBindingGroup(ref);
                     }
                     mergeBindingGroups(updates, groups, groupName, includedGroup, processed);
                 }
@@ -433,6 +574,9 @@ class ModelCombiner implements ManagedServerBootConfiguration {
     }
 
     private void addSocketBindings(List<ModelNode> updates, ModelNode group, final String groupName, ModelNode defaultInterface) {
+        if(! group.hasDefined(SOCKET_BINDING)) {
+            return;
+        }
         for(final Property socketBinding : group.get(SOCKET_BINDING).asPropertyList()) {
             final String name = socketBinding.getName();
             final ModelNode binding = socketBinding.getValue();
@@ -481,7 +625,7 @@ class ModelCombiner implements ManagedServerBootConfiguration {
     private void addDeployments(List<ModelNode> updates) {
         if (serverGroup.hasDefined(DEPLOYMENT)) {
 
-            FileRepository remoteRepository = null;
+            HostFileRepository remoteRepository = null;
             if (! domainController.getLocalHostInfo().isMasterDomainController()) {
                 remoteRepository = domainController.getRemoteFileRepository();
             }
@@ -521,34 +665,93 @@ class ModelCombiner implements ManagedServerBootConfiguration {
         return PathAddress.pathAddress(elements).toModelNode();
     }
 
-
     /**
-     * Equivalent to default JAVA_OPTS in < AS 7 run.conf file
+     * Adds the absolute path to command.
      *
-     * TODO externalize this somewhere if doing this at all is the right thing
      *
-     * @param sysProps
+     *
+     *
+     *
+     * @param command           the command to add the arguments to.
+     * @param typeName          the type of directory.
+     * @param propertyName      the name of the property.
+     * @param properties        the properties where the path may already be defined.
+     * @param directoryGrouping the directory group type.
+     * @param typeDir           the domain level directory for the given directory type; to be used for by-type grouping
+     * @param serverDir         the root directory for the server, to be used for 'by-server' grouping
+     * @return the absolute path that was added.
      */
-    static void addStandardProperties(final String serverName, final HostControllerEnvironment environment, Map<String, String> sysProps) {
-        //
-        if (!sysProps.containsKey("sun.rmi.dgc.client.gcInterval")) {
-            sysProps.put("sun.rmi.dgc.client.gcInterval","3600000");
+    private String addPathProperty(final List<String> command, final String typeName, final String propertyName, final Map<String, String> properties, final DirectoryGrouping directoryGrouping,
+                                   final File typeDir, File serverDir) {
+        final String result;
+        final String value = properties.get(propertyName);
+        if (value == null) {
+            switch (directoryGrouping) {
+                case BY_TYPE:
+                    result = getAbsolutePath(typeDir, "servers", serverName);
+                    break;
+                case BY_SERVER:
+                default:
+                    result = getAbsolutePath(serverDir, typeName);
+                    break;
+            }
+            properties.put(propertyName, result);
+        } else {
+            result = new File(value).getAbsolutePath();
         }
-        if (!sysProps.containsKey("sun.rmi.dgc.server.gcInterval")) {
-            sysProps.put("sun.rmi.dgc.server.gcInterval","3600000");
+        command.add(String.format("-D%s=%s", propertyName, result));
+        return result;
+    }
+
+    static String getAbsolutePath(final File root, final String... paths) {
+        File path = root;
+        for(String segment : paths) {
+            path = new File(path, segment);
+        }
+        return path.getAbsolutePath();
+    }
+
+    static class ProcessedBootConfiguration implements ManagedServerBootConfiguration {
+
+        List<String> command;
+        List<ModelNode> bootUpdates;
+        Map<String, String> environment;
+        boolean managementSubsystemEndpoint;
+        HostControllerEnvironment hostControllerEnvironment;
+
+        ProcessedBootConfiguration(List<String> command, List<ModelNode> bootUpdates, Map<String, String> environment,
+                                   boolean managementSubsystemEndpoint, HostControllerEnvironment hostControllerEnvironment) {
+            this.command = command;
+            this.bootUpdates = bootUpdates;
+            this.environment = environment;
+            this.managementSubsystemEndpoint = managementSubsystemEndpoint;
+            this.hostControllerEnvironment = hostControllerEnvironment;
         }
 
-        sysProps.put(HostControllerEnvironment.HOME_DIR, environment.getHomeDir().getAbsolutePath());
-        String key = ServerEnvironment.SERVER_BASE_DIR;
-        if (sysProps.get(key) == null) {
-            File serverBaseDir = new File(environment.getDomainServersDir(), serverName);
-            sysProps.put(key, serverBaseDir.getAbsolutePath());
+        @Override
+        public List<ModelNode> getBootUpdates() {
+            return bootUpdates;
         }
-        // Servers should use the host controller's deployment content repo
-        key = ServerEnvironment.SERVER_DEPLOY_DIR;
-        if (sysProps.get(key) == null) {
-            File serverDeploymentDir = environment.getDomainDeploymentDir();
-            sysProps.put(key, serverDeploymentDir.getAbsolutePath());
+
+        @Override
+        public Map<String, String> getServerLaunchEnvironment() {
+            return environment;
+        }
+
+        @Override
+        public List<String> getServerLaunchCommand() {
+            return command;
+        }
+
+        @Override
+        public HostControllerEnvironment getHostControllerEnvironment() {
+            return hostControllerEnvironment;
+        }
+
+        @Override
+        public boolean isManagementSubsystemEndpoint() {
+            return managementSubsystemEndpoint;
         }
     }
+
 }

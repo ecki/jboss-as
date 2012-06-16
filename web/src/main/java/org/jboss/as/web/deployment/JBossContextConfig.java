@@ -37,11 +37,8 @@ import javax.servlet.annotation.ServletSecurity.EmptyRoleSemantic;
 import javax.servlet.annotation.ServletSecurity.TransportGuarantee;
 
 import org.apache.catalina.Container;
-import org.apache.catalina.ContainerListener;
 import org.apache.catalina.Lifecycle;
 import org.apache.catalina.LifecycleEvent;
-import org.apache.catalina.LifecycleListener;
-import org.apache.catalina.Valve;
 import org.apache.catalina.Wrapper;
 import org.apache.catalina.core.StandardContext;
 import org.apache.catalina.deploy.Multipart;
@@ -57,12 +54,16 @@ import org.apache.naming.resources.FileDirContext;
 import org.apache.naming.resources.ProxyDirContext;
 import org.apache.tomcat.util.IntrospectionUtils;
 import org.jboss.annotation.javaee.Icon;
+import org.jboss.as.clustering.ClassLoaderAwareClassResolver;
+import org.jboss.as.clustering.web.DistributedCacheManagerFactory;
 import org.jboss.as.clustering.web.OutgoingDistributableSessionData;
 import org.jboss.as.server.deployment.Attachments;
 import org.jboss.as.server.deployment.DeploymentUnit;
+import org.jboss.as.web.WebLogger;
 import org.jboss.as.web.deployment.helpers.VFSDirContext;
 import org.jboss.as.web.session.DistributableSessionManager;
-import org.jboss.logging.Logger;
+import org.jboss.marshalling.ClassResolver;
+import org.jboss.marshalling.ModularClassResolver;
 import org.jboss.metadata.javaee.spec.DescriptionGroupMetaData;
 import org.jboss.metadata.javaee.spec.ParamValueMetaData;
 import org.jboss.metadata.javaee.spec.SecurityRoleMetaData;
@@ -70,12 +71,10 @@ import org.jboss.metadata.javaee.spec.SecurityRoleRefMetaData;
 import org.jboss.metadata.javaee.spec.SecurityRoleRefsMetaData;
 import org.jboss.metadata.javaee.spec.SecurityRolesMetaData;
 import org.jboss.metadata.merge.web.jboss.JBossWebMetaDataMerger;
-import org.jboss.metadata.web.jboss.ContainerListenerMetaData;
 import org.jboss.metadata.web.jboss.JBossAnnotationsMetaData;
 import org.jboss.metadata.web.jboss.JBossServletMetaData;
 import org.jboss.metadata.web.jboss.JBossServletsMetaData;
 import org.jboss.metadata.web.jboss.JBossWebMetaData;
-import org.jboss.metadata.web.jboss.ValveMetaData;
 import org.jboss.metadata.web.spec.AnnotationMetaData;
 import org.jboss.metadata.web.spec.AttributeMetaData;
 import org.jboss.metadata.web.spec.AuthConstraintMetaData;
@@ -111,16 +110,17 @@ import org.jboss.metadata.web.spec.WebResourceCollectionsMetaData;
 import org.jboss.metadata.web.spec.WelcomeFileListMetaData;
 import org.jboss.modules.Module;
 import org.jboss.modules.ModuleIdentifier;
+import org.jboss.msc.inject.Injector;
+import org.jboss.msc.value.InjectedValue;
 import org.jboss.vfs.VirtualFile;
 
 /**
  * @author Remy Maucherat
  */
 public class JBossContextConfig extends ContextConfig {
-    private static Logger log = Logger.getLogger(JBossContextConfig.class);
-
     private DeploymentUnit deploymentUnitContext = null;
     private Set<String> overlays = new HashSet<String>();
+    private final InjectedValue<DistributedCacheManagerFactory> factory = new InjectedValue<DistributedCacheManagerFactory>();
 
     /**
      * <p>
@@ -135,6 +135,32 @@ public class JBossContextConfig extends ContextConfig {
     @Override
     public void lifecycleEvent(LifecycleEvent event) {
         if (event.getType().equals(Lifecycle.AFTER_START_EVENT)) {
+            final WarMetaData warMetaData = deploymentUnitContext.getAttachment(WarMetaData.ATTACHMENT_KEY);
+            // Find and configure overlays
+            Set<VirtualFile> overlayVirtualFiles = warMetaData.getOverlays();
+            if (overlayVirtualFiles != null) {
+                if (context.getResources() instanceof ProxyDirContext) {
+                    ProxyDirContext resources = (ProxyDirContext) context.getResources();
+                    for (VirtualFile overlay : overlayVirtualFiles) {
+                        VFSDirContext dirContext = new VFSDirContext();
+                        dirContext.setVirtualFile(overlay);
+                        resources.addOverlay(dirContext);
+                    }
+                } else if (overlayVirtualFiles.size() > 0) {
+                    // Error, overlays need a ProxyDirContext to compose results
+                    WebLogger.WEB_LOGGER.noOverlay(context.getName());
+                    ok = false;
+                }
+            }
+            // Add other overlays, if any
+            for (String overlay : overlays) {
+                if (context.getResources() instanceof ProxyDirContext) {
+                    ProxyDirContext resources = (ProxyDirContext) context.getResources();
+                    FileDirContext dirContext = new FileDirContext();
+                    dirContext.setDocBase(overlay);
+                    resources.addOverlay(dirContext);
+                }
+            }
             // Invoke ServletContainerInitializer
             final ScisMetaData scisMetaData = deploymentUnitContext.getAttachment(ScisMetaData.ATTACHMENT_KEY);
             if (scisMetaData != null) {
@@ -142,13 +168,12 @@ public class JBossContextConfig extends ContextConfig {
                     try {
                         sci.onStartup(scisMetaData.getHandlesTypes().get(sci), context.getServletContext());
                     } catch (Throwable t) {
-                        log.error("Error calling onStartup for servlet container initializer: " + sci.getClass().getName(), t);
+                        WebLogger.WEB_LOGGER.sciOnStartupError(sci.getClass().getName(), t);
                         ok = false;
                     }
                 }
             }
             // Post order
-            final WarMetaData warMetaData = deploymentUnitContext.getAttachment(WarMetaData.ATTACHMENT_KEY);
             List<String> order = warMetaData.getOrder();
             if (!warMetaData.isNoOrder()) {
                 context.getServletContext().setAttribute(ServletContext.ORDERED_LIBS, order);
@@ -175,46 +200,9 @@ public class JBossContextConfig extends ContextConfig {
     }
 
     protected void processJBossWebMetaData(JBossWebMetaData metaData) {
-        // Valves
-        List<ValveMetaData> valves = metaData.getValves();
-        if (valves != null) {
-            for (ValveMetaData valve : valves) {
-                Valve valveInstance = (Valve) getInstance(valve.getModule(), valve.getValveClass(), valve.getParams());
-                if (ok) {
-                    context.getPipeline().addValve(valveInstance);
-                }
-            }
-        }
         // Overlays
         if (metaData.getOverlays() != null) {
             overlays.addAll(metaData.getOverlays());
-        }
-        // Container listeners
-        List<ContainerListenerMetaData> listeners = metaData.getContainerListeners();
-        if (listeners != null) {
-            for (ContainerListenerMetaData listener : listeners) {
-                switch (listener.getListenerType()) {
-                    case CONTAINER:
-                        ContainerListener containerListener = (ContainerListener) getInstance(listener.getModule(), listener.getListenerClass(), listener.getParams());
-                        context.addContainerListener(containerListener);
-                        break;
-                    case LIFECYCLE:
-                        LifecycleListener lifecycleListener = (LifecycleListener) getInstance(listener.getModule(), listener.getListenerClass(), listener.getParams());
-                        if (context instanceof Lifecycle) {
-                            ((Lifecycle) context).addLifecycleListener(lifecycleListener);
-                        }
-                        break;
-                   case SERVLET_INSTANCE:
-                        context.addInstanceListener(listener.getListenerClass());
-                        break;
-                    case SERVLET_CONTAINER:
-                        context.addWrapperListener(listener.getListenerClass());
-                        break;
-                    case SERVLET_LIFECYCLE:
-                        context.addWrapperLifecycle(listener.getListenerClass());
-                        break;
-                }
-            }
         }
     }
 
@@ -239,7 +227,7 @@ public class JBossContextConfig extends ContextConfig {
             }
             return instance;
         } catch (Throwable t) {
-            log.error("Error instantiating container component: " + className, t);
+            WebLogger.WEB_LOGGER.componentInstanceCreationFailed(className, t);
             ok = false;
         }
         return null;
@@ -277,10 +265,12 @@ public class JBossContextConfig extends ContextConfig {
         // Distributable
         if (metaData.getDistributable() != null) {
             try {
-                context.setManager(new DistributableSessionManager<OutgoingDistributableSessionData>(this.context.getParent(), metaData, this.deploymentUnitContext.getServiceRegistry()));
+                Module module = this.deploymentUnitContext.getAttachment(Attachments.MODULE);
+                ClassResolver resolver = ModularClassResolver.getInstance(module.getModuleLoader());
+                context.setManager(new DistributableSessionManager<OutgoingDistributableSessionData>(this.factory.getValue(), metaData, new ClassLoaderAwareClassResolver(resolver, module.getClassLoader())));
                 context.setDistributable(true);
             } catch (Exception e) {
-                log.warn("Clustering not supported, falling back to non-clustered session manager.", e);
+                WebLogger.WEB_LOGGER.clusteringNotSupported();
             }
         }
 
@@ -886,42 +876,15 @@ public class JBossContextConfig extends ContextConfig {
             authenticatorConfig();
         }
 
-        // Find and configure overlays
-        if (ok) {
-            Set<VirtualFile> overlays = warMetaData.getOverlays();
-            if (overlays != null) {
-                if (context.getResources() instanceof ProxyDirContext) {
-                    ProxyDirContext resources = (ProxyDirContext) context.getResources();
-                    for (VirtualFile overlay : overlays) {
-                        VFSDirContext dirContext = new VFSDirContext();
-                        dirContext.setVirtualFile(overlay);
-                        resources.addOverlay(dirContext);
-                    }
-                } else if (overlays.size() > 0) {
-                    // Error, overlays need a ProxyDirContext to compose results
-                    log.error(sm.getString("contextConfig.noOverlay", context.getName()));
-                    ok = false;
-                }
-            }
-        }
-
-        // Add other overlays, if any
-        if (ok) {
-            for (String overlay : overlays) {
-                if (context.getResources() instanceof ProxyDirContext) {
-                    ProxyDirContext resources = (ProxyDirContext) context.getResources();
-                    FileDirContext dirContext = new FileDirContext();
-                    dirContext.setDocBase(overlay);
-                    resources.addOverlay(dirContext);
-                }
-            }
-        }
-
         // Make our application unavailable if problems were encountered
         if (!ok) {
-            log.error(sm.getString("contextConfig.unavailable"));
+            WebLogger.WEB_LOGGER.unavailable(context.getName());
             context.setConfigured(false);
         }
 
+    }
+
+    Injector<DistributedCacheManagerFactory> getDistributedCacheManagerFactoryInjector() {
+        return this.factory;
     }
 }

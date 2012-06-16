@@ -32,8 +32,8 @@ public class ManagementPongHeader extends ManagementProtocolHeader {
     }
 
     @Override
-    byte getType() {
-        return ManagementProtocol.TYPE_PING;
+    public byte getType() {
+        return ManagementProtocol.TYPE_PONG;
     }
 
 }

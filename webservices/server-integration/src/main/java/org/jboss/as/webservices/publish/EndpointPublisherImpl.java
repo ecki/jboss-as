@@ -50,12 +50,17 @@ import org.jboss.metadata.web.jboss.JBossWebMetaData;
 import org.jboss.metadata.web.spec.ServletMappingMetaData;
 import org.jboss.msc.service.ServiceTarget;
 import org.jboss.ws.common.deployment.DeploymentAspectManagerImpl;
+import org.jboss.wsf.spi.SPIProvider;
+import org.jboss.wsf.spi.SPIProviderResolver;
 import org.jboss.wsf.spi.classloading.ClassLoaderProvider;
 import org.jboss.wsf.spi.deployment.Deployment;
 import org.jboss.wsf.spi.deployment.DeploymentAspect;
 import org.jboss.wsf.spi.deployment.DeploymentAspectManager;
 import org.jboss.wsf.spi.deployment.Endpoint;
 import org.jboss.wsf.spi.deployment.WSFServlet;
+import org.jboss.wsf.spi.management.EndpointRegistry;
+import org.jboss.wsf.spi.management.EndpointRegistryFactory;
+import org.jboss.wsf.spi.metadata.webservices.WebservicesMetaData;
 import org.jboss.wsf.spi.publish.Context;
 import org.jboss.wsf.spi.publish.EndpointPublisher;
 
@@ -75,14 +80,24 @@ public final class EndpointPublisherImpl implements EndpointPublisher {
 
     @Override
     public Context publish(String context, ClassLoader loader, Map<String, String> urlPatternToClassNameMap) throws Exception {
-        return publish(null, context, loader, urlPatternToClassNameMap);
+        return publish(null, context, loader, urlPatternToClassNameMap, null, null);
     }
 
-    public Context publish(ServiceTarget target, String context, ClassLoader loader, Map<String, String> urlPatternToClassNameMap) throws Exception {
-        WSEndpointDeploymentUnit unit = new WSEndpointDeploymentUnit(loader, context, urlPatternToClassNameMap);
+    @Override
+    public Context publish(String context, ClassLoader loader, Map<String, String> urlPatternToClassNameMap, WebservicesMetaData metadata) throws Exception {
+        return publish(null, context, loader, urlPatternToClassNameMap, null, metadata);
+    }
+
+    public Context publish(ServiceTarget target, String context, ClassLoader loader,
+            Map<String, String> urlPatternToClassNameMap, JBossWebMetaData jbwmd, WebservicesMetaData metadata)
+            throws Exception {
+        WSEndpointDeploymentUnit unit = new WSEndpointDeploymentUnit(loader, context, urlPatternToClassNameMap, jbwmd, metadata);
         return new Context(context, publish(target, unit));
     }
 
+    /**
+     * Publishes the endpoints declared to the provided WSEndpointDeploymentUnit
+     */
     public List<Endpoint> publish(ServiceTarget target, WSEndpointDeploymentUnit unit) throws Exception {
         List<DeploymentAspect> aspects = DeploymentAspectsProvider.getSortedDeploymentAspects();
         ClassLoader origClassLoader = SecurityActions.getContextClassLoader();
@@ -95,6 +110,16 @@ public final class EndpointPublisherImpl implements EndpointPublisher {
             DeploymentAspectManager dam = new DeploymentAspectManagerImpl();
             dam.setDeploymentAspects(aspects);
             dam.deploy(dep);
+            // TODO: [JBWS-3426] fix this. START workaround
+            if (target == null) {
+                SPIProvider spiProvider = SPIProviderResolver.getInstance().getProvider();
+                EndpointRegistryFactory factory = spiProvider.getSPI(EndpointRegistryFactory.class);
+                EndpointRegistry registry = factory.getEndpointRegistry();
+                for (final Endpoint endpoint : dep.getService().getEndpoints()) {
+                    registry.register(endpoint);
+                }
+            }
+            // END workaround
         } finally {
             if (dep != null) {
                 dep.removeAttachment(ServiceTarget.class);
@@ -183,6 +208,18 @@ public final class EndpointPublisherImpl implements EndpointPublisher {
             ClassLoader origClassLoader = SecurityActions.getContextClassLoader();
             try {
                 SecurityActions.setContextClassLoader(ClassLoaderProvider.getDefaultProvider().getServerIntegrationClassLoader());
+                // TODO: [JBWS-3426] fix this. START workaround
+                try {
+                    SPIProvider spiProvider = SPIProviderResolver.getInstance().getProvider();
+                    EndpointRegistryFactory factory = spiProvider.getSPI(EndpointRegistryFactory.class);
+                    EndpointRegistry registry = factory.getEndpointRegistry();
+                    for (final Endpoint endpoint : deployment.getService().getEndpoints()) {
+                        registry.unregister(endpoint);
+                    }
+                } catch (IllegalStateException e) {
+                    //ignore; there will be no need for unregistering here once 3426 is solved
+                }
+                // END workaround
                 DeploymentAspectManager dam = new DeploymentAspectManagerImpl();
                 dam.setDeploymentAspects(aspects);
                 dam.undeploy(deployment);

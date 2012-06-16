@@ -28,7 +28,7 @@
   <parent>
     <groupId>org.jboss.as</groupId>
     <artifactId>jboss-as-parent</artifactId>
-    <version>7.1.0.CR1-SNAPSHOT</version>
+    <version>7.2.0.Alpha1-SNAPSHOT</version>
   </parent>
 
   <artifactId>jboss-as-spec-api</artifactId>
@@ -130,7 +130,7 @@
     </dependency>
     <dependency>
        <groupId>org.osgi</groupId>
-       <artifactId>org.osgi.compendium</artifactId>
+       <artifactId>org.osgi.enterprise</artifactId>
     </dependency>
     <dependency>
       <groupId>javax.mail</groupId>

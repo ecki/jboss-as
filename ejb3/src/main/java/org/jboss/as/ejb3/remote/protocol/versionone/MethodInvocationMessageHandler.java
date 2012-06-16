@@ -25,33 +25,44 @@ package org.jboss.as.ejb3.remote.protocol.versionone;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.ObjectStreamException;
 import java.lang.reflect.Method;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 
 import org.jboss.as.ee.component.Component;
 import org.jboss.as.ee.component.ComponentView;
+import org.jboss.as.ee.component.interceptors.InvocationType;
+import org.jboss.as.ejb3.EjbLogger;
+import org.jboss.as.ejb3.EjbMessages;
 import org.jboss.as.ejb3.component.entity.EntityBeanComponent;
-import org.jboss.as.ejb3.component.interceptors.AsyncInvocationTask;
-import org.jboss.as.ejb3.component.interceptors.CancellationFlag;
 import org.jboss.as.ejb3.component.session.SessionBeanComponent;
+import org.jboss.as.ejb3.component.stateful.StatefulSessionComponent;
+import org.jboss.as.ejb3.component.stateless.StatelessSessionComponent;
 import org.jboss.as.ejb3.deployment.DeploymentRepository;
 import org.jboss.as.ejb3.deployment.EjbDeploymentInformation;
+import org.jboss.as.security.remoting.RemotingContext;
+import org.jboss.ejb.client.Affinity;
 import org.jboss.ejb.client.EJBLocator;
 import org.jboss.ejb.client.EntityEJBLocator;
 import org.jboss.ejb.client.SessionID;
 import org.jboss.ejb.client.StatefulEJBLocator;
-import org.jboss.ejb.client.remoting.RemotingAttachments;
 import org.jboss.invocation.InterceptorContext;
 import org.jboss.logging.Logger;
-import org.jboss.remoting3.Channel;
+import org.jboss.marshalling.AbstractClassResolver;
+import org.jboss.marshalling.Marshaller;
+import org.jboss.marshalling.MarshallerFactory;
+import org.jboss.marshalling.Unmarshaller;
 import org.jboss.remoting3.MessageInputStream;
+import org.jboss.remoting3.MessageOutputStream;
 import org.xnio.IoUtils;
 
 
 /**
- * User: jpai
+ * @author Jaikiran Pai
  */
 class MethodInvocationMessageHandler extends EJBIdentifierBasedMessageHandler {
 
@@ -63,14 +74,16 @@ class MethodInvocationMessageHandler extends EJBIdentifierBasedMessageHandler {
     private static final byte HEADER_ASYNC_METHOD_NOTIFICATION = 0x0E;
 
     private final ExecutorService executorService;
+    private final MarshallerFactory marshallerFactory;
 
-    MethodInvocationMessageHandler(final DeploymentRepository deploymentRepository, final String marshallingStrategy, final ExecutorService executorService) {
-        super(deploymentRepository, marshallingStrategy);
+    MethodInvocationMessageHandler(final DeploymentRepository deploymentRepository, final org.jboss.marshalling.MarshallerFactory marshallerFactory, final ExecutorService executorService) {
+        super(deploymentRepository);
+        this.marshallerFactory = marshallerFactory;
         this.executorService = executorService;
     }
 
     @Override
-    public void processMessage(final Channel channel, final MessageInputStream messageInputStream) throws IOException {
+    public void processMessage(final ChannelAssociation channelAssociation, final MessageInputStream messageInputStream) throws IOException {
 
         final DataInputStream input = new DataInputStream(messageInputStream);
         // read the invocation id
@@ -86,57 +99,55 @@ class MethodInvocationMessageHandler extends EJBIdentifierBasedMessageHandler {
         } else {
             methodParamTypes = signature.split(String.valueOf(METHOD_PARAM_TYPE_SEPARATOR));
         }
-        // read the attachments
-        final RemotingAttachments attachments = this.readAttachments(input);
 
         // read the Locator
-        final UnMarshaller unMarshaller = MarshallerFactory.createUnMarshaller(this.marshallingStrategy);
-        // we use a mutable ClassLoaderProvider, so that we can switch to a different (and correct deployment CL)
+        // we use a mutable ClassResolver, so that we can switch to a different (and correct deployment CL)
         // midway through the unmarshalling of the stream
-        final ClassLoaderSwitchingClassLoaderProvider classLoaderProvider = new ClassLoaderSwitchingClassLoaderProvider(Thread.currentThread().getContextClassLoader());
-        unMarshaller.start(input, classLoaderProvider);
+        final ClassLoaderSwitchingClassResolver classResolver = new ClassLoaderSwitchingClassResolver(Thread.currentThread().getContextClassLoader());
+        final Unmarshaller unmarshaller = this.prepareForUnMarshalling(this.marshallerFactory, classResolver, input);
         // read the EJB info
         final String appName;
         final String moduleName;
         final String distinctName;
         final String beanName;
         try {
-            appName = (String) unMarshaller.readObject();
-            moduleName = (String) unMarshaller.readObject();
-            distinctName = (String) unMarshaller.readObject();
-            beanName = (String) unMarshaller.readObject();
+            appName = (String) unmarshaller.readObject();
+            moduleName = (String) unmarshaller.readObject();
+            distinctName = (String) unmarshaller.readObject();
+            beanName = (String) unmarshaller.readObject();
         } catch (ClassNotFoundException e) {
-            throw new RuntimeException(e);
+            throw EjbMessages.MESSAGES.classNotFoundException(e);
         }
         final EjbDeploymentInformation ejbDeploymentInformation = this.findEJB(appName, moduleName, distinctName, beanName);
         if (ejbDeploymentInformation == null) {
-            this.writeNoSuchEJBFailureMessage(channel, invocationId, appName, moduleName, distinctName, beanName, null);
+            this.writeNoSuchEJBFailureMessage(channelAssociation, invocationId, appName, moduleName, distinctName, beanName, null);
             return;
         }
         final ClassLoader tccl = SecurityActions.getContextClassLoader();
+        Runnable runnable = null;
         try {
             //set the correct TCCL for unmarshalling
             SecurityActions.setContextClassLoader(ejbDeploymentInformation.getDeploymentClassLoader());
             // now switch the CL to the EJB deployment's CL so that the unmarshaller can use the
             // correct CL for the rest of the unmarshalling of the stream
-            classLoaderProvider.switchClassLoader(ejbDeploymentInformation.getDeploymentClassLoader());
+            classResolver.switchClassLoader(ejbDeploymentInformation.getDeploymentClassLoader());
             // read the Locator
-            final EJBLocator locator;
+            final EJBLocator<?> locator;
             try {
-                locator = (EJBLocator) unMarshaller.readObject();
+                locator = (EJBLocator<?>) unmarshaller.readObject();
             } catch (ClassNotFoundException e) {
-                throw new RuntimeException(e);
+                throw EjbMessages.MESSAGES.classNotFoundException(e);
             }
             final String viewClassName = locator.getViewType().getName();
-            if (!ejbDeploymentInformation.getViewNames().contains(viewClassName)) {
-                this.writeNoSuchEJBFailureMessage(channel, invocationId, appName, moduleName, distinctName, beanName, viewClassName);
+            // Make sure it's a remote view
+            if (!ejbDeploymentInformation.isRemoteView(viewClassName)) {
+                this.writeNoSuchEJBFailureMessage(channelAssociation, invocationId, appName, moduleName, distinctName, beanName, viewClassName);
                 return;
             }
-            // TODO: Add a check for remote view
             final ComponentView componentView = ejbDeploymentInformation.getView(viewClassName);
             final Method invokedMethod = this.findMethod(componentView, methodName, methodParamTypes);
             if (invokedMethod == null) {
-                this.writeNoSuchEJBMethodFailureMessage(channel, invocationId, appName, moduleName, distinctName, beanName, viewClassName, methodName, methodParamTypes);
+                this.writeNoSuchEJBMethodFailureMessage(channelAssociation, invocationId, appName, moduleName, distinctName, beanName, viewClassName, methodName, methodParamTypes);
                 return;
             }
 
@@ -145,17 +156,27 @@ class MethodInvocationMessageHandler extends EJBIdentifierBasedMessageHandler {
             if (methodParamTypes.length > 0) {
                 for (int i = 0; i < methodParamTypes.length; i++) {
                     try {
-                        methodParams[i] = unMarshaller.readObject();
+                        methodParams[i] = unmarshaller.readObject();
                     } catch (ClassNotFoundException cnfe) {
-                        // TODO: Write out invocation failure to channel outstream
-                        throw new RuntimeException(cnfe);
+                        // write out the failure
+                        MethodInvocationMessageHandler.this.writeException(channelAssociation, MethodInvocationMessageHandler.this.marshallerFactory, invocationId, cnfe, null);
+                        return;
                     }
                 }
             }
-            unMarshaller.finish();
+            // read the attachments
+            final Map<String, Object> attachments;
+            try {
+                attachments = this.readAttachments(unmarshaller);
+            } catch (ClassNotFoundException cnfe) {
+                // write out the failure
+                MethodInvocationMessageHandler.this.writeException(channelAssociation, MethodInvocationMessageHandler.this.marshallerFactory, invocationId, cnfe, null);
+                return;
+            }
+            // done with unmarshalling
+            unmarshaller.finish();
 
-            // invoke the method and write out the response on a separate thread
-            executorService.submit(new Runnable() {
+            runnable = new Runnable() {
 
                 @Override
                 public void run() {
@@ -163,95 +184,117 @@ class MethodInvocationMessageHandler extends EJBIdentifierBasedMessageHandler {
                     // it can unblock if necessary)
                     if (componentView.isAsynchronous(invokedMethod)) {
                         try {
-                            MethodInvocationMessageHandler.this.writeAsyncMethodNotification(channel, invocationId);
+                            MethodInvocationMessageHandler.this.writeAsyncMethodNotification(channelAssociation, invocationId);
                         } catch (Throwable t) {
                             // catch Throwable, so that we don't skip invoking the method, just because we
                             // failed to send a notification to the client that the method is an async method
-                            logger.warn("Method " + invokedMethod + " was a async method but the client could not be informed about the same. This will mean that the client might block till the method completes", t);
+                            EjbLogger.EJB3_LOGGER.failedToSendAsyncMethodIndicatorToClient(t, invokedMethod);
                         }
                     }
 
                     // invoke the method
                     Object result = null;
+                    RemotingContext.setConnection(channelAssociation.getChannel().getConnection());
                     try {
                         result = invokeMethod(componentView, invokedMethod, methodParams, locator, attachments);
                     } catch (Throwable throwable) {
                         try {
                             // write out the failure
-                            MethodInvocationMessageHandler.this.writeException(channel, invocationId, throwable, attachments);
+                            MethodInvocationMessageHandler.this.writeException(channelAssociation, MethodInvocationMessageHandler.this.marshallerFactory, invocationId, throwable, attachments);
                         } catch (IOException ioe) {
-                            // we couldn't write out a method invocation failure message. So let's atleast log the
+                            // we couldn't write out a method invocation failure message. So let's at least log the
                             // actual method invocation exception, for debugging/reference
                             logger.error("Error invoking method " + invokedMethod + " on bean named " + beanName
                                     + " for appname " + appName + " modulename " + moduleName + " distinctname " + distinctName, throwable);
                             // now log why we couldn't send back the method invocation failure message
                             logger.error("Could not write method invocation failure for method " + invokedMethod + " on bean named " + beanName
                                     + " for appname " + appName + " modulename " + moduleName + " distinctname " + distinctName + " due to ", ioe);
-                            // close the channel
-                            IoUtils.safeClose(channel);
+                            // close the channel unless this is a NotSerializableException
+                            //as this does not represent a problem with the channel there is no
+                            //need to close it (see AS7-3402)
+                            if(!(ioe instanceof ObjectStreamException)) {
+                                IoUtils.safeClose(channelAssociation.getChannel());
+                            }
                             return;
                         }
+                    } finally {
+                        RemotingContext.clear();
                     }
                     // write out the (successful) method invocation result to the channel output stream
                     try {
-                        writeMethodInvocationResponse(channel, invocationId, result, attachments);
+                        // attach any weak affinity if available
+                        Affinity weakAffinity = null;
+                        if (locator instanceof StatefulEJBLocator && componentView.getComponent() instanceof StatefulSessionComponent) {
+                            final StatefulSessionComponent statefulSessionComponent = (StatefulSessionComponent) componentView.getComponent();
+                            weakAffinity = MethodInvocationMessageHandler.this.getWeakAffinity(statefulSessionComponent, (StatefulEJBLocator<?>) locator);
+                        } else if (componentView.getComponent() instanceof StatelessSessionComponent) {
+                            final StatelessSessionComponent statelessSessionComponent = (StatelessSessionComponent) componentView.getComponent();
+                            weakAffinity = statelessSessionComponent.getWeakAffinity();
+                        }
+                        if (weakAffinity != null) {
+                            attachments.put(Affinity.WEAK_AFFINITY_CONTEXT_KEY, weakAffinity);
+                        }
+                        writeMethodInvocationResponse(channelAssociation, invocationId, result, attachments);
                     } catch (IOException ioe) {
                         logger.error("Could not write method invocation result for method " + invokedMethod + " on bean named " + beanName
                                 + " for appname " + appName + " modulename " + moduleName + " distinctname " + distinctName + " due to ", ioe);
-                        // close the channel
-                        IoUtils.safeClose(channel);
+                        // close the channel unless this is a NotSerializableException
+                        //as this does not represent a problem with the channel there is no
+                        //need to close it (see AS7-3402)
+                        if(!(ioe instanceof ObjectStreamException)) {
+                            IoUtils.safeClose(channelAssociation.getChannel());
+                        }
                         return;
                     }
                 }
-            });
+            };
         } finally {
             SecurityActions.setContextClassLoader(tccl);
         }
-
+        // invoke the method and write out the response on a separate thread
+        executorService.submit(runnable);
     }
 
-    private Object invokeMethod(final ComponentView componentView, final Method method, final Object[] args, final EJBLocator ejbLocator, final RemotingAttachments attachments) throws Throwable {
+    private Affinity getWeakAffinity(final StatefulSessionComponent statefulSessionComponent, final StatefulEJBLocator<?> statefulEJBLocator) {
+        final SessionID sessionID = statefulEJBLocator.getSessionId();
+        return statefulSessionComponent.getCache().getWeakAffinity(sessionID);
+    }
+
+    private Object invokeMethod(final ComponentView componentView, final Method method, final Object[] args, final EJBLocator<?> ejbLocator, final Map<String, Object> attachments) throws Throwable {
         final InterceptorContext interceptorContext = new InterceptorContext();
         interceptorContext.setParameters(args);
         interceptorContext.setMethod(method);
         interceptorContext.setContextData(new HashMap<String, Object>());
         interceptorContext.putPrivateData(Component.class, componentView.getComponent());
         interceptorContext.putPrivateData(ComponentView.class, componentView);
+        interceptorContext.putPrivateData(InvocationType.class, InvocationType.REMOTE);
         if (attachments != null) {
-            // attach the RemotingAttachments
-            interceptorContext.putPrivateData(RemotingAttachments.class, attachments);
+            // attach the attachments which were passed from the remote client
+            for (final Map.Entry<String, Object> attachment : attachments.entrySet()) {
+                if (attachment == null) {
+                    continue;
+                }
+                final String key = attachment.getKey();
+                final Object value = attachment.getValue();
+                // add it to the context
+                interceptorContext.putPrivateData(key, value);
+            }
         }
         // add the session id to the interceptor context, if it's a stateful ejb locator
         if (ejbLocator instanceof StatefulEJBLocator) {
-            interceptorContext.putPrivateData(SessionID.SESSION_ID_KEY, ((StatefulEJBLocator) ejbLocator).getSessionId());
+            interceptorContext.putPrivateData(SessionID.class, ((StatefulEJBLocator<?>) ejbLocator).getSessionId());
         } else if (ejbLocator instanceof EntityEJBLocator) {
-            final Object primaryKey = ((EntityEJBLocator) ejbLocator).getPrimaryKey();
+            final Object primaryKey = ((EntityEJBLocator<?>) ejbLocator).getPrimaryKey();
             interceptorContext.putPrivateData(EntityBeanComponent.PRIMARY_KEY_CONTEXT_KEY, primaryKey);
         }
         if (componentView.isAsynchronous(method)) {
             final Component component = componentView.getComponent();
             if (!(component instanceof SessionBeanComponent)) {
-                logger.warn("Asynchronous invocations are only supported on session beans. Bean class " + component.getComponentClass()
-                        + " is not a session bean, invocation on method " + method + " will have no asynchronous semantics");
+                EjbLogger.EJB3_LOGGER.asyncMethodSupportedOnlyForSessionBeans(component.getComponentClass(), method);
                 // just invoke normally
                 return componentView.invoke(interceptorContext);
             }
-            // it's really a async method invocation on a session bean. So treat it accordingly
-            final SessionBeanComponent sessionBeanComponent = (SessionBeanComponent) componentView.getComponent();
-            final CancellationFlag cancellationFlag = new CancellationFlag();
-            // add the cancellation flag to the interceptor context
-            interceptorContext.putPrivateData(CancellationFlag.class, cancellationFlag);
-
-            final AsyncInvocationTask asyncInvocationTask = new AsyncInvocationTask(cancellationFlag) {
-                @Override
-                protected Object runInvocation() throws Exception {
-                    return componentView.invoke(interceptorContext);
-                }
-            };
-            // invoke
-            sessionBeanComponent.getAsynchronousExecutor().submit(asyncInvocationTask);
-            // wait/block for the bean invocation to complete and get the real result to be returned to the client
-            return asyncInvocationTask.get();
+            return ((Future)componentView.invoke(interceptorContext)).get();
         } else {
             return componentView.invoke(interceptorContext);
         }
@@ -280,63 +323,78 @@ class MethodInvocationMessageHandler extends EJBIdentifierBasedMessageHandler {
         return null;
     }
 
-    private void writeMethodInvocationResponse(final Channel channel, final short invocationId, final Object result, final RemotingAttachments attachments) throws IOException {
-        final DataOutputStream outputStream = new DataOutputStream(channel.writeMessage());
+    private void writeMethodInvocationResponse(final ChannelAssociation channelAssociation, final short invocationId, final Object result, final Map<String, Object> attachments) throws IOException {
+        final DataOutputStream outputStream;
+        final MessageOutputStream messageOutputStream;
+        try {
+            messageOutputStream = channelAssociation.acquireChannelMessageOutputStream();
+        } catch (Exception e) {
+            throw EjbMessages.MESSAGES.failedToOpenMessageOutputStream(e);
+        }
+        outputStream = new DataOutputStream(messageOutputStream);
         try {
             // write invocation response header
             outputStream.write(HEADER_METHOD_INVOCATION_RESPONSE);
             // write the invocation id
             outputStream.writeShort(invocationId);
-            // write the attachments
-            this.writeAttachments(outputStream, attachments);
-
             // write out the result
-            final Marshaller marshaller = MarshallerFactory.createMarshaller(this.marshallingStrategy);
-            marshaller.start(outputStream);
+            final Marshaller marshaller = this.prepareForMarshalling(this.marshallerFactory, outputStream);
             marshaller.writeObject(result);
+            // write the attachments
+            this.writeAttachments(marshaller, attachments);
+            // finish marshalling
             marshaller.finish();
         } finally {
+            channelAssociation.releaseChannelMessageOutputStream(messageOutputStream);
             outputStream.close();
         }
     }
 
 
-    private void writeAsyncMethodNotification(final Channel channel, final short invocationId) throws IOException {
-        final DataOutputStream outputStream = new DataOutputStream(channel.writeMessage());
+    private void writeAsyncMethodNotification(final ChannelAssociation channelAssociation, final short invocationId) throws IOException {
+        final DataOutputStream outputStream;
+        final MessageOutputStream messageOutputStream;
+        try {
+            messageOutputStream = channelAssociation.acquireChannelMessageOutputStream();
+        } catch (Exception e) {
+            throw EjbMessages.MESSAGES.failedToOpenMessageOutputStream(e);
+        }
+        outputStream = new DataOutputStream(messageOutputStream);
         try {
             // write the header
             outputStream.write(HEADER_ASYNC_METHOD_NOTIFICATION);
             // write the invocation id
             outputStream.writeShort(invocationId);
         } finally {
+            channelAssociation.releaseChannelMessageOutputStream(messageOutputStream);
             outputStream.close();
         }
     }
 
     /**
-     * A mutable {@link org.jboss.as.ejb3.remote.protocol.versionone.UnMarshaller.ClassLoaderProvider}
+     * A mutable {@link org.jboss.marshalling.ClassResolver}
      */
-    private class ClassLoaderSwitchingClassLoaderProvider implements UnMarshaller.ClassLoaderProvider {
+    private class ClassLoaderSwitchingClassResolver extends AbstractClassResolver {
 
         private ClassLoader currentClassLoader;
 
-        ClassLoaderSwitchingClassLoaderProvider(final ClassLoader classLoader) {
+        ClassLoaderSwitchingClassResolver(final ClassLoader classLoader) {
             this.currentClassLoader = classLoader;
-        }
-
-        @Override
-        public ClassLoader provideClassLoader() {
-            return this.currentClassLoader;
         }
 
         /**
          * Sets the passed <code>newCL</code> as the classloader which will be returned on
-         * subsequent calls to {@link #provideClassLoader()}
+         * subsequent calls to {@link #getClassLoader()}
          *
          * @param newCL
          */
         void switchClassLoader(final ClassLoader newCL) {
             this.currentClassLoader = newCL;
+        }
+
+        @Override
+        protected ClassLoader getClassLoader() {
+            return this.currentClassLoader;
         }
     }
 }

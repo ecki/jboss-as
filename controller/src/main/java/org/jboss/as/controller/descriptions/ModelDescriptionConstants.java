@@ -36,6 +36,7 @@ public class ModelDescriptionConstants {
     public static final String ACCESS_TYPE = "access-type";
     public static final String ADD = "add";
     public static final String ADDRESS = "address";
+    public static final String ADMIN_ONLY = "admin-only";
     public static final String ADVANCED_FILTER = "advanced-filter";
     public static final String ALLOWED = "allowed";
     public static final String ALLOW_RESOURCE_SERVICE_RESTART = "allow-resource-service-restart";
@@ -48,18 +49,22 @@ public class ModelDescriptionConstants {
     public static final String ARCHIVE = "archive";
     public static final String ATTRIBUTES = "attributes";
     public static final String AUTHENTICATION = "authentication";
+    public static final String AUTHORIZATION = "authorization";
     public static final String AUTO_START = "auto-start";
     public static final String BASE_DN = "base-dn";
     public static final String BOOT_TIME = "boot-time";
     public static final String BYTES = "bytes";
+    public static final String CALLER_TYPE = "caller-type";
     public static final String CANCELLED = "cancelled";
     public static final String CHILD_TYPE = "child-type";
     public static final String CHILDREN = "children";
+    public static final String CLIENT_MAPPINGS = "client-mappings";
     public static final String CODE = "code";
     public static final String COMPOSITE = "composite";
     public static final String CONCURRENT_GROUPS = "concurrent-groups";
     public static final String CONNECTION = "connection";
     public static final String CONNECTIONS = "connections";
+    public static final String CONSOLE_ENABLED = "console-enabled";
     public static final String CONTENT = "content";
     public static final String CORE_SERVICE = "core-service";
     public static final String CPU_AFFINITY = "cpu-affinity";
@@ -70,7 +75,10 @@ public class ModelDescriptionConstants {
     public static final String DEPLOYMENT = "deployment";
     public static final String DESCRIBE = "describe";
     public static final String DESCRIPTION = "description";
+    public static final String DESTINATION_ADDRESS = "destination-address";
+    public static final String DESTINATION_PORT = "destination-port";
     public static final String DIRECTORY = "directory";
+    public static final String DIRECTORY_GROUPING = "directory-grouping";
     public static final String DISABLE = "disable";
     public static final String DOMAIN_FAILURE_DESCRIPTION = "domain-failure-description";
     public static final String DOMAIN_CONTROLLER = "domain-controller";
@@ -92,10 +100,15 @@ public class ModelDescriptionConstants {
     public static final String HASH = "hash";
     public static final String HEAD_COMMENT_ALLOWED = "head-comment-allowed";
     public static final String HOST = "host";
+    public static final String HOST_CONTROLLER = "host-controller";
+    public static final String HOST_ENVIRONMENT = "host-environment";
     public static final String HOST_FAILURE_DESCRIPTION = "host-failure-description";
     public static final String HOST_FAILURE_DESCRIPTIONS = "host-failure-descriptions";
+    public static final String HOST_STATE = "host-state";
     public static final String HTTP_INTERFACE = "http-interface";
     public static final String IGNORED = "ignored-by-unaffected-host-controller";
+    public static final String IGNORED_RESOURCES = "ignored-resources";
+    public static final String IGNORED_RESOURCE_TYPE = "ignored-resource-type";
     public static final String IN_SERIES = "in-series";
     public static final String INCLUDE = "include";
     public static final String INCLUDES = "includes";
@@ -106,16 +119,20 @@ public class ModelDescriptionConstants {
     public static final String INITIAL_CONTEXT_FACTORY = "initial-context-factory";
     public static final String INPUT_STREAM_INDEX = "input-stream-index";
     public static final String INTERFACE = "interface";
+    public static final String JAAS = "jaas";
     public static final String JVM = "jvm";
-    public static final String JVM_TYPE = "type";
-    public static final String KEYSTORE = "keystore";
     public static final String LDAP = "ldap";
+    public static final String LDAP_CONNECTION = "ldap-connection";
     public static final String LOCAL = "local";
     public static final String LOCAL_DESTINATION_OUTBOUND_SOCKET_BINDING = "local-destination-outbound-socket-binding";
+    public static final String LOCAL_HOST_NAME = "local-host-name";
     public static final String LOCALE = "locale";
     public static final String MANAGEMENT_SUBSYSTEM_ENDPOINT = "management-subsystem-endpoint";
     public static final String MANAGEMENT = "management";
+    public static final String MANAGEMENT_CLIENT_CONTENT = "management-client-content";
     public static final String MANAGEMENT_INTERFACE = "management-interface";
+    public static final String MANAGEMENT_MAJOR_VERSION = "management-major-version";
+    public static final String MANAGEMENT_MINOR_VERSION = "management-minor-version";
     public static final String MASK = "mask";
     public static final String MASTER = "master";
     public static final String MAX = "max";
@@ -128,6 +145,7 @@ public class ModelDescriptionConstants {
     public static final String MIN_LENGTH = "min-length";
     public static final String MIN_OCCURS = "min-occurs";
     public static final String MODEL_DESCRIPTION = "model-description";
+    public static final String MODULE = "module";
     public static final String MULTICAST_ADDRESS = "multicast-address";
     public static final String MULTICAST_PORT = "multicast-port";
     public static final String NAME = "name";
@@ -158,8 +176,11 @@ public class ModelDescriptionConstants {
     public static final String PORT = "port";
     public static final String PORT_OFFSET = "port-offset";
     public static final String PRIORITY = "priority";
+    public static final String PROBLEM = "problem";
     public static final String PROCESS_TYPE = "process-type";
     public static final String PROCESS_STATE = "process-state";
+    public static final String PRODUCT_NAME = "product-name";
+    public static final String PRODUCT_VERSION = "product-version";
     public static final String PROFILE = "profile";
     public static final String PROFILE_NAME = "profile-name";
     public static final String PROPERTIES = "properties";
@@ -176,7 +197,9 @@ public class ModelDescriptionConstants {
     public static final String READ_RESOURCE_DESCRIPTION_OPERATION = "read-resource-description";
     public static final String READ_RESOURCE_METRICS = "read-resource-metrics";
     public static final String READ_RESOURCE_OPERATION = "read-resource";
+    public static final String READ_TRANSFORMED_RESOURCE_OPERATION = "read-transformed-resource";
     public static final String RECURSIVE = "recursive";
+    public static final String RECURSIVE_DEPTH = "recursive-depth";
     public static final String REDEPLOY = "redeploy";
     public static final String RELATIVE_TO = "relative-to";
     public static final String RELEASE_CODENAME = "release-codename";
@@ -191,6 +214,7 @@ public class ModelDescriptionConstants {
     public static final String REQUIRES = "requires";
     public static final String RESPONSE = "response";
     public static final String RESPONSE_HEADERS = "response-headers";
+    public static final String RESTART = "restart";
     public static final String RESTART_REQUIRED = "restart-required";
     public static final String RESULT = "result";
     public static final String ROLLBACK_ACROSS_GROUPS = "rollback-across-groups";
@@ -199,6 +223,7 @@ public class ModelDescriptionConstants {
     public static final String ROLLED_BACK = "rolled-back";
     public static final String ROLLING_TO_SERVERS = "rolling-to-servers";
     public static final String ROLLOUT_PLAN = "rollout-plan";
+    public static final String ROLLOUT_PLANS = "rollout-plans";
     public static final String RUNNING_SERVER = "server";
     public static final String RUNTIME_NAME = "runtime-name";
     public static final String RUNTIME_UPDATE_SKIPPED = "runtime-update-skipped";
@@ -217,8 +242,10 @@ public class ModelDescriptionConstants {
     public static final String SERVER_GROUP = "server-group";
     public static final String SERVER_GROUPS = "server-groups";
     public static final String SERVER_IDENTITIES = "server-identities";
+    public static final String SERVER_IDENTITY = "server-identity";
     public static final String SERVER_OPERATIONS = "server-operations";
     public static final String SERVICE_CONTAINER = "service-container";
+    public static final String SOURCE_NETWORK = "source-network";
     public static final String OPERATION_REQUIRES_RELOAD = "operation-requires-reload";
     public static final String OPERATION_REQUIRES_RESTART = "operation-requires-restart";
     public static final String RESTART_SERVERS = "restart-servers";
@@ -246,7 +273,9 @@ public class ModelDescriptionConstants {
     public static final String SYSTEM_PROPERTIES = "system-properties";
     public static final String TAIL_COMMENT_ALLOWED = "tail-comment-allowed";
     public static final String TO_REPLACE = "to-replace";
+    public static final String TRUSTSTORE = "truststore";
     public static final String TYPE = "type";
+    public static final String UNDEFINE_ATTRIBUTE_OPERATION = "undefine-attribute";
     public static final String UNDEPLOY = "undeploy";
     public static final String UPLOAD_DEPLOYMENT_BYTES = "upload-deployment-bytes";
     public static final String UPLOAD_DEPLOYMENT_URL = "upload-deployment-url";
@@ -256,14 +285,18 @@ public class ModelDescriptionConstants {
     public static final String URL = "url";
     public static final String USER = "user";
     public static final String USER_DN = "user-dn";
+    public static final String USERNAME = "username";
     public static final String USERNAME_ATTRIBUTE = "username-attribute";
     public static final String USERS = "users";
+    public static final String VALIDATE_OPERATION = "validate-operation";
+    public static final String VALID = "valid";
     public static final String VALUE = "value";
     public static final String VALUE_TYPE = "value-type";
-    public static final String WRITE_ATTRIBUTE_OPERATION = "write-attribute";
     public static final String VAULT = "vault";
     public static final String VAULT_OPTION = "vault-option";
     public static final String VAULT_OPTIONS = "vault-options";
+    public static final String WILDCARD = "wildcard";
+    public static final String WRITE_ATTRIBUTE_OPERATION = "write-attribute";
 
     private ModelDescriptionConstants() {
     }

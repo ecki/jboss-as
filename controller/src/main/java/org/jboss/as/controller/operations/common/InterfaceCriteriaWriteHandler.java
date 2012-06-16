@@ -27,8 +27,11 @@ import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.PathAddress;
-import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
+
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.NAME;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.VALUE;
 import org.jboss.as.controller.descriptions.common.InterfaceDescription;
+import org.jboss.as.controller.operations.validation.ParametersValidator;
 import org.jboss.as.controller.registry.ManagementResourceRegistration;
 import org.jboss.as.controller.registry.Resource;
 import org.jboss.dmr.ModelNode;
@@ -37,6 +40,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.jboss.as.controller.ControllerMessages.MESSAGES;
+import org.jboss.dmr.ModelType;
 
 /**
  * Interface criteria write-attribute {@code OperationHandler}
@@ -45,10 +49,13 @@ import static org.jboss.as.controller.ControllerMessages.MESSAGES;
  */
 public final class InterfaceCriteriaWriteHandler implements OperationStepHandler {
 
-    public static final OperationStepHandler INSTANCE = new InterfaceCriteriaWriteHandler();
+    public static final InterfaceCriteriaWriteHandler UPDATE_RUNTIME = new InterfaceCriteriaWriteHandler(true);
+
+    public static final InterfaceCriteriaWriteHandler CONFIG_ONLY = new InterfaceCriteriaWriteHandler(false);
 
     private static final Map<String, AttributeDefinition> ATTRIBUTES = new HashMap<String, AttributeDefinition>();
     private static final OperationStepHandler VERIFY_HANDLER = new ModelValidationStep();
+    private static final ParametersValidator nameValidator = new ParametersValidator();
 
     static {
         for(final AttributeDefinition def : InterfaceDescription.ROOT_ATTRIBUTES) {
@@ -56,32 +63,39 @@ public final class InterfaceCriteriaWriteHandler implements OperationStepHandler
         }
     }
 
-    public static void register(final ManagementResourceRegistration registration) {
+    public void register(final ManagementResourceRegistration registration) {
         for(final AttributeDefinition def : InterfaceDescription.ROOT_ATTRIBUTES) {
-            registration.registerReadWriteAttribute(def, null, INSTANCE);
+            registration.registerReadWriteAttribute(def, null, this);
         }
     }
 
-    private InterfaceCriteriaWriteHandler() {
-        //
+    private final boolean updateRuntime;
+
+    private InterfaceCriteriaWriteHandler(final boolean updateRuntime) {
+        this.updateRuntime = updateRuntime;
     }
 
     @Override
     public void execute(final OperationContext context, final ModelNode operation) throws OperationFailedException {
-        final Resource resource = context.readResourceForUpdate(PathAddress.EMPTY_ADDRESS);
-        final ModelNode model = resource.getModel();
-        final String name = operation.require(ModelDescriptionConstants.NAME).asString();
-        final AttributeDefinition def = ATTRIBUTES.get(name);
-        if(def == null) {
-            throw new OperationFailedException(new ModelNode().set(MESSAGES.unknownAttribute(name)));
+        nameValidator.validate(operation);
+        final String attributeName = operation.require(NAME).asString();
+        final ModelNode newValue = operation.hasDefined(VALUE) ? operation.get(VALUE) : new ModelNode();
+        final ModelNode submodel = context.readResourceForUpdate(PathAddress.EMPTY_ADDRESS).getModel();
+        final AttributeDefinition attributeDefinition = ATTRIBUTES.get(attributeName);
+        if (attributeDefinition != null) {
+            final ModelNode syntheticOp = new ModelNode();
+            syntheticOp.get(attributeName).set(newValue);
+            attributeDefinition.validateAndSet(syntheticOp, submodel);
+        } else {
+            throw new OperationFailedException(new ModelNode().set(MESSAGES.unknownAttribute(attributeName)));
         }
-        final ModelNode value = operation.get(ModelDescriptionConstants.VALUE);
-        def.getValidator().validateParameter(name, value);
-        model.get(name).set(value);
-        context.reloadRequired();
+        if (updateRuntime) {
+            // Require a reload
+            context.reloadRequired();
+        }
         // Verify the model in a later step
-        context.addStep(VERIFY_HANDLER, OperationContext.Stage.VERIFY);
-        if (context.completeStep() != OperationContext.ResultAction.KEEP) {
+        context.addStep(VERIFY_HANDLER, OperationContext.Stage.MODEL);
+        if (context.completeStep() != OperationContext.ResultAction.KEEP && updateRuntime) {
             context.revertReloadRequired();
         }
     }
@@ -99,6 +113,10 @@ public final class InterfaceCriteriaWriteHandler implements OperationStepHandler
                     throw new OperationFailedException(new ModelNode().set(MESSAGES.required(attributeName)));
                 }
                 if(has) {
+                    // Just ignore 'false'
+                    if(definition.getType() == ModelType.BOOLEAN && ! model.get(attributeName).asBoolean()) {
+                        continue;
+                    }
                     if(! isAllowed(definition, model)) {
                         // TODO probably move this into AttributeDefinition
                         String[] alts = definition.getAlternatives();
@@ -119,12 +137,12 @@ public final class InterfaceCriteriaWriteHandler implements OperationStepHandler
                     }
                 }
             }
-            context.completeStep();
+            context.completeStep(OperationContext.RollbackHandler.NOOP_ROLLBACK_HANDLER);
         }
 
         boolean isRequired(final AttributeDefinition def, final ModelNode model) {
             final boolean required = ! def.isAllowNull();
-            return required ? ! hasAlternative(def.getAlternatives(), model) : required;
+            return required ? ! hasAlternative(def.getAlternatives(), model, true) : required;
         }
 
         boolean isAllowed(final AttributeDefinition def, final ModelNode model) {
@@ -132,6 +150,9 @@ public final class InterfaceCriteriaWriteHandler implements OperationStepHandler
             if(alternatives != null) {
                 for(final String alternative : alternatives) {
                     if(model.hasDefined(alternative)) {
+                        if(ATTRIBUTES.get(alternative).getType() == ModelType.BOOLEAN) {
+                            return ! model.get(alternative).asBoolean();
+                        }
                         return false;
                     }
                 }
@@ -139,10 +160,15 @@ public final class InterfaceCriteriaWriteHandler implements OperationStepHandler
             return true;
         }
 
-        boolean hasAlternative(final String[] alternatives,  ModelNode operationObject) {
+        boolean hasAlternative(final String[] alternatives,  ModelNode operationObject, boolean ignoreBoolean) {
             if(alternatives != null) {
                 for(final String alternative : alternatives) {
                     if(operationObject.hasDefined(alternative)) {
+                        if(ignoreBoolean) {
+                            if(operationObject.get(alternative).getType() == ModelType.BOOLEAN) {
+                                return operationObject.get(alternative).asBoolean();
+                            }
+                        }
                         return true;
                     }
                 }

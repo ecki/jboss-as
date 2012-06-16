@@ -23,6 +23,7 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.DOM
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.LOCAL;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.REMOTE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SECURITY_REALM;
+import static org.jboss.dmr.ModelType.STRING;
 
 import java.util.Locale;
 
@@ -34,15 +35,19 @@ import org.jboss.as.controller.SimpleAttributeDefinition;
 import org.jboss.as.controller.SimpleAttributeDefinitionBuilder;
 import org.jboss.as.controller.descriptions.DescriptionProvider;
 import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
+import org.jboss.as.controller.extension.ExtensionRegistry;
 import org.jboss.as.controller.operations.validation.IntRangeValidator;
 import org.jboss.as.controller.operations.validation.StringLengthValidator;
 import org.jboss.as.controller.registry.AttributeAccess;
 import org.jboss.as.controller.registry.ManagementResourceRegistration;
 import org.jboss.as.controller.registry.Resource;
+import org.jboss.as.controller.services.path.PathManagerService;
 import org.jboss.as.domain.controller.DomainModelUtil;
-import org.jboss.as.domain.controller.FileRepository;
 import org.jboss.as.host.controller.HostControllerConfigurationPersister;
 import org.jboss.as.host.controller.descriptions.HostRootDescription;
+import org.jboss.as.host.controller.ignored.IgnoredDomainResourceRegistry;
+import org.jboss.as.repository.ContentRepository;
+import org.jboss.as.repository.HostFileRepository;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.ModelType;
 
@@ -60,29 +65,36 @@ public class RemoteDomainControllerAddHandler implements OperationStepHandler, D
     public static final SimpleAttributeDefinition HOST = new SimpleAttributeDefinitionBuilder(ModelDescriptionConstants.HOST, ModelType.STRING, false)
             .setAllowExpression(true).setValidator(new StringLengthValidator(1, Integer.MAX_VALUE, false, true)).setFlags(AttributeAccess.Flag.RESTART_JVM).build();
 
+    public static final SimpleAttributeDefinition USERNAME = new SimpleAttributeDefinitionBuilder(
+            ModelDescriptionConstants.USERNAME, STRING, true).setAllowExpression(true)
+            .setValidator(new StringLengthValidator(1, Integer.MAX_VALUE, true, true))
+            .setFlags(AttributeAccess.Flag.RESTART_JVM).build();
+
     private final ManagementResourceRegistration rootRegistration;
     private final HostControllerConfigurationPersister overallConfigPersister;
-    private final FileRepository fileRepository;
+    private final ContentRepository contentRepository;
+    private final HostFileRepository fileRepository;
     private final LocalHostControllerInfoImpl hostControllerInfo;
+    private final ExtensionRegistry extensionRegistry;
+    private final IgnoredDomainResourceRegistry ignoredDomainResourceRegistry;
+    private final PathManagerService pathManager;
 
-    public static RemoteDomainControllerAddHandler getInstance(final ManagementResourceRegistration rootRegistration,
-                                                                 final LocalHostControllerInfoImpl hostControllerInfo,
-                                                                 final HostControllerConfigurationPersister overallConfigPersister,
-                                                                 final FileRepository fileRepository) {
-        return new RemoteDomainControllerAddHandler(rootRegistration, hostControllerInfo, overallConfigPersister, fileRepository);
-    }
-
-    /**
-     * Create the ServerAddHandler
-     */
-    RemoteDomainControllerAddHandler(final ManagementResourceRegistration rootRegistration,
-                                     final LocalHostControllerInfoImpl hostControllerInfo,
-                                     final HostControllerConfigurationPersister overallConfigPersister,
-                                     final FileRepository fileRepository) {
+    public RemoteDomainControllerAddHandler(final ManagementResourceRegistration rootRegistration,
+                                               final LocalHostControllerInfoImpl hostControllerInfo,
+                                               final HostControllerConfigurationPersister overallConfigPersister,
+                                               final ContentRepository contentRepository,
+                                               final HostFileRepository fileRepository,
+                                               final ExtensionRegistry extensionRegistry,
+                                               final IgnoredDomainResourceRegistry ignoredDomainResourceRegistry,
+                                               final PathManagerService pathManager) {
         this.rootRegistration = rootRegistration;
         this.overallConfigPersister = overallConfigPersister;
+        this.contentRepository = contentRepository;
         this.fileRepository = fileRepository;
         this.hostControllerInfo = hostControllerInfo;
+        this.extensionRegistry = extensionRegistry;
+        this.ignoredDomainResourceRegistry = ignoredDomainResourceRegistry;
+        this.pathManager = pathManager;
     }
 
     @Override
@@ -94,36 +106,53 @@ public class RemoteDomainControllerAddHandler implements OperationStepHandler, D
 
         PORT.validateAndSet(operation, remoteDC);
         HOST.validateAndSet(operation, remoteDC);
+        USERNAME.validateAndSet(operation, remoteDC);
         if (operation.has(SECURITY_REALM)) {
             ModelNode securityRealm = operation.require(SECURITY_REALM);
             dc.get(REMOTE, SECURITY_REALM).set(securityRealm);
             hostControllerInfo.setRemoteDomainControllerSecurityRealm(securityRealm.resolve().asString());
+        } else {
+            remoteDC.get(SECURITY_REALM).clear();
         }
 
         if (dc.has(LOCAL)) {
             dc.remove(LOCAL);
         }
 
+        if (context.isBooting()) {
+            initializeDomain(context, remoteDC);
+        } else {
+            context.reloadRequired();
+        }
+
+        context.completeStep(new OperationContext.RollbackHandler() {
+            @Override
+            public void handleRollback(OperationContext context, ModelNode operation) {
+                if (!context.isBooting()) {
+                    context.revertReloadRequired();
+                }
+            }
+        });
+    }
+
+    protected void initializeDomain(OperationContext context, ModelNode remoteDC) throws OperationFailedException {
         hostControllerInfo.setMasterDomainController(false);
         hostControllerInfo.setRemoteDomainControllerHost(HOST.resolveModelAttribute(context, remoteDC).asString());
         hostControllerInfo.setRemoteDomainControllerPort(PORT.resolveModelAttribute(context, remoteDC).asInt());
+        ModelNode usernameNode = USERNAME.resolveModelAttribute(context, remoteDC);
+        if (usernameNode.isDefined()) {
+            hostControllerInfo.setRemoteDomainControllerUsername(usernameNode.asString());
+        }
 
         overallConfigPersister.initializeDomainConfigurationPersister(true);
 
-        DomainModelUtil.initializeSlaveDomainRegistry(rootRegistration, overallConfigPersister.getDomainPersister(), fileRepository, hostControllerInfo);
-        context.completeStep();
+        DomainModelUtil.initializeSlaveDomainRegistry(rootRegistration, overallConfigPersister.getDomainPersister(),
+                contentRepository, fileRepository, hostControllerInfo, extensionRegistry, ignoredDomainResourceRegistry, pathManager);
     }
-
-  //Done by DomainModelControllerService
-//    protected void performRuntime(OperationContext context, ModelNode operation, ModelNode model, ServiceVerificationHandler verificationHandler, List<ServiceController<?>> newControllers) {
-//        final ModelNode hostModel = context.readModel(PathAddress.EMPTY_ADDRESS);
-//        final ServiceTarget serviceTarget = context.getServiceTarget();
-//        newControllers.add(installRemoteDomainControllerConnection(hostModel, serviceTarget, fileRepository));
-//        newControllers.addAll(installLocalDomainController(hostModel, serviceTarget, true, verificationHandler));
-//    }
 
     @Override
     public ModelNode getModelDescription(final Locale locale) {
+        // TODO replace this with a generated description
         return HostRootDescription.getRemoteDomainControllerAdd(locale);
     }
 }

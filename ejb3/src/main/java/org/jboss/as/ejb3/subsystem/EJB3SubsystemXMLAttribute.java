@@ -30,34 +30,55 @@ import java.util.Map;
 public enum EJB3SubsystemXMLAttribute {
     UNKNOWN(null),
 
+    ALIASES("aliases"),
+
+    BEAN_CACHE("bean-cache"),
+
+    CACHE_CONTAINER("cache-container"),
+    CACHE_REF("cache-ref"),
+    CLIENT_MAPPINGS_CACHE("client-mappings-cache"),
+    CLUSTERED_CACHE_REF("clustered-cache-ref"),
     CONNECTOR_REF("connector-ref"),
     CORE_THREADS("core-threads"),
 
     DEFAULT_ACCESS_TIMEOUT("default-access-timeout"),
 
+    ENABLED("enabled"),
     ENABLE_BY_DEFAULT("enable-by-default"),
 
-    INSTANCE_AQUISITION_TIMEOUT("instance-acquisition-timeout"),
-    INSTANCE_AQUISITION_TIMEOUT_UNIT("instance-acquisition-timeout-unit"),
+    GROUPS_PATH("groups-path"),
+
+    IDLE_TIMEOUT("idle-timeout"),
+    IDLE_TIMEOUT_UNIT("idle-timeout-unit"),
+    INSTANCE_ACQUISITION_TIMEOUT("instance-acquisition-timeout"),
+    INSTANCE_ACQUISITION_TIMEOUT_UNIT("instance-acquisition-timeout-unit"),
 
     KEEPALIVE_TIME("keepalive-time"),
 
     MAX_POOL_SIZE("max-pool-size"),
+    MAX_SIZE("max-size"),
     MAX_THREADS("max-threads"),
 
     NAME("name"),
 
+    PASS_BY_VALUE("pass-by-value"),
+    PASSIVATE_EVENTS_ON_REPLICATE("passivate-events-on-replicate"),
+    PASSIVATION_STORE_REF("passivation-store-ref"),
     PATH("path"),
     POOL_NAME("pool-name"),
 
     RELATIVE_TO("relative-to"),
     RESOURCE_ADAPTER_NAME("resource-adapter-name"),
 
+    SESSIONS_PATH("sessions-path"),
+    SUBDIRECTORY_COUNT("subdirectory-count"),
+
     THREAD_POOL_NAME("thread-pool-name"),
+    TYPE("type"),
 
     USE_QUALIFIED_NAME("use-qualified-name"),
 
-
+    VALUE("value"),
     ;
 
     private final String name;

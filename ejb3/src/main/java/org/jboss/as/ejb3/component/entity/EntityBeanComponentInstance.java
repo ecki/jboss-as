@@ -29,10 +29,14 @@ import java.util.concurrent.atomic.AtomicReference;
 import javax.ejb.EJBLocalObject;
 import javax.ejb.EJBObject;
 import javax.ejb.EntityBean;
+import javax.ejb.Timer;
 
 import org.jboss.as.ee.component.BasicComponent;
+import org.jboss.as.ee.component.interceptors.InvocationType;
+import org.jboss.as.ejb3.EjbLogger;
 import org.jboss.as.ejb3.component.EjbComponentInstance;
 import org.jboss.as.ejb3.context.EntityContextImpl;
+import org.jboss.as.ejb3.timerservice.TimerImpl;
 import org.jboss.as.naming.ManagedReference;
 import org.jboss.invocation.Interceptor;
 import org.jboss.invocation.InterceptorContext;
@@ -46,7 +50,6 @@ public class EntityBeanComponentInstance extends EjbComponentInstance {
      * The primary key of this instance, is it is associated with an object identity
      */
     private volatile Object primaryKey;
-    private volatile boolean isDiscarded;
     private volatile EntityContextImpl entityContext;
     private volatile boolean removed = false;
     private volatile boolean synchronizeRegistered;
@@ -55,14 +58,16 @@ public class EntityBeanComponentInstance extends EjbComponentInstance {
     private final Interceptor ejbActivate;
     private final Interceptor ejbLoad;
     private final Interceptor ejbPassivate;
+    private final Interceptor unsetEntityContext;
 
-    protected EntityBeanComponentInstance(final BasicComponent component, final AtomicReference<ManagedReference> instanceReference, final Interceptor preDestroyInterceptor, final Map<Method, Interceptor> methodInterceptors, final Map<Method, Interceptor> timeoutInterceptors) {
-        super(component, instanceReference, preDestroyInterceptor, methodInterceptors, timeoutInterceptors);
-        final EntityBeanComponent ejbComponent = (EntityBeanComponent)component;
+    protected EntityBeanComponentInstance(final BasicComponent component, final AtomicReference<ManagedReference> instanceReference, final Interceptor preDestroyInterceptor, final Map<Method, Interceptor> methodInterceptors) {
+        super(component, instanceReference, preDestroyInterceptor, methodInterceptors);
+        final EntityBeanComponent ejbComponent = (EntityBeanComponent) component;
         this.ejbStore = ejbComponent.createInterceptor(ejbComponent.getEjbStore());
         this.ejbActivate = ejbComponent.createInterceptor(ejbComponent.getEjbActivate());
         this.ejbLoad = ejbComponent.createInterceptor(ejbComponent.getEjbLoad());
-        this.ejbPassivate  = ejbComponent.createInterceptor(ejbComponent.getEjbPassivate());
+        this.ejbPassivate = ejbComponent.createInterceptor(ejbComponent.getEjbPassivate());
+        this.unsetEntityContext = ejbComponent.createInterceptor(ejbComponent.getUnsetEntityContext());
     }
 
     @Override
@@ -81,21 +86,30 @@ public class EntityBeanComponentInstance extends EjbComponentInstance {
 
 
     public void discard() {
-        if (!isDiscarded) {
-            isDiscarded = true;
+        if (!isDiscarded()) {
             getComponent().getCache().discard(this);
             this.primaryKey = null;
         }
+        super.discard();
     }
 
     @Override
-    public void destroy() {
+    protected void preDestroy() {
         try {
-            getInstance().unsetEntityContext();
+            invokeUnsetEntityContext();
         } catch (RemoteException e) {
             throw new RuntimeException(e);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
-        super.destroy();
+    }
+
+    protected void invokeUnsetEntityContext() throws Exception {
+        final InterceptorContext context = prepareInterceptorContext();
+        final EntityBeanComponent component = getComponent();
+        context.setMethod(component.getUnsetEntityContextMethod());
+        context.putPrivateData(InvocationType.class, InvocationType.UNSET_ENTITY_CONTEXT);
+        unsetEntityContext.processInvocation(context);
     }
 
     /**
@@ -111,8 +125,10 @@ public class EntityBeanComponentInstance extends EjbComponentInstance {
             final EntityBeanComponent component = getComponent();
             final Method ejbActivateMethod = component.getEjbActivateMethod();
             context.setMethod(ejbActivateMethod);
+            context.putPrivateData(InvocationType.class, InvocationType.ENTITY_EJB_ACTIVATE);
             ejbActivate.processInvocation(context);
             final InterceptorContext loadContext = prepareInterceptorContext();
+            context.putPrivateData(InvocationType.class, InvocationType.ENTITY_EJB_EJB_LOAD);
             loadContext.setMethod(component.getEjbLoadMethod());
             ejbLoad.processInvocation(loadContext);
         } catch (RemoteException e) {
@@ -130,10 +146,7 @@ public class EntityBeanComponentInstance extends EjbComponentInstance {
     public synchronized void store() {
         try {
             if (!removed) {
-                final InterceptorContext context = prepareInterceptorContext();
-                final EntityBeanComponent component = getComponent();
-                context.setMethod(component.getEjbStoreMethod());
-                ejbStore.processInvocation(context);
+                invokeEjbStore();
             }
         } catch (RemoteException e) {
             throw new WrappedRemoteException(e);
@@ -142,6 +155,13 @@ public class EntityBeanComponentInstance extends EjbComponentInstance {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    protected void invokeEjbStore() throws Exception {
+        final InterceptorContext context = prepareInterceptorContext();
+        final EntityBeanComponent component = getComponent();
+        context.setMethod(component.getEjbStoreMethod());
+        ejbStore.processInvocation(context);
     }
 
     /**
@@ -155,8 +175,11 @@ public class EntityBeanComponentInstance extends EjbComponentInstance {
                 final InterceptorContext context = prepareInterceptorContext();
                 final EntityBeanComponent component = getComponent();
                 context.setMethod(component.getEjbPassivateMethod());
+                context.putPrivateData(InvocationType.class, InvocationType.ENTITY_EJB_PASSIVATE);
                 ejbPassivate.processInvocation(context);
             }
+            primaryKey = null;
+            removed = false;
         } catch (RemoteException e) {
             throw new WrappedRemoteException(e);
         } catch (RuntimeException e) {
@@ -166,13 +189,20 @@ public class EntityBeanComponentInstance extends EjbComponentInstance {
         }
     }
 
-    public void setupContext() {
+    public void setupContext(final InterceptorContext interceptorContext) {
+
+        final InvocationType invocationType = interceptorContext.getPrivateData(InvocationType.class);
         try {
+            interceptorContext.putPrivateData(InvocationType.class, InvocationType.SET_ENTITY_CONTEXT);
             final EntityContextImpl entityContext = new EntityContextImpl(this);
             setEjbContext(entityContext);
             getInstance().setEntityContext(entityContext);
         } catch (RemoteException e) {
             throw new WrappedRemoteException(e);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        } finally {
+            interceptorContext.putPrivateData(InvocationType.class, invocationType);
         }
     }
 
@@ -187,7 +217,7 @@ public class EntityBeanComponentInstance extends EjbComponentInstance {
     public EJBObject getEjbObject() {
         final Object pk = getPrimaryKey();
         if (pk == null) {
-            throw new IllegalStateException("Cannot call getEjbObject before the object is associated with a primary key");
+            throw EjbLogger.EJB3_LOGGER.cannotCallGetEjbObjectBeforePrimaryKeyAssociation();
         }
         return getComponent().getEJBObject(pk);
     }
@@ -195,9 +225,9 @@ public class EntityBeanComponentInstance extends EjbComponentInstance {
     public EJBLocalObject getEjbLocalObject() {
         final Object pk = getPrimaryKey();
         if (pk == null) {
-            throw new IllegalStateException("Cannot call getEjbLocalObject before the object is associated with a primary key");
+            throw EjbLogger.EJB3_LOGGER.cannotCallGetEjbLocalObjectBeforePrimaryKeyAssociation();
         }
-        return getComponent().getEjbLocalObject(pk);
+        return getComponent().getEJBLocalObject(pk);
     }
 
     public boolean isRemoved() {
@@ -214,5 +244,25 @@ public class EntityBeanComponentInstance extends EjbComponentInstance {
 
     public synchronized boolean isSynchronizeRegistered() {
         return synchronizeRegistered;
+    }
+
+    protected void clearPrimaryKey() {
+        this.primaryKey = null;
+    }
+
+    /**
+     * Remove all timers for this entity bean. This method is transactional, so if the current TX is rolled back
+     * the timers will not be removed
+     */
+    public void removeAllTimers() {
+        //cancel all timers for this entity
+        for (final Timer timer : getComponent().getTimerService().getTimers()) {
+            if (timer instanceof TimerImpl) {
+                TimerImpl timerImpl = (TimerImpl) timer;
+                if (timerImpl.getPrimaryKey() != null && timerImpl.getPrimaryKey().equals(getPrimaryKey())) {
+                    timer.cancel();
+                }
+            }
+        }
     }
 }

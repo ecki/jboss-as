@@ -22,15 +22,19 @@
 
 package org.jboss.as.logging.loggers;
 
-import static org.jboss.as.logging.CommonAttributes.HANDLERS;
-import static org.jboss.as.logging.CommonAttributes.ROOT_LOGGER;
 import static org.jboss.as.logging.CommonAttributes.ROOT_LOGGER_NAME;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import org.jboss.as.controller.AbstractRemoveStepHandler;
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
+import org.jboss.as.controller.ServiceVerificationHandler;
+import org.jboss.as.logging.CommonAttributes;
 import org.jboss.as.logging.util.LogServices;
 import org.jboss.dmr.ModelNode;
+import org.jboss.msc.service.ServiceController;
 
 /**
  * @author <a href="mailto:david.lloyd@redhat.com">David M. Lloyd</a>
@@ -40,17 +44,23 @@ public class RootLoggerRemove extends AbstractRemoveStepHandler {
 
     public static final RootLoggerRemove INSTANCE = new RootLoggerRemove();
 
-    public static final String OPERATION_NAME = "remove-root-logger";
+    public static final String OPERATION_NAME = "remove";
+    public static final String LEGACY_OPERATION_NAME = "remove-root-logger";
 
     @Override
-    protected void performRemove(OperationContext context, ModelNode operation, ModelNode model) {
+    protected void performRuntime(OperationContext context, ModelNode operation, ModelNode model) throws OperationFailedException {
+        if (model.hasDefined(CommonAttributes.HANDLERS.getName())) {
+            for (ModelNode handler : model.get(CommonAttributes.HANDLERS.getName()).asList()) {
+                context.removeService(LogServices.loggerHandlerName(ROOT_LOGGER_NAME, handler.asString()));
+            }
+        }
         context.removeService(LogServices.ROOT_LOGGER);
     }
 
     @Override
-    protected void performRuntime(OperationContext context, ModelNode operation, ModelNode model) throws OperationFailedException {
-        context.removeService(LogServices.ROOT_LOGGER);
-        final ModelNode rootLogger = operation.get(ROOT_LOGGER);
-        LoggerUnassignHandler.removeHandlers(HANDLERS, rootLogger, context, ROOT_LOGGER_NAME);
+    protected void recoverServices(OperationContext context, ModelNode operation, ModelNode model) throws OperationFailedException {
+        final List<ServiceController<?>> controllers = new ArrayList<ServiceController<?>>();
+        final ServiceVerificationHandler verificationHandler = new ServiceVerificationHandler();
+        RootLoggerAdd.INSTANCE.performRuntime(context, operation, model, verificationHandler, controllers);
     }
 }

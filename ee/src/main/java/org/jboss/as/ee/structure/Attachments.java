@@ -24,9 +24,10 @@ package org.jboss.as.ee.structure;
 
 import org.jboss.as.ee.metadata.EJBClientDescriptorMetaData;
 import org.jboss.as.server.deployment.AttachmentKey;
-import org.jboss.metadata.ear.jboss.JBossAppMetaData;
+import org.jboss.as.server.deployment.AttachmentList;
 import org.jboss.metadata.ear.spec.EarMetaData;
 import org.jboss.metadata.ear.spec.ModuleMetaData;
+import org.jboss.msc.service.ServiceName;
 import org.jboss.vfs.VirtualFile;
 
 /**
@@ -39,7 +40,10 @@ public final class Attachments {
 
     public static final AttachmentKey<EarMetaData> EAR_METADATA = AttachmentKey.create(EarMetaData.class);
 
-    public static final AttachmentKey<JBossAppMetaData> JBOSS_APP_METADATA = AttachmentKey.create(JBossAppMetaData.class);
+    /**
+     * The distinct-name that is configured for the EE deployment, in the deployment descriptor
+     */
+    public static final AttachmentKey<String> DISTINCT_NAME = AttachmentKey.create(String.class);
 
     public static final AttachmentKey<ModuleMetaData> MODULE_META_DATA = AttachmentKey.create(ModuleMetaData.class);
 
@@ -57,6 +61,26 @@ public final class Attachments {
      * A Marker that identifies the a type of deployment
      */
     public static final AttachmentKey<DeploymentType> DEPLOYMENT_TYPE = AttachmentKey.create(DeploymentType.class);
+
+
+    /**
+     * Services that must be waited on for this deployment if initialize in order is enabled. Only once all these services are up can the next deployment
+     * start. It is not necessary to add component start services to this list, they are handed automatically.
+     *
+     * These entries must be added before the {@link org.jboss.as.server.deployment.Phase#POST_MODULE} phase, as this is the phase where the dependencies are
+     * set up.
+     */
+    public static final AttachmentKey<AttachmentList<ServiceName>> INITIALISE_IN_ORDER_SERVICES = AttachmentKey.createList(ServiceName.class);
+
+    /**
+     * If this is set to true property replacement will be enabled for spec descriptors
+     */
+    public static final AttachmentKey<Boolean> SPEC_DESCRIPTOR_PROPERTY_REPLACEMENT = AttachmentKey.create(Boolean.class);
+
+    /**
+     * If this is set to true property replacement will be enabled for jboss descriptors
+     */
+    public static final AttachmentKey<Boolean> JBOSS_DESCRIPTOR_PROPERTY_REPLACEMENT = AttachmentKey.create(Boolean.class);
 
     private Attachments() {
     }

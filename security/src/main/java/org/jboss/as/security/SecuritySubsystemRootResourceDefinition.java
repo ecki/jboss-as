@@ -30,6 +30,8 @@ import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.PathElement;
+import org.jboss.as.controller.ProcessType;
+import org.jboss.as.controller.ReloadRequiredRemoveStepHandler;
 import org.jboss.as.controller.ReloadRequiredWriteAttributeHandler;
 import org.jboss.as.controller.ServiceVerificationHandler;
 import org.jboss.as.controller.SimpleAttributeDefinition;
@@ -50,13 +52,15 @@ import org.jboss.as.security.service.SimpleSecurityManagerService;
 import org.jboss.as.security.service.SubjectFactoryService;
 import org.jboss.as.server.AbstractDeploymentChainStep;
 import org.jboss.as.server.DeploymentProcessorTarget;
+import org.jboss.as.server.Services;
 import org.jboss.as.server.deployment.Phase;
+import org.jboss.as.server.moduleservice.ServiceModuleLoader;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.ModelType;
-import org.jboss.logging.Logger;
 import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceTarget;
 import org.jboss.security.ISecurityManagement;
+import org.jboss.security.SecurityContextAssociation;
 import org.jboss.security.auth.callback.JBossCallbackHandler;
 import org.jboss.security.auth.login.XMLLoginConfigImpl;
 import org.jboss.security.authentication.JBossCachedAuthenticationManager;
@@ -78,7 +82,7 @@ public class SecuritySubsystemRootResourceDefinition extends SimpleResourceDefin
 
     private SecuritySubsystemRootResourceDefinition() {
         super(PathElement.pathElement(ModelDescriptionConstants.SUBSYSTEM, SecurityExtension.SUBSYSTEM_NAME),
-                SecurityExtension.getResourceDescriptionResolver(SecurityExtension.SUBSYSTEM_NAME), NewSecuritySubsystemAdd.INSTANCE, null);
+                SecurityExtension.getResourceDescriptionResolver(SecurityExtension.SUBSYSTEM_NAME), NewSecuritySubsystemAdd.INSTANCE, ReloadRequiredRemoveStepHandler.INSTANCE);
     }
 
     public void registerAttributes(final ManagementResourceRegistration resourceRegistration) {
@@ -107,7 +111,6 @@ public class SecuritySubsystemRootResourceDefinition extends SimpleResourceDefin
         private static final String SUBJECT_FACTORY = ModuleName.PICKETBOX.getName() + ":" + ModuleName.PICKETBOX.getSlot() + ":"
                 + JBossSecuritySubjectFactory.class.getName();
 
-        private static final Logger log = Logger.getLogger("org.jboss.as.security");
         public static final OperationStepHandler INSTANCE = new NewSecuritySubsystemAdd();
 
 
@@ -118,12 +121,17 @@ public class SecuritySubsystemRootResourceDefinition extends SimpleResourceDefin
 
         @Override
         protected void performBoottime(OperationContext context, ModelNode operation, ModelNode model, ServiceVerificationHandler verificationHandler, List<ServiceController<?>> newControllers) throws OperationFailedException {
-            log.info("Activating Security Subsystem");
+            SecurityLogger.ROOT_LOGGER.activatingSecuritySubsystem();
 
+            if(context.getProcessType() != ProcessType.APPLICATION_CLIENT) {
+                //remove once AS7-4687 is resolved
+                SecurityActions.setSystemProperty(SecurityContextAssociation.SECURITYCONTEXT_THREADLOCAL, "true");
+            }
             final ServiceTarget target = context.getServiceTarget();
 
             final SecurityBootstrapService bootstrapService = new SecurityBootstrapService();
             newControllers.add(target.addService(SecurityBootstrapService.SERVICE_NAME, bootstrapService)
+                .addDependency(Services.JBOSS_SERVICE_MODULE_LOADER, ServiceModuleLoader.class, bootstrapService.getServiceModuleLoaderInjectedValue())
                 .addListener(verificationHandler)
                 .setInitialMode(ServiceController.Mode.ACTIVE).install());
 
@@ -149,6 +157,7 @@ public class SecuritySubsystemRootResourceDefinition extends SimpleResourceDefin
                 AUTHENTICATION_MANAGER, modelNode.isDefined() && modelNode.asBoolean(), CALLBACK_HANDLER,
                 AUTHORIZATION_MANAGER, AUDIT_MANAGER, IDENTITY_TRUST_MANAGER, MAPPING_MANAGER);
             newControllers.add(target.addService(SecurityManagementService.SERVICE_NAME, securityManagementService)
+                 .addDependency(Services.JBOSS_SERVICE_MODULE_LOADER, ServiceModuleLoader.class, securityManagementService.getServiceModuleLoaderInjectedValue())
                 .addListener(verificationHandler)
                 .setInitialMode(ServiceController.Mode.ACTIVE).install());
 
@@ -166,18 +175,22 @@ public class SecuritySubsystemRootResourceDefinition extends SimpleResourceDefin
             newControllers.add(target.addService(JaasConfigurationService.SERVICE_NAME, jaasConfigurationService)
                 .addListener(verificationHandler).setInitialMode(ServiceController.Mode.ACTIVE).install());
 
-            newControllers.add(target.addService(SimpleSecurityManagerService.SERVICE_NAME, new SimpleSecurityManagerService())
+            //add Simple Security Manager Service
+            final SimpleSecurityManagerService simpleSecurityManagerService = new SimpleSecurityManagerService();
+
+            newControllers.add(target.addService(SimpleSecurityManagerService.SERVICE_NAME, simpleSecurityManagerService)
+                .addDependency(SecurityManagementService.SERVICE_NAME, ISecurityManagement.class,
+                            simpleSecurityManagerService.getSecurityManagementInjector())
                 .addListener(verificationHandler).install());
 
             context.addStep(new AbstractDeploymentChainStep() {
                 protected void execute(DeploymentProcessorTarget processorTarget) {
-                    processorTarget.addDeploymentProcessor(Phase.INSTALL, Phase.INSTALL_JACC_POLICY,
+                    processorTarget.addDeploymentProcessor(SecurityExtension.SUBSYSTEM_NAME, Phase.INSTALL, Phase.INSTALL_JACC_POLICY,
                             new JaccEarDeploymentProcessor());
-                    processorTarget.addDeploymentProcessor(Phase.DEPENDENCIES, Phase.DEPENDENCIES_SECURITY,
+                    processorTarget.addDeploymentProcessor(SecurityExtension.SUBSYSTEM_NAME, Phase.DEPENDENCIES, Phase.DEPENDENCIES_SECURITY,
                             new SecurityDependencyProcessor());
                 }
             }, OperationContext.Stage.RUNTIME);
         }
     }
-
 }

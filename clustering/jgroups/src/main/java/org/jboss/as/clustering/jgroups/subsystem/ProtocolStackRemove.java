@@ -21,32 +21,32 @@
  */
 package org.jboss.as.clustering.jgroups.subsystem;
 
-import java.util.Locale;
 import org.jboss.as.controller.AbstractRemoveStepHandler;
 import org.jboss.as.controller.OperationContext;
-import org.jboss.as.controller.PathAddress;
-import org.jboss.as.controller.descriptions.DescriptionProvider;
-import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
+import org.jboss.as.controller.OperationFailedException;
+import org.jboss.as.controller.ServiceVerificationHandler;
 import org.jboss.dmr.ModelNode;
 
 /**
  * @author Paul Ferraro
+ * @author Richard Achmatowicz (c) 2011 Red Hat, Inc.
  */
-public class ProtocolStackRemove extends AbstractRemoveStepHandler implements DescriptionProvider {
+public class ProtocolStackRemove extends AbstractRemoveStepHandler {
 
-    @Override
-    public ModelNode getModelDescription(Locale locale) {
-        return JGroupsDescriptions.getProtocolStackRemoveDescription(locale);
+    public static final ProtocolStackRemove INSTANCE = new ProtocolStackRemove();
+
+    protected void performRuntime(OperationContext context, ModelNode operation, ModelNode model)
+            throws OperationFailedException {
+
+        ProtocolStackAdd.INSTANCE.removeRuntimeServices(context, operation, model);
     }
 
-    protected void performRuntime(OperationContext context, ModelNode operation, ModelNode model) {
-        final PathAddress address = PathAddress.pathAddress(operation.get(ModelDescriptionConstants.OP_ADDR));
-        final String name = address.getLastElement().getValue();
-        context.removeService(ChannelFactoryService.getServiceName(name));
-    }
+    protected void recoverServices(OperationContext context, ModelNode operation, ModelNode model)
+            throws OperationFailedException{
+        // re-install the ProtocolStack services using the information in model
+        ServiceVerificationHandler verificationHandler = new ServiceVerificationHandler();
 
-    protected void recoverServices(OperationContext context, ModelNode operation, ModelNode model) {
-        // TODO:  RE-ADD SERVICES
+        ProtocolStackAdd.INSTANCE.installRuntimeServices(context, operation, model, verificationHandler, null);
     }
 
 }

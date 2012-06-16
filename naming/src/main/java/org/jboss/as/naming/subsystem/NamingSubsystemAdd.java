@@ -22,18 +22,17 @@
 
 package org.jboss.as.naming.subsystem;
 
-import static org.jboss.as.naming.NamingLogger.ROOT_LOGGER;
-
 import java.util.List;
 
 import javax.naming.CompositeName;
 import javax.naming.Context;
+import javax.naming.InitialContext;
 import javax.naming.NamingException;
 
 import org.jboss.as.controller.AbstractBoottimeAddStepHandler;
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.ServiceVerificationHandler;
-import org.jboss.as.naming.InitialContextFactoryService;
+import org.jboss.as.naming.InitialContextFactoryBuilder;
 import org.jboss.as.naming.NamingContext;
 import org.jboss.as.naming.NamingStore;
 import org.jboss.as.naming.ServiceBasedNamingStore;
@@ -51,6 +50,8 @@ import org.jboss.as.server.deployment.Phase;
 import org.jboss.dmr.ModelNode;
 import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceTarget;
+
+import static org.jboss.as.naming.NamingLogger.ROOT_LOGGER;
 
 /**
  * @author <a href="mailto:david.lloyd@redhat.com">David M. Lloyd</a>
@@ -99,9 +100,9 @@ public class NamingSubsystemAdd extends AbstractBoottimeAddStepHandler {
         NamespaceContextSelector.setDefault(new NamespaceContextSelector() {
             public Context getContext(String identifier) {
                 final NamingStore namingStore;
-                if(identifier.equals("global")){
+                if (identifier.equals("global")) {
                     namingStore = globalNamingStore;
-                } else if(identifier.equals("jboss")) {
+                } else if (identifier.equals("jboss")) {
                     namingStore = jbossNamingStore;
                 } else {
                     namingStore = null;
@@ -118,17 +119,29 @@ public class NamingSubsystemAdd extends AbstractBoottimeAddStepHandler {
             }
         });
 
-        // Provide the {@link InitialContext} as OSGi service
-        newControllers.add(InitialContextFactoryService.addService(target, verificationHandler));
+        // Register InitialContext and InitialContextFactoryBuilder as OSGi services
+        newControllers.add(NamingSubsystemOSGiService.addService(target,
+                InitialContext.class, InitialContext.class, verificationHandler));
+        newControllers.add(NamingSubsystemOSGiService.addService(target,
+                javax.naming.spi.InitialContextFactoryBuilder.class, InitialContextFactoryBuilder.class, verificationHandler));
 
         newControllers.add(target.addService(JndiViewExtensionRegistry.SERVICE_NAME, new JndiViewExtensionRegistry()).install());
 
+        // Setup remote naming store
+        //we always install the naming store, but we don't install the server unless it has been explicitly enabled
+        final ServiceBasedNamingStore remoteExposedNamingStore = new WritableServiceBasedNamingStore(context.getServiceRegistry(false), ContextNames.EXPORTED_CONTEXT_SERVICE_NAME);
+        newControllers.add(target.addService(ContextNames.EXPORTED_CONTEXT_SERVICE_NAME, new NamingStoreService(remoteExposedNamingStore))
+                .setInitialMode(ServiceController.Mode.ACTIVE)
+                .addListener(verificationHandler)
+                .install());
+
         context.addStep(new AbstractDeploymentChainStep() {
             protected void execute(DeploymentProcessorTarget processorTarget) {
-                processorTarget.addDeploymentProcessor(Phase.INSTALL, Phase.INSTALL_JNDI_DEPENDENCY_SETUP, new JndiNamingDependencySetupProcessor());
-                processorTarget.addDeploymentProcessor(Phase.INSTALL, Phase.INSTALL_JNDI_DEPENDENCIES, new JndiNamingDependencyProcessor());
+                processorTarget.addDeploymentProcessor(NamingExtension.SUBSYSTEM_NAME, Phase.INSTALL, Phase.INSTALL_JNDI_DEPENDENCY_SETUP, new JndiNamingDependencySetupProcessor());
+                processorTarget.addDeploymentProcessor(NamingExtension.SUBSYSTEM_NAME, Phase.INSTALL, Phase.INSTALL_JNDI_DEPENDENCIES, new JndiNamingDependencyProcessor());
             }
         }, OperationContext.Stage.RUNTIME);
+
 
     }
 }

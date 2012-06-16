@@ -30,14 +30,12 @@
     <parent>
         <groupId>org.jboss.as</groupId>
         <artifactId>jboss-as-jpa-parent</artifactId>
-        <version>7.1.0.CR1-SNAPSHOT</version>
+        <version>7.2.0.Alpha1-SNAPSHOT</version>
     </parent>
 
-    <groupId>org.jboss.as</groupId>
     <artifactId>jboss-as-jpa-hibernate3</artifactId>
-    <version>7.1.0.CR1-SNAPSHOT</version>
 
-    <name>JBoss Application Server: Hibernate 3.6.x JPA integration </name>
+    <name>JBoss Application Server: Hibernate 3.6.x JPA integration</name>
 
     <dependencies>
 
@@ -46,16 +44,33 @@
         <dependency>
             <groupId>org.hibernate</groupId>
             <artifactId>hibernate-core</artifactId>
-            <version>3.6.6.Final</version>
+            <version>${version.org.hibernate3}</version>
         </dependency>
 
         <dependency>
             <groupId>org.hibernate</groupId>
             <artifactId>hibernate-entitymanager</artifactId>
-            <version>3.6.6.Final</version>
+            <version>${version.org.hibernate3}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.hibernate</groupId>
+            <artifactId>hibernate-infinispan</artifactId>
+            <version>${version.org.hibernate3}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.hibernate</groupId>
+                    <artifactId>hibernate-core</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <!-- Internal -->
+
+        <dependency>
+            <groupId>org.jboss.as</groupId>
+            <artifactId>jboss-as-clustering-infinispan</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>org.jboss.as</groupId>
@@ -80,11 +95,6 @@
         <dependency>
             <groupId>org.jboss.as</groupId>
             <artifactId>jboss-as-jpa-spi</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.jboss.as</groupId>
-            <artifactId>jboss-as-naming</artifactId>
         </dependency>
 
         <dependency>
@@ -125,7 +135,7 @@
         </dependency>
 
         <dependency>
-            <groupId>javassist</groupId>
+            <groupId>org.javassist</groupId>
             <artifactId>javassist</artifactId>
         </dependency>
 
@@ -133,11 +143,6 @@
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
             <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.ant</groupId>
-            <artifactId>ant</artifactId>
         </dependency>
 
         <dependency>
@@ -149,7 +154,7 @@
         <dependency>
             <groupId>org.hibernate</groupId>
             <artifactId>hibernate-commons-annotations</artifactId>
-			<version>3.2.0.Final</version>
+            <version>${version.org.hibernate3.commons.annotations}</version>
         </dependency>
 
         <dependency>

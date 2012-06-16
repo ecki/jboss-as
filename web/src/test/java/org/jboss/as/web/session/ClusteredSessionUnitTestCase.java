@@ -24,13 +24,16 @@ package org.jboss.as.web.session;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
-import static org.mockito.Mockito.mock;
 
-import org.apache.catalina.Container;
+import org.apache.catalina.Engine;
+import org.apache.catalina.Host;
+import org.apache.catalina.core.StandardContext;
 import org.jboss.as.clustering.web.OutgoingDistributableSessionData;
 import org.jboss.as.web.session.mocks.MockDistributedCacheManagerFactory;
+import org.jboss.as.web.session.mocks.MockEngine;
+import org.jboss.as.web.session.mocks.MockHost;
+import org.jboss.marshalling.ContextClassResolver;
 import org.jboss.metadata.web.jboss.ReplicationGranularity;
-import org.jboss.msc.service.ServiceRegistry;
 import org.junit.Test;
 
 /**
@@ -51,8 +54,17 @@ public class ClusteredSessionUnitTestCase {
      */
     @Test
     public void testNewSessionIsOutdated() throws Exception {
-        DistributableSessionManager<?> mgr = new DistributableSessionManager<OutgoingDistributableSessionData>(new MockDistributedCacheManagerFactory(), mock(Container.class), SessionTestUtil.createWebMetaData(10), mock(ServiceRegistry.class));
-        SessionTestUtil.setupContainer("test", null, mgr);
+        Engine engine = new MockEngine();
+        engine.setName("jboss.web");
+        Host host = new MockHost();
+        host.setName("localhost");
+        engine.addChild(host);
+        StandardContext context = new StandardContext();
+        context.setName("test");
+        host.addChild(context);
+        
+        DistributableSessionManager<?> mgr = new DistributableSessionManager<OutgoingDistributableSessionData>(new MockDistributedCacheManagerFactory(), SessionTestUtil.createWebMetaData(10), new ContextClassResolver());
+        context.setManager(mgr);
         mgr.start();
 
         mgr.getReplicationConfig().setReplicationGranularity(ReplicationGranularity.SESSION);

@@ -45,6 +45,11 @@ public class HttpManagementRemoveHandler extends AbstractRemoveStepHandler {
     }
 
     @Override
+    protected boolean requiresRuntime(OperationContext context) {
+        return true;
+    }
+
+    @Override
     protected void performRuntime(OperationContext context, ModelNode operation, ModelNode model) throws OperationFailedException {
         removeHttpManagementService(context);
     }
@@ -52,7 +57,7 @@ public class HttpManagementRemoveHandler extends AbstractRemoveStepHandler {
     @Override
     protected void recoverServices(OperationContext context, ModelNode operation, ModelNode model) throws OperationFailedException {
         HttpManagementAddHandler.populateHostControllerInfo(hostControllerInfo, context, model);
-        HttpManagementAddHandler.installHttpManagementServices(context.getServiceTarget(), hostControllerInfo, environment, null);
+        HttpManagementAddHandler.installHttpManagementServices(context.getRunningMode(), context.getServiceTarget(), hostControllerInfo, environment, null, false);
     }
 
     static void clearHostControllerInfo(LocalHostControllerInfoImpl hostControllerInfo) {

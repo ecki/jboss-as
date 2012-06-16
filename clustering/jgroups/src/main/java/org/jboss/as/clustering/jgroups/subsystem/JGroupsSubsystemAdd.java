@@ -21,70 +21,113 @@
  */
 package org.jboss.as.clustering.jgroups.subsystem;
 
+import static org.jboss.as.clustering.jgroups.JGroupsLogger.ROOT_LOGGER;
+
 import java.util.List;
-import java.util.Locale;
+
 import org.jboss.as.clustering.jgroups.ChannelFactory;
+import org.jboss.as.clustering.jgroups.ProtocolDefaults;
 import org.jboss.as.controller.AbstractAddStepHandler;
 import org.jboss.as.controller.OperationContext;
+import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.ServiceVerificationHandler;
-import org.jboss.as.controller.descriptions.DescriptionProvider;
 import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
 import org.jboss.as.controller.operations.common.Util;
 import org.jboss.dmr.ModelNode;
+import org.jboss.msc.service.ServiceBuilder;
 import org.jboss.msc.service.ServiceController;
+import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.service.ServiceTarget;
 import org.jboss.msc.service.ValueService;
 import org.jboss.msc.value.InjectedValue;
-
-import static org.jboss.as.clustering.jgroups.JGroupsLogger.ROOT_LOGGER;
 
 /**
  * Handler for JGroups subsystem add operations.
  *
  * @author Paul Ferraro
+ * @author Richard Achmatowicz (c) 2011 Red Hat, Inc
  */
-public class JGroupsSubsystemAdd extends AbstractAddStepHandler implements DescriptionProvider {
+public class JGroupsSubsystemAdd extends AbstractAddStepHandler {
 
-    static ModelNode createOperation(ModelNode address, ModelNode existing) {
+    public static final JGroupsSubsystemAdd INSTANCE = new JGroupsSubsystemAdd();
+
+    static ModelNode createOperation(ModelNode address, ModelNode existing) throws OperationFailedException {
         ModelNode operation = Util.getEmptyOperation(ModelDescriptionConstants.ADD, address);
         populate(existing, operation);
         return operation;
     }
 
-    private static void populate(ModelNode source, ModelNode target) {
-        target.get(ModelKeys.DEFAULT_STACK).set(source.require(ModelKeys.DEFAULT_STACK));
+    private static void populate(ModelNode source, ModelNode target) throws OperationFailedException {
+        CommonAttributes.DEFAULT_STACK.validateAndSet(source, target);
         target.get(ModelKeys.STACK).setEmptyObject();
     }
 
-    /**
-     * {@inheritDoc}
-     *
-     * @see org.jboss.as.controller.descriptions.DescriptionProvider#getModelDescription(java.util.Locale)
-     */
-    @Override
-    public ModelNode getModelDescription(final Locale locale) {
-        return JGroupsDescriptions.getSubsystemAddDescription(locale);
-    }
-
-    protected void populateModel(ModelNode operation, ModelNode model) {
+    protected void populateModel(ModelNode operation, ModelNode model) throws OperationFailedException {
         populate(operation, model);
     }
 
-    protected void performRuntime(OperationContext context, ModelNode operation, ModelNode model, ServiceVerificationHandler verificationHandler, List<ServiceController<?>> newControllers) {
-        ROOT_LOGGER.activatingSubsystem();
+    protected void performRuntime(OperationContext context, ModelNode operation, ModelNode model, ServiceVerificationHandler verificationHandler, List<ServiceController<?>> newControllers)
+            throws OperationFailedException {
 
+        installRuntimeServices(context, operation, model, verificationHandler, newControllers);
+    }
+
+    protected void installRuntimeServices(OperationContext context, ModelNode operation, ModelNode model, ServiceVerificationHandler verificationHandler, List<ServiceController<?>> newControllers) throws OperationFailedException {
+
+        ROOT_LOGGER.activatingSubsystem();
         ServiceTarget target = context.getServiceTarget();
-        newControllers.add(target.addService(ProtocolDefaultsService.SERVICE_NAME, new ProtocolDefaultsService())
-                .setInitialMode(ServiceController.Mode.ON_DEMAND)
-                .install());
-        String stack = operation.require(ModelKeys.DEFAULT_STACK).asString();
+
+        // install the protocol defaults service
+        ServiceController<ProtocolDefaults> pdsController = installProtocolDefaultsService(target, verificationHandler);
+        if (newControllers != null) {
+            newControllers.add(pdsController);
+        }
+
+        final String stack = CommonAttributes.DEFAULT_STACK.resolveModelAttribute(context, model).asString() ;
+
+        // install the default channel factory service
+        ServiceController<ChannelFactory> dcfsController = installDefaultChannelFactoryService(target, stack, verificationHandler);
+        if (newControllers != null) {
+            newControllers.add(dcfsController);
+        }
+
+    }
+
+    protected void removeRuntimeServices(OperationContext context, ModelNode operation, ModelNode model)
+            throws OperationFailedException {
+
+        // remove the ProtocolDefaultsService
+        ServiceName protocolDefaultsService = ProtocolDefaultsService.SERVICE_NAME;
+        context.removeService(protocolDefaultsService);
+
+        // remove the DefaultChannelFactoryServiceAlias
+        ServiceName defaultChannelFactoryService = ChannelFactoryService.getServiceName(null);
+        context.removeService(defaultChannelFactoryService);
+    }
+
+    protected ServiceController<ProtocolDefaults> installProtocolDefaultsService(ServiceTarget target,
+                                                                           ServiceVerificationHandler verificationHandler) {
+        final ProtocolDefaultsService service = new ProtocolDefaultsService();
+        ServiceBuilder<ProtocolDefaults> protocolDefaultsBuilder =
+                target.addService(ProtocolDefaultsService.SERVICE_NAME, service)
+                .setInitialMode(ServiceController.Mode.ON_DEMAND) ;
+        org.jboss.as.server.Services.addServerExecutorDependency(protocolDefaultsBuilder, service.getExecutorInjector(), false);
+
+        return protocolDefaultsBuilder.install() ;
+    }
+
+    protected ServiceController<ChannelFactory> installDefaultChannelFactoryService(ServiceTarget target,
+                                                                                    String stack,
+                                                                                    ServiceVerificationHandler verificationHandler) {
         InjectedValue<ChannelFactory> factory = new InjectedValue<ChannelFactory>();
         ValueService<ChannelFactory> service = new ValueService<ChannelFactory>(factory);
-        newControllers.add(target.addService(ChannelFactoryService.getServiceName(null), service)
-                .addDependency(ChannelFactoryService.getServiceName(stack), ChannelFactory.class, factory)
-                .setInitialMode(ServiceController.Mode.ON_DEMAND)
-                .install());
 
+        ServiceBuilder<ChannelFactory> channelFactoryBuilder =
+                target.addService(ChannelFactoryService.getServiceName(null), service)
+                .addDependency(ChannelFactoryService.getServiceName(stack), ChannelFactory.class, factory)
+                .setInitialMode(ServiceController.Mode.ON_DEMAND);
+
+        return channelFactoryBuilder.install() ;
     }
 
     protected boolean requiresRuntimeVerification() {

@@ -39,8 +39,11 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SUB
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.VALUE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.WRITE_ATTRIBUTE_OPERATION;
 
+import java.io.File;
 import java.io.IOException;
 
+import org.jboss.as.controller.services.path.AbsolutePathService;
+import org.jboss.as.server.ServerEnvironment;
 import org.jboss.as.subsystem.test.AbstractSubsystemBaseTest;
 import org.jboss.as.subsystem.test.AdditionalInitialization;
 import org.jboss.as.subsystem.test.ControllerInitializer;
@@ -49,6 +52,7 @@ import org.jboss.dmr.ModelNode;
 import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.service.ServiceNotFoundException;
+import org.jboss.msc.service.ServiceTarget;
 import org.junit.Ignore;
 import org.junit.Test;
 
@@ -77,6 +81,12 @@ public class RemotingSubsystemTestCase extends AbstractSubsystemBaseTest {
                     controllerInitializer.addSocketBinding("test", port);
                 }
 
+                @Override
+                protected void addExtraServices(ServiceTarget target) {
+                    //Needed for initialization of the RealmAuthenticationProviderService
+                    AbsolutePathService.addService(ServerEnvironment.CONTROLLER_TEMP_DIR, new File("target/temp" + System.currentTimeMillis()).getAbsolutePath(), target);
+                }
+
             },readResource("remoting-with-threads.xml"));
 
         ServiceController<?> endPointService = services.getContainer().getRequiredService(RemotingServices.SUBSYSTEM_ENDPOINT);
@@ -99,13 +109,19 @@ public class RemotingSubsystemTestCase extends AbstractSubsystemBaseTest {
         assertEquals(1, connector.require(CommonAttributes.PROPERTY).require("org.xnio.Options.WORKER_ACCEPT_THREADS").require(CommonAttributes.VALUE).asInt());
     }
 
-    @Test @Ignore("AS7-2717")
+    @Test
     public void testSubsystemWithThreadAttributeChange() throws Exception {
         final int port = 12345;
         KernelServices services = installInController(new AdditionalInitialization(){
                 @Override
                 protected void setupController(ControllerInitializer controllerInitializer) {
                     controllerInitializer.addSocketBinding("test", port);
+                }
+
+                @Override
+                protected void addExtraServices(ServiceTarget target) {
+                    //Needed for initialization of the RealmAuthenticationProviderService
+                    AbsolutePathService.addService(ServerEnvironment.CONTROLLER_TEMP_DIR, new File("target/temp" + System.currentTimeMillis()).getAbsolutePath(), target);
                 }
 
             },readResource("remoting-with-threads.xml"));
@@ -138,7 +154,7 @@ public class RemotingSubsystemTestCase extends AbstractSubsystemBaseTest {
     }
 
 
-    @Test @Ignore("AS7-2717")
+    @Test
     public void testSubsystemWithConnectorPropertyChange() throws Exception {
         final int port = 12345;
         KernelServices services = installInController(new AdditionalInitialization(){
@@ -147,6 +163,11 @@ public class RemotingSubsystemTestCase extends AbstractSubsystemBaseTest {
                     controllerInitializer.addSocketBinding("test", port);
                 }
 
+                @Override
+                protected void addExtraServices(ServiceTarget target) {
+                    //Needed for initialization of the RealmAuthenticationProviderService
+                    AbsolutePathService.addService(ServerEnvironment.CONTROLLER_TEMP_DIR, new File("target/temp" + System.currentTimeMillis()).getAbsolutePath(), target);
+                }
             },readResource("remoting-with-threads.xml"));
 
         CurrentConnectorAndController current = CurrentConnectorAndController.create(services, RemotingServices.SUBSYSTEM_ENDPOINT, RemotingServices.serverServiceName("test-connector"));
@@ -186,7 +207,7 @@ public class RemotingSubsystemTestCase extends AbstractSubsystemBaseTest {
         current.updateCurrentConnector(false);
     }
 
-    @Test @Ignore("AS7-2717")
+    @Test @Ignore("AS7-3632")
     public void testSubsystemWithBadConnectorProperty() throws Exception {
         final int port = 12345;
         KernelServices services = installInController(new AdditionalInitialization(){
@@ -213,7 +234,7 @@ public class RemotingSubsystemTestCase extends AbstractSubsystemBaseTest {
     /**
      * Tests that the outbound connections configured in the remoting subsytem are processed and services
      * are created for them
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -237,12 +258,15 @@ public class RemotingSubsystemTestCase extends AbstractSubsystemBaseTest {
         ServiceName remoteOutboundConnectionServiceName = RemoteOutboundConnectionService.REMOTE_OUTBOUND_CONNECTION_BASE_SERVICE_NAME.append(remoteOutboundConnectionName);
         ServiceController<?> remoteOutboundConnectionService = services.getContainer().getRequiredService(remoteOutboundConnectionServiceName);
         assertNotNull("Remote outbound connection service for outbound connection:" + remoteOutboundConnectionName + " was null", remoteOutboundConnectionService);
-
+        RemoteOutboundConnectionService remoteService = (RemoteOutboundConnectionService) remoteOutboundConnectionService.getService();
+        assertEquals(2, remoteService.connectionCreationOptions.size());
 
         final String localOutboundConnectionName = "local-conn1";
         ServiceName localOutboundConnectionServiceName = LocalOutboundConnectionService.LOCAL_OUTBOUND_CONNECTION_BASE_SERVICE_NAME.append(localOutboundConnectionName);
         ServiceController<?> localOutboundConnectionService = services.getContainer().getRequiredService(localOutboundConnectionServiceName);
         assertNotNull("Local outbound connection service for outbound connection:" + localOutboundConnectionName + " was null", localOutboundConnectionService);
+        LocalOutboundConnectionService localService = (LocalOutboundConnectionService)localOutboundConnectionService.getService();
+        assertEquals(2, localService.connectionCreationOptions.size());
     }
 
     @Override
@@ -256,13 +280,8 @@ public class RemotingSubsystemTestCase extends AbstractSubsystemBaseTest {
     }
 
     @Override
-    protected void validateXml(String original, String marshalled) throws Exception {
-        // TODO: Can't and shouldn't rely on string equality check because if the original subsystem xml had a
-        // namespace of 1.0 and the current is 1.1, then the marshalled subsystem xml will have the current == 1.1
-        // value. So string equality won't work out here
-        //assertEquals(original, marshalled);
-        // let's just delegate it to the base class
-        super.validateXml(original, marshalled);
+    protected void compareXml(String configId, String original, String marshalled) throws Exception {
+        super.compareXml(configId, original, marshalled, true);
     }
 
     private static class CurrentConnectorAndController {

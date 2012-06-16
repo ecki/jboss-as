@@ -35,6 +35,7 @@ import javax.management.ReflectionException;
 import javax.management.loading.ClassLoaderRepository;
 
 import org.jboss.as.jmx.model.Constants;
+import org.jboss.as.server.jmx.MBeanServerPlugin;
 
 /**
  *
@@ -62,14 +63,17 @@ public abstract class BaseMBeanServerPlugin implements MBeanServerPlugin {
         throw new NotCompliantMBeanException("You can't create mbeans under the reserved domain '" + Constants.DOMAIN + "'");
     }
 
+    @Deprecated
     public ObjectInputStream deserialize(ObjectName name, byte[] data) throws OperationsException {
         throw new OperationsException("Don't know how to deserialize");
     }
 
+    @Deprecated
     public ObjectInputStream deserialize(String className, byte[] data) throws OperationsException, ReflectionException {
         throw new OperationsException("Don't know how to deserialize");
     }
 
+    @Deprecated
     public ObjectInputStream deserialize(String className, ObjectName loaderName, byte[] data) throws OperationsException,
             ReflectionException {
         throw new OperationsException("Don't know how to deserialize");

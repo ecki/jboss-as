@@ -26,7 +26,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * An enumeration of all the recognized XML attributes, by local name.
+ * An enumeration of all the recognized core configuration XML attributes, by local name.
  *
  * @author <a href="mailto:david.lloyd@redhat.com">David M. Lloyd</a>
  */
@@ -38,17 +38,24 @@ public enum Attribute {
     NO_NAMESPACE_SCHEMA_LOCATION("noNamespaceSchemaLocation"),
     SCHEMA_LOCATION("schemaLocation"),
 
-    // domain 1.0 attributes in alpha order
-    AUTO_START("auto-start"),
+    // domain attributes in alpha order
+    ALIAS("alias"),
+    ALLOWED_USERS("allowed-users"),
     ATTRIBUTE("attribute"),
+    AUTO_START("auto-start"),
     BASE_DN("base-dn"),
     BOOT_TIME("boot-time"),
     CODE("code"),
     CONNECTION("connection"),
     CONNECTOR("connector"),
+    CONSOLE_ENABLED("console-enabled"),
     DEFAULT_INTERFACE("default-interface"),
+    DEFAULT_USER("default-user"),
     DEBUG_ENABLED("debug-enabled"),
     DEBUG_OPTIONS("debug-options"),
+    DESTINATION_ADDRESS("destination-address"),
+    DIRECTORY_GROUPING("directory-grouping"),
+    DESTINATION_PORT("destination-port"),
     ENABLED("enabled"),
     ENV_CLASSPATH_IGNORED("env-classpath-ignored"),
     FILE("file"),
@@ -62,9 +69,12 @@ public enum Attribute {
     INITIAL_CONTEXT_FACTORY("initial-context-factory"),
     INTERFACE("interface"),
     JAVA_HOME("java-home"),
+    KEY_PASSWORD("key-password"),
+    KEYSTORE_PASSWORD("keystore-password"),
     MANAGEMENT_SUBSYSTEM_ENDPOINT("management-subsystem-endpoint"),
     MAX_SIZE("max-size"),
     MAX_THREADS("max-threads"),
+    MECHANISM("mechanism"),
     MODULE("module"),
     MULTICAST_ADDRESS("multicast-address"),
     MULTICAST_PORT("multicast-port"),
@@ -82,10 +92,7 @@ public enum Attribute {
     RECURSIVE("recursive"),
     REF("ref"),
     RELATIVE_TO("relative-to"),
-    REPOSITORY("repository"),
     RUNTIME_NAME("runtime-name"),
-    SCAN_ENABLED("scan-enabled"),
-    SCAN_INTERVAL("scan-interval"),
     SEARCH_CREDENTIAL("search-credential"),
     SEARCH_DN("search-dn"),
     SECURE_PORT("secure-port"),
@@ -95,6 +102,7 @@ public enum Attribute {
     SOCKET_BINDING_GROUP("socket-binding-group"),
     SOCKET_BINDING_REF("socket-binding-ref"),
     SOURCE_INTERFACE("source-interface"),
+    SOURCE_NETWORK("source-network"),
     SOURCE_PORT("source-port"),
     TYPE("type"),
     URL("url"),
@@ -102,7 +110,8 @@ public enum Attribute {
     USER_DN("user-dn"),
     USERNAME("username"),
     USERNAME_ATTRIBUTE("username-attribute"),
-    VALUE("value")
+    VALUE("value"),
+    WILDCARD("wildcard")
     ;
 
     private final String name;

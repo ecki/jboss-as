@@ -35,7 +35,6 @@ import java.util.Set;
 import javax.ejb.AccessTimeout;
 import javax.ejb.ConcurrencyManagementType;
 import javax.ejb.LockType;
-import javax.ejb.SessionBean;
 import javax.ejb.TransactionManagementType;
 
 import org.jboss.as.ee.component.ComponentConfiguration;
@@ -45,10 +44,10 @@ import org.jboss.as.ee.component.ViewConfiguration;
 import org.jboss.as.ee.component.ViewConfigurator;
 import org.jboss.as.ee.component.ViewDescription;
 import org.jboss.as.ee.component.interceptors.InterceptorOrder;
-import org.jboss.as.ejb3.component.interceptors.CurrentInvocationContextInterceptor;
 import org.jboss.as.ejb3.component.EJBComponentDescription;
 import org.jboss.as.ejb3.component.EJBViewDescription;
 import org.jboss.as.ejb3.component.MethodIntf;
+import org.jboss.as.ejb3.component.interceptors.CurrentInvocationContextInterceptor;
 import org.jboss.as.ejb3.concurrency.AccessTimeoutDetails;
 import org.jboss.as.ejb3.deployment.EjbJarDescription;
 import org.jboss.as.ejb3.tx.CMTTxInterceptor;
@@ -56,9 +55,9 @@ import org.jboss.as.server.deployment.DeploymentPhaseContext;
 import org.jboss.as.server.deployment.DeploymentUnitProcessingException;
 import org.jboss.invocation.ImmediateInterceptorFactory;
 import org.jboss.invocation.proxy.MethodIdentifier;
-import org.jboss.logging.Logger;
 import org.jboss.metadata.ejb.spec.SessionBeanMetaData;
 import org.jboss.msc.service.ServiceName;
+
 import static org.jboss.as.ejb3.EjbMessages.MESSAGES;
 /**
  * @author Jaikiran Pai
@@ -111,6 +110,7 @@ public abstract class SessionBeanComponentDescription extends EJBComponentDescri
      */
     private String mappedName;
 
+    private ClusteringInfo clusteringInfo;
 
     public enum SessionBeanType {
         STATELESS,
@@ -126,9 +126,9 @@ public abstract class SessionBeanComponentDescription extends EJBComponentDescri
      * @param ejbJarDescription  the module description
      */
     public SessionBeanComponentDescription(final String componentName, final String componentClassName,
-                                           final EjbJarDescription ejbJarDescription, final ServiceName deploymentUnitServiceName) {
-        super(componentName, componentClassName, ejbJarDescription, deploymentUnitServiceName);
-        this.addSetSessionContextMethodInvocationInterceptor();
+                                           final EjbJarDescription ejbJarDescription, final ServiceName deploymentUnitServiceName,
+                                           final SessionBeanMetaData descriptorData) {
+        super(componentName, componentClassName, ejbJarDescription, deploymentUnitServiceName, descriptorData);
     }
 
     /**
@@ -388,23 +388,13 @@ public abstract class SessionBeanComponentDescription extends EJBComponentDescri
             public void configure(DeploymentPhaseContext context, ComponentDescription description, ComponentConfiguration configuration) throws DeploymentUnitProcessingException {
                 configuration.addPostConstructInterceptor(CurrentInvocationContextInterceptor.FACTORY, InterceptorOrder.ComponentPostConstruct.EJB_SESSION_CONTEXT_INTERCEPTOR);
                 configuration.addPreDestroyInterceptor(CurrentInvocationContextInterceptor.FACTORY, InterceptorOrder.ComponentPreDestroy.EJB_SESSION_CONTEXT_INTERCEPTOR);
-            }
-        });
-    }
-
-    private void addSetSessionContextMethodInvocationInterceptor() {
-        // add the setSessionContext(SessionContext) method invocation interceptor for session bean implementing the javax.ejb.SessionContext
-        // interface
-        this.getConfigurators().add(new ComponentConfigurator() {
-            @Override
-            public void configure(DeploymentPhaseContext context, ComponentDescription description, ComponentConfiguration configuration) throws DeploymentUnitProcessingException {
-                if (SessionBean.class.isAssignableFrom(configuration.getComponentClass())) {
-                    configuration.addPostConstructInterceptor(SessionBeanSetSessionContextMethodInvocationInterceptor.FACTORY, InterceptorOrder.ComponentPostConstruct.EJB_SET_SESSION_CONTEXT_METHOD_INVOCATION_INTERCEPTOR);
+                if(description.isPassivationApplicable()) {
+                    configuration.addPrePassivateInterceptor(CurrentInvocationContextInterceptor.FACTORY, InterceptorOrder.ComponentPassivation.EJB_SESSION_CONTEXT_INTERCEPTOR);
+                    configuration.addPostActivateInterceptor(CurrentInvocationContextInterceptor.FACTORY, InterceptorOrder.ComponentPassivation.EJB_SESSION_CONTEXT_INTERCEPTOR);
                 }
             }
         });
     }
-
 
     @Override
     protected void addCurrentInvocationContextFactory(ViewDescription view) {
@@ -415,6 +405,11 @@ public abstract class SessionBeanComponentDescription extends EJBComponentDescri
             }
         });
 
+    }
+
+    @Override
+    public boolean isSession() {
+        return true;
     }
 
     @Override
@@ -437,4 +432,11 @@ public abstract class SessionBeanComponentDescription extends EJBComponentDescri
         return (SessionBeanMetaData) super.getDescriptorData();
     }
 
+    public ClusteringInfo getClustering() {
+        return this.clusteringInfo;
+    }
+
+    public void setClustering(ClusteringInfo info) {
+        this.clusteringInfo = info;
+    }
 }

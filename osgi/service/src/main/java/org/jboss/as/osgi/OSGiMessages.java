@@ -25,134 +25,66 @@ package org.jboss.as.osgi;
 import java.io.File;
 
 import org.jboss.as.server.deployment.DeploymentUnit;
+import org.jboss.as.server.deployment.DeploymentUnitProcessingException;
+import org.jboss.logging.Cause;
 import org.jboss.logging.Message;
 import org.jboss.logging.MessageBundle;
 import org.jboss.logging.Messages;
 import org.jboss.modules.Module;
+import org.jboss.msc.service.StartException;
 import org.jboss.osgi.deployment.deployer.Deployment;
 import org.jboss.vfs.VirtualFile;
+import org.osgi.framework.BundleException;
 
 /**
- * Date: 27.06.2011
+ * Logging Id ranges: 11950-11999
+ *
+ * https://community.jboss.org/wiki/LoggingIds
  *
  * @author <a href="mailto:jperkins@redhat.com">James R. Perkins</a>
+ * @author Thomas.Diesler@jboss.com
  */
 @MessageBundle(projectCode = "JBAS")
 public interface OSGiMessages {
-    /**
-     * The messages.
-     */
+
     OSGiMessages MESSAGES = Messages.getBundle(OSGiMessages.class);
 
-    /**
-     * A message indicating the deployment bundle could not be created from the deployment unit.
-     *
-     * @param deploymentUnit the deployment unit.
-     *
-     * @return the message.
-     */
-    @Message(id = 11940, value = "Cannot create bundle deployment from: %s")
-    String cannotCreateBundleDeployment(DeploymentUnit deploymentUnit);
+    @Message(id = 11950, value = "%s is null")
+    IllegalArgumentException illegalArgumentNull(String name);
 
-    /**
-     * A message indicating the bundle cannot be deployed.
-     *
-     * @param deployment the deployment.
-     *
-     * @return the message.
-     */
-    @Message(id = 11941, value = "Cannot deploy bundle: %s")
-    String cannotDeployBundle(Deployment deployment);
+    @Message(id = 11951, value = "Cannot create bundle deployment from: %s")
+    DeploymentUnitProcessingException cannotCreateBundleDeployment(@Cause Throwable th, DeploymentUnit deploymentUnit);
 
-    /**
-     * Creates an exception indicating the bundle directory could not be found.
-     *
-     * @param dir the bundle directory.
-     *
-     * @return an {@link IllegalArgumentException} for the error.
-     */
-    @Message(id = 11942, value = "Cannot find bundles directory: %s")
-    IllegalArgumentException cannotFindBundleDir(File dir);
+    @Message(id = 11952, value = "Cannot deploy bundle: %s")
+    BundleException cannotDeployBundle(@Cause Throwable th, Deployment deployment);
 
-    /**
-     * A message indicating the file could not be parsed.
-     *
-     * @param file the file that could not be parsed.
-     *
-     * @return the message.
-     */
-    @Message(id = 11943, value = "Cannot parse: %s")
-    String cannotParse(VirtualFile file);
+    @Message(id = 11953, value = "Cannot find bundles directory: %s")
+    IllegalStateException illegalStateCannotFindBundleDir(File dir);
 
-    /**
-     * A message indicating a failure to create the auto install list.
-     *
-     * @return the message.
-     */
-    @Message(id = 11944, value = "Failed to create auto install list")
-    String failedToCreateAutoInstallList();
+    @Message(id = 11954, value = "Cannot parse OSGi metadata: %s")
+    DeploymentUnitProcessingException cannotParseOSGiMetadata(@Cause Throwable th, VirtualFile file);
 
-    /**
-     * A message indicating a failure to create the framework services.
-     *
-     * @return the message.
-     */
-    @Message(id = 11945, value = "Failed to create Framework services")
-    String failedToCreateFrameworkServices();
+    @Message(id = 11955, value = "Failed to process initial capabilities")
+    StartException startFailedToProcessInitialCapabilites(@Cause Throwable th);
 
-    /**
-     * A message indicating the deployment failed to install.
-     *
-     * @param deployment the deployment that failed.
-     *
-     * @return the message.
-     */
-    @Message(id = 11946, value = "Failed to install deployment: %s")
-    String failedToInstallDeployment(Deployment deployment);
+    @Message(id = 11956, value = "Failed to create Framework services")
+    StartException startFailedToCreateFrameworkServices(@Cause Throwable th);
 
-    /**
-     * A message indicating the module failed to register.
-     *
-     * @param module the module that failed to register.
-     *
-     * @return the message.
-     */
-    @Message(id = 11947, value = "Failed to register module: %s")
-    String failedToRegisterModule(Module module);
+    @Message(id = 11957, value = "Failed to install deployment: %s")
+    StartException startFailedToInstallDeployment(@Cause Throwable th, Deployment deployment);
 
-    /**
-     * Creates an exception indicating the variable is {@code null}.
-     *
-     * @param varName the variable name.
-     *
-     * @return an {@link IllegalArgumentException} for the error.
-     */
-    @Message(id = 11948, value = "%s is null")
-    IllegalArgumentException nullVar(String varName);
+    @Message(id = 11958, value = "Failed to register module: %s")
+    StartException startFailedToRegisterModule(@Cause Throwable th, Module module);
 
-    /**
-     * A message indicating that the OSGi subsysem is not active
-     *
-     * @return the message.
-     */
-    @Message(id = 11949, value = "OSGi subsystem not active")
-    String osgiSubsystemNotActive();
+    @Message(id = 11959, value = "StartLevel service not available")
+    String startLevelServiceNotAvailable();
 
-    /**
-     * A message indicating the property already exists.
-     *
-     * @param name the property name.
-     *
-     * @return the message.
-     */
-    @Message(id = 11950, value = "Property %s already exists")
-    String propertyAlreadyExists(String name);
+    @Message(id = 11960, value = "Cannot obtain bundle resource for: %s")
+    IllegalArgumentException illegalArgumentCannotObtainBundleResource(String name);
 
-    /**
-     * A message indicating that a service is not available.
-     *
-     * @return the message.
-     */
-    @Message(id = 11951, value = "Service not available")
-    String serviceNotAvailable();
+    @Message(id = 11961, value = "Cannot resolve capability: %s")
+    StartException startFailedCannotResolveInitialCapability(@Cause Throwable th, String identifier);
+
+    @Message(id = 11962, value = "Illegal repository base location: %s")
+    IllegalStateException illegalStateArtifactBaseLocation(File dir);
 }

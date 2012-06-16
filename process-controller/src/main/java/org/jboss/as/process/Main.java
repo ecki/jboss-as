@@ -26,6 +26,7 @@ import static org.jboss.as.process.ProcessMessages.MESSAGES;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.security.AccessController;
 import java.util.ArrayList;
@@ -39,9 +40,11 @@ import java.util.logging.Logger;
 import javax.net.ServerSocketFactory;
 
 import org.jboss.as.process.protocol.ProtocolServer;
+import org.jboss.as.version.ProductConfig;
 import org.jboss.as.version.Version;
 import org.jboss.logging.MDC;
 import org.jboss.logmanager.handlers.ConsoleHandler;
+import org.jboss.modules.Module;
 import org.jboss.threads.JBossThreadFactory;
 
 /**
@@ -78,7 +81,6 @@ public final class Main {
         String jbossHome = SecurityActions.getSystemProperty("jboss.home.dir", ".");
         String modulePath = null;
         String bootJar = null;
-        String logModule = "org.jboss.logmanager";
         String jaxpModule = "javax.xml.jaxp-provider";
         String bootModule = HOST_CONTROLLER_MODULE;
         final PCSocketConfig pcSocketConfig = new PCSocketConfig();
@@ -88,7 +90,6 @@ public final class Main {
         final List<String> javaOptions = new ArrayList<String>();
         final List<String> smOptions = new ArrayList<String>();
 
-        // logmodule is the same as mine or defaulted
         // target module is always SM
         // -mp is my module path
         // -jar is jboss-modules.jar in jboss-home
@@ -104,8 +105,6 @@ public final class Main {
                 modulePath = args[++i];
             } else if ("-jar".equals(arg)) {
                 bootJar = args[++i];
-            } else if ("-logmodule".equals(arg)) {
-                logModule = args[++i];
             } else if ("-jaxpmodule".equals(arg)) {
                 jaxpModule = args[++i];
             } else if ("--".equals(arg)) {
@@ -120,7 +119,7 @@ public final class Main {
                                 return null;
                             } else if (CommandLineConstants.VERSION.equals(arg) || CommandLineConstants.SHORT_VERSION.equals(arg)
                                     || CommandLineConstants.OLD_VERSION.equals(arg) || CommandLineConstants.OLD_SHORT_VERSION.equals(arg)) {
-                                System.out.println("\nJBoss Application Server " + getVersionString());
+                                System.out.println(new ProductConfig(Module.getBootModuleLoader(), jbossHome).getPrettyVersionString());
                                 return null;
                             } else if (pcSocketConfig.processPCSocketConfigArgument(arg, args, i)) {
                                 if (pcSocketConfig.isParseFailed()) {
@@ -158,7 +157,8 @@ public final class Main {
         if (modulePath == null) {
             // if "-mp" (i.e. module path) wasn't part of the command line args, then check the system property.
             // if system property not set, then default to JBOSS_HOME/modules
-            modulePath = SecurityActions.getSystemProperty("jboss.module.path", jbossHome + File.separator + "modules");
+            // TODO: jboss-modules setting module.path is not a reliable API; log a WARN or something if we get here
+            modulePath = SecurityActions.getSystemProperty("module.path", jbossHome + File.separator + "modules");
         }
         if (bootJar == null) {
             // if "-jar" wasn't part of the command line args, then default to JBOSS_HOME/jboss-modules.jar
@@ -182,7 +182,9 @@ public final class Main {
         }
 
         final ProtocolServer.Configuration configuration = new ProtocolServer.Configuration();
-        configuration.setBindAddress(new InetSocketAddress(pcSocketConfig.getBindAddress(), pcSocketConfig.getBindPort()));
+        InetAddress pcInetAddress = InetAddress.getByName(pcSocketConfig.getBindAddress());
+        InetSocketAddress pcInetSocketAddress = new InetSocketAddress(pcInetAddress, pcSocketConfig.getBindPort());
+        configuration.setBindAddress(pcInetSocketAddress);
         configuration.setSocketFactory(ServerSocketFactory.getDefault());
         final ThreadFactory threadFactory = new JBossThreadFactory(new ThreadGroup("ProcessController-threads"), Boolean.FALSE, null, "%G - %t", null, null, AccessController.getContext());
         configuration.setThreadFactory(threadFactory);
@@ -193,18 +195,19 @@ public final class Main {
 
         final List<String> initialCommand = new ArrayList<String>();
         initialCommand.add(jvmName);
+        initialCommand.add("-D[" + HOST_CONTROLLER_PROCESS_NAME + "]");
         initialCommand.addAll(javaOptions);
         initialCommand.add("-jar");
         initialCommand.add(bootJar);
         initialCommand.add("-mp");
         initialCommand.add(modulePath);
-        initialCommand.add("-logmodule");
-        initialCommand.add(logModule);
         initialCommand.add("-jaxpmodule");
         initialCommand.add(jaxpModule);
         initialCommand.add(bootModule);
+        initialCommand.add("-mp");  // Repeat the module path so HostController's Main sees it
+        initialCommand.add(modulePath);
         initialCommand.add(CommandLineConstants.PROCESS_CONTROLLER_BIND_ADDR);
-        initialCommand.add(boundAddress.getHostName());
+        initialCommand.add(boundAddress.getAddress().getHostAddress());
         initialCommand.add(CommandLineConstants.PROCESS_CONTROLLER_BIND_PORT);
         initialCommand.add(Integer.toString(boundAddress.getPort()));
         initialCommand.addAll(smOptions);
@@ -285,7 +288,7 @@ public final class Main {
                 } else {
                     bindAddress = addr;
                 }
-            } else if (CommandLineConstants.PROCESS_CONTROLLER_BIND_PORT.equals(arg) || CommandLineConstants.OLD_PROCESS_CONROLLER_BIND_PORT.equals(arg)) {
+            } else if (CommandLineConstants.PROCESS_CONTROLLER_BIND_PORT.equals(arg) || CommandLineConstants.OLD_PROCESS_CONTROLLER_BIND_PORT.equals(arg)) {
                 bindPort = Integer.parseInt(args[index + 1]);
                 argIncrement = 1;
             } else if (arg.startsWith(CommandLineConstants.PROCESS_CONTROLLER_BIND_PORT)) {
@@ -295,8 +298,8 @@ public final class Main {
                 } else {
                     bindPort = Integer.parseInt(port);
                 }
-            } else if (arg.startsWith(CommandLineConstants.OLD_PROCESS_CONROLLER_BIND_PORT)) {
-                String port = parseValue(arg, CommandLineConstants.OLD_PROCESS_CONROLLER_BIND_PORT);
+            } else if (arg.startsWith(CommandLineConstants.OLD_PROCESS_CONTROLLER_BIND_PORT)) {
+                String port = parseValue(arg, CommandLineConstants.OLD_PROCESS_CONTROLLER_BIND_PORT);
                 if (port == null) {
                     parseFailed = true;
                 } else {

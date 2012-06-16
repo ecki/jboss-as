@@ -22,16 +22,18 @@
 
 package org.jboss.as.server.deployment;
 
+import java.util.List;
+
 import org.jboss.as.controller.ServiceVerificationHandler;
 import org.jboss.as.controller.registry.ImmutableManagementResourceRegistration;
+import org.jboss.as.controller.registry.ManagementResourceRegistration;
 import org.jboss.as.controller.registry.Resource;
 import org.jboss.as.server.deployment.module.ResourceRoot;
+import org.jboss.as.server.services.security.AbstractVaultReader;
 import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.service.ServiceRegistry;
 import org.jboss.msc.service.ServiceTarget;
-
-import java.util.List;
 
 /**
  * Deployment processor responsible to creating deployment unit services for sub-deployment.
@@ -54,7 +56,9 @@ public class SubDeploymentProcessor implements DeploymentUnitProcessor {
                 }
                 final Resource resource = DeploymentModelUtils.createSubDeployment(childRoot.getRootName(), deploymentUnit);
                 final ImmutableManagementResourceRegistration registration = deploymentUnit.getAttachment(DeploymentModelUtils.REGISTRATION_ATTACHMENT);
-                final SubDeploymentUnitService service = new SubDeploymentUnitService(childRoot, deploymentUnit, registration, resource, serviceVerificationHandler);
+                final ManagementResourceRegistration mutableRegistration =  deploymentUnit.getAttachment(DeploymentModelUtils.MUTABLE_REGISTRATION_ATTACHMENT);
+                final AbstractVaultReader vaultReader = deploymentUnit.getAttachment(Attachments.VAULT_READER_ATTACHMENT_KEY);
+                final SubDeploymentUnitService service = new SubDeploymentUnitService(childRoot, deploymentUnit, registration, mutableRegistration, resource, serviceVerificationHandler, vaultReader);
 
                 final ResourceRoot parentRoot = deploymentUnit.getAttachment(Attachments.DEPLOYMENT_ROOT);
                 final String relativePath = childRoot.getRoot().getPathNameRelativeTo(parentRoot.getRoot());
@@ -66,7 +70,7 @@ public class SubDeploymentProcessor implements DeploymentUnitProcessor {
                         .install();
                 phaseContext.addDeploymentDependency(serviceName, Attachments.SUB_DEPLOYMENTS);
                 //we also need a dep on the first phase of the sub deployments
-                phaseContext.addToAttachmentList(Attachments.NEXT_PHASE_DEPS,serviceName.append(ServiceName.of(Phase.STRUCTURE.name())));
+                phaseContext.addToAttachmentList(Attachments.NEXT_PHASE_DEPS, serviceName.append(ServiceName.of(Phase.STRUCTURE.name())));
                 previous = serviceName;
             }
         }

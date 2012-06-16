@@ -22,121 +22,50 @@
 
 package org.jboss.as.domain.controller.operations;
 
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.DOMAIN_MODEL;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.FAILURE_DESCRIPTION;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.HOST;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OPERATION_HEADERS;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RESULT;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Locale;
-import java.util.concurrent.atomic.AtomicReference;
-
-import org.jboss.as.controller.ModelController;
-import org.jboss.as.controller.ModelController.OperationTransaction;
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.PathAddress;
-import org.jboss.as.controller.ProxyController;
-import org.jboss.as.controller.client.OperationMessageHandler;
 import org.jboss.as.controller.descriptions.DescriptionProvider;
 import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
 import org.jboss.as.controller.registry.Resource;
-import org.jboss.as.domain.controller.DomainController;
-import org.jboss.as.domain.controller.UnregisteredHostChannelRegistry;
+import org.jboss.as.controller.transform.Transformers;
 import org.jboss.dmr.ModelNode;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+
 /**
- * Step handler responsible for pushing our master domain model to the remote slave
- * as part of the remote slave's registration with this master domain controller.
+ * Step handler responsible for collecting a complete description of the domain model,
+ * which is going to be sent back to a remote host-controller.
  *
  * @author John Bailey
  */
 public class ReadMasterDomainModelHandler implements OperationStepHandler, DescriptionProvider {
+
     public static final String OPERATION_NAME = "read-master-domain-model";
 
-    public static final String FORCE_DIRECT_HACK = "force-direct-hack";
+    private final Transformers transformers;
+    public ReadMasterDomainModelHandler(final Transformers transformers) {
+        this.transformers = transformers;
+    }
 
-    private final DomainController domainController;
-    private final UnregisteredHostChannelRegistry registry;
-
-    public ReadMasterDomainModelHandler(final DomainController domainController, final UnregisteredHostChannelRegistry registry) {
-        this.domainController = domainController;
-        this.registry = registry;
+    private Resource transformResource(final OperationContext context, Resource root) {
+        return transformers.transformResource(Transformers.Factory.getTransformationContext(context), root);
     }
 
     public void execute(OperationContext context, ModelNode operation) throws OperationFailedException {
-        //Lock the model here
-        final Resource root = context.readResourceForUpdate(PathAddress.EMPTY_ADDRESS);
-        final String hostName = operation.get(HOST).asString();
-
+        // Acquire the lock
+        context.acquireControllerLock();
+        // Transform the model
+        final Resource untransformedRoot = context.readResource(PathAddress.EMPTY_ADDRESS,true);
+        final Resource root = transformResource(context, untransformedRoot);
         // Get the list of all resources registered in this model
-        final List<ModelNode> modelDescription = describeAsNodeList(root);
-
-        ModelNode op = new ModelNode();
-        op.get(OP).set(ApplyRemoteMasterDomainModelHandler.OPERATION_NAME);
-        //FIXME this makes the op work after boot (i.e. slave connects to restarted master), but does not make the slave resync the servers
-        op.get(OPERATION_HEADERS, "execute-for-coordinator").set(true);
-        op.get(OP_ADDR).setEmptyList();
-        op.get(DOMAIN_MODEL).set(modelDescription);
-
-        //TODO get this from somewhere
-        final ProxyController proxy = registry.popChannelAndCreateProxy(hostName);
-
-        final AtomicReference<ModelNode> failedRef = new AtomicReference<ModelNode>();
-        final AtomicReference<ModelNode> preparedRef = new AtomicReference<ModelNode>();
-        final AtomicReference<OperationTransaction> txRef = new AtomicReference<OperationTransaction>();
-        ProxyController.ProxyOperationControl control = new ProxyController.ProxyOperationControl() {
-
-            @Override
-            public void operationFailed(ModelNode response) {
-                failedRef.set(response);
-            }
-
-            @Override
-            public void operationPrepared(OperationTransaction transaction, ModelNode result) {
-                txRef.set(transaction);
-                preparedRef.set(result);
-            }
-
-            @Override
-            public void operationCompleted(ModelNode response) {
-            }
-        };
-        proxy.execute(op, OperationMessageHandler.logging, control, null);
-
-        if (failedRef.get() != null) {
-            final ModelNode failed = failedRef.get();
-            context.getResult().set(failed.get(RESULT));
-            context.getFailureDescription().set(failed.get(FAILURE_DESCRIPTION));
-            context.completeStep();
-        } else {
-            final ModelNode preparedResult = preparedRef.get();
-            context.getResult().set(preparedResult.get(RESULT));
-            if (preparedResult.hasDefined(FAILURE_DESCRIPTION)) {
-                context.getFailureDescription().set(preparedResult.get(FAILURE_DESCRIPTION));
-            }
-
-            OperationContext.ResultAction resultAction = context.completeStep();
-            ModelController.OperationTransaction tx = txRef.get();
-            if (tx != null) {
-                if (resultAction == OperationContext.ResultAction.KEEP) {
-                    try {
-                        domainController.registerRemoteHost(proxy);
-                        tx.commit();
-                    } catch (Exception e) {
-                        context.getFailureDescription().set(SlaveRegistrationError.formatHostAlreadyExists(e.getMessage()));
-                        tx.rollback();
-                    }
-                } else {
-                    tx.rollback();
-                }
-            }
-        }
+        context.getResult().set(describeAsNodeList(root));
+        // The HC registration process will hijack the operationPrepared call and push
+        // the model to a registering host-controller
+        context.completeStep();
     }
 
     /**
@@ -148,14 +77,14 @@ public class ReadMasterDomainModelHandler implements OperationStepHandler, Descr
      * @param resource the root resource
      * @return the list of resources
      */
-    static List<ModelNode> describeAsNodeList(final Resource resource) {
+    private static List<ModelNode> describeAsNodeList(final Resource resource) {
         final List<ModelNode> list = new ArrayList<ModelNode>();
         describe(PathAddress.EMPTY_ADDRESS, resource, list);
         return list;
     }
 
-    static void describe(final PathAddress base, final Resource resource, List<ModelNode> nodes) {
-        if(resource.isProxy() || resource.isRuntime()) {
+    private static void describe(final PathAddress base, final Resource resource, List<ModelNode> nodes) {
+        if (resource.isProxy() || resource.isRuntime()) {
             return; // ignore runtime and proxies
         } else if (base.size() >= 1 && base.getElement(0).getKey().equals(ModelDescriptionConstants.HOST)) {
             return; // ignore hosts
@@ -164,8 +93,8 @@ public class ReadMasterDomainModelHandler implements OperationStepHandler, Descr
         description.get("domain-resource-address").set(base.toModelNode());
         description.get("domain-resource-model").set(resource.getModel());
         nodes.add(description);
-        for(final String childType : resource.getChildTypes()) {
-            for(final Resource.ResourceEntry entry : resource.getChildren(childType)) {
+        for (final String childType : resource.getChildTypes()) {
+            for (final Resource.ResourceEntry entry : resource.getChildren(childType)) {
                 describe(base.append(entry.getPathElement()), entry, nodes);
             }
         }

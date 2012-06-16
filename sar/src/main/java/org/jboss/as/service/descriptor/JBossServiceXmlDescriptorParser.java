@@ -35,6 +35,8 @@ import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 
+import org.jboss.as.service.SarMessages;
+import org.jboss.metadata.property.PropertyReplacer;
 import org.jboss.staxmapper.XMLElementReader;
 import org.jboss.staxmapper.XMLExtendedStreamReader;
 
@@ -143,6 +145,12 @@ public final class JBossServiceXmlDescriptorParser implements XMLElementReader<P
             final Attribute attribute = QNAME_MAP.get(qName);
             return attribute == null ? UNKNOWN : attribute;
         }
+    }
+
+    private final PropertyReplacer propertyReplacer;
+
+    public JBossServiceXmlDescriptorParser(final PropertyReplacer propertyReplacer) {
+        this.propertyReplacer = propertyReplacer;
     }
 
     public void readElement(final XMLExtendedStreamReader reader, final ParseResult<JBossServiceXmlDescriptor> value) throws XMLStreamException {
@@ -373,7 +381,7 @@ public final class JBossServiceXmlDescriptorParser implements XMLElementReader<P
                     }
                     break;
                 case CHARACTERS:
-                    attributeConfig.setValue(reader.getText());
+                    attributeConfig.setValue(propertyReplacer.replaceProperties(reader.getText()));
             }
         }
         throw unexpectedContent(reader);
@@ -618,18 +626,11 @@ public final class JBossServiceXmlDescriptorParser implements XMLElementReader<P
             case XMLStreamConstants.START_ELEMENT: kind = "element start"; break;
             default: kind = "unknown"; break;
         }
-        final StringBuilder b = new StringBuilder("Unexpected content of type '").append(kind).append('\'');
-        if (reader.hasName()) {
-            b.append(" named '").append(reader.getName()).append('\'');
-        }
-        if (reader.hasText()) {
-            b.append(", text is: '").append(reader.getText()).append('\'');
-        }
-        return new XMLStreamException(b.toString(), reader.getLocation());
+        return new XMLStreamException(SarMessages.MESSAGES.unexpectedContent(kind, reader.getName(), reader.getText()), reader.getLocation());
     }
 
     private static XMLStreamException missingAttributes(final Location location, final Set<Attribute> required) {
-        final StringBuilder b = new StringBuilder("Missing one or more required attributes:");
+        final StringBuilder b = new StringBuilder(SarMessages.MESSAGES.missingRequiredAttributes());
         for (Attribute attribute : required) {
             b.append(' ').append(attribute);
         }

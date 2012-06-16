@@ -1,10 +1,30 @@
+/*
+ * JBoss, Home of Professional Open Source.
+ * Copyright 2012, Red Hat, Inc., and individual contributors
+ * as indicated by the @author tags. See the copyright.txt file in the
+ * distribution for a full listing of individual contributors.
+ *
+ * This is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU Lesser General Public License as
+ * published by the Free Software Foundation; either version 2.1 of
+ * the License, or (at your option) any later version.
+ *
+ * This software is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this software; if not, write to the Free
+ * Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
+ * 02110-1301 USA, or see the FSF site: http://www.fsf.org.
+ */
 package org.jboss.as.txn.subsystem;
 
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
 
-import javax.xml.stream.Location;
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
 
@@ -97,6 +117,16 @@ class TransactionSubsystem10Parser implements XMLStreamConstants, XMLElementRead
         if (!required.isEmpty()) {
             throw missingRequiredElement(reader, required);
         }
+
+        final ModelNode logStoreAddress = address.clone();
+        final ModelNode operation = new ModelNode();
+        operation.get(OP).set(ADD);
+        logStoreAddress.add(LogStoreConstants.LOG_STORE, LogStoreConstants.LOG_STORE);
+
+        logStoreAddress.protect();
+
+        operation.get(OP_ADDR).set(logStoreAddress);
+        list.add(operation);
     }
 
     static void parseObjectStoreEnvironmentElementAndEnrichOperation(final XMLExtendedStreamReader reader, ModelNode operation) throws XMLStreamException {
@@ -105,14 +135,13 @@ class TransactionSubsystem10Parser implements XMLStreamConstants, XMLElementRead
         for (int i = 0; i < count; i++) {
             requireNoNamespaceAttribute(reader, i);
             final String value = reader.getAttributeValue(i);
-            final Location location = reader.getLocation();
             final Attribute attribute = Attribute.forName(reader.getAttributeLocalName(i));
             switch (attribute) {
                 case RELATIVE_TO:
-                    TransactionSubsystemRootResourceDefinition.OBJECT_STORE_RELATIVE_TO.parseAndSetParameter(value, operation, location);
+                    TransactionSubsystemRootResourceDefinition.OBJECT_STORE_RELATIVE_TO.parseAndSetParameter(value, operation, reader);
                     break;
                 case PATH:
-                    TransactionSubsystemRootResourceDefinition.OBJECT_STORE_PATH.parseAndSetParameter(value, operation, location);
+                    TransactionSubsystemRootResourceDefinition.OBJECT_STORE_PATH.parseAndSetParameter(value, operation, reader);
                     break;
                 default:
                     throw unexpectedAttribute(reader, i);
@@ -129,17 +158,16 @@ class TransactionSubsystem10Parser implements XMLStreamConstants, XMLElementRead
         for (int i = 0; i < count; i++) {
             requireNoNamespaceAttribute(reader, i);
             final String value = reader.getAttributeValue(i);
-            final Location location = reader.getLocation();
             final Attribute attribute = Attribute.forName(reader.getAttributeLocalName(i));
             switch (attribute) {
                 case ENABLE_STATISTICS:
-                    TransactionSubsystemRootResourceDefinition.ENABLE_STATISTICS.parseAndSetParameter(value, operation, location);
+                    TransactionSubsystemRootResourceDefinition.ENABLE_STATISTICS.parseAndSetParameter(value, operation, reader);
                     break;
                 case ENABLE_TSM_STATUS:
-                    TransactionSubsystemRootResourceDefinition.ENABLE_TSM_STATUS.parseAndSetParameter(value, operation, location);
+                    TransactionSubsystemRootResourceDefinition.ENABLE_TSM_STATUS.parseAndSetParameter(value, operation, reader);
                     break;
                 case DEFAULT_TIMEOUT:
-                    TransactionSubsystemRootResourceDefinition.DEFAULT_TIMEOUT.parseAndSetParameter(value, operation, location);
+                    TransactionSubsystemRootResourceDefinition.DEFAULT_TIMEOUT.parseAndSetParameter(value, operation, reader);
                     break;
                 default:
                     throw unexpectedAttribute(reader, i);
@@ -167,13 +195,13 @@ class TransactionSubsystem10Parser implements XMLStreamConstants, XMLElementRead
             final Attribute attribute = Attribute.forName(reader.getAttributeLocalName(i));
             switch (attribute) {
                 case NODE_IDENTIFIER:
-                    TransactionSubsystemRootResourceDefinition.NODE_IDENTIFIER.parseAndSetParameter(value, operation, reader.getLocation());
+                    TransactionSubsystemRootResourceDefinition.NODE_IDENTIFIER.parseAndSetParameter(value, operation, reader);
                     break;
                 case PATH:
-                    TransactionSubsystemRootResourceDefinition.PATH.parseAndSetParameter(value, operation, reader.getLocation());
+                    TransactionSubsystemRootResourceDefinition.PATH.parseAndSetParameter(value, operation, reader);
                     break;
                 case RELATIVE_TO:
-                    TransactionSubsystemRootResourceDefinition.RELATIVE_TO.parseAndSetParameter(value, operation, reader.getLocation());
+                    TransactionSubsystemRootResourceDefinition.RELATIVE_TO.parseAndSetParameter(value, operation, reader);
                     break;
                 default:
                     throw unexpectedAttribute(reader, i);
@@ -255,10 +283,10 @@ class TransactionSubsystem10Parser implements XMLStreamConstants, XMLElementRead
             required.remove(attribute);
             switch (attribute) {
                 case BINDING:
-                    TransactionSubsystemRootResourceDefinition.PROCESS_ID_SOCKET_BINDING.parseAndSetParameter(value, coreEnvironmentAdd, reader.getLocation());
+                    TransactionSubsystemRootResourceDefinition.PROCESS_ID_SOCKET_BINDING.parseAndSetParameter(value, coreEnvironmentAdd, reader);
                     break;
                 case SOCKET_PROCESS_ID_MAX_PORTS:
-                    TransactionSubsystemRootResourceDefinition.PROCESS_ID_SOCKET_MAX_PORTS.parseAndSetParameter(value, coreEnvironmentAdd, reader.getLocation());
+                    TransactionSubsystemRootResourceDefinition.PROCESS_ID_SOCKET_MAX_PORTS.parseAndSetParameter(value, coreEnvironmentAdd, reader);
                     break;
                 default:
                     throw unexpectedAttribute(reader, i);
@@ -278,18 +306,17 @@ class TransactionSubsystem10Parser implements XMLStreamConstants, XMLElementRead
         for (int i = 0; i < count; i++) {
             requireNoNamespaceAttribute(reader, i);
             final String value = reader.getAttributeValue(i);
-            final Location location = reader.getLocation();
             final Attribute attribute = Attribute.forName(reader.getAttributeLocalName(i));
             required.remove(attribute);
             switch (attribute) {
                 case BINDING:
-                    TransactionSubsystemRootResourceDefinition.BINDING.parseAndSetParameter(value, operation, location);
+                    TransactionSubsystemRootResourceDefinition.BINDING.parseAndSetParameter(value, operation, reader);
                     break;
                 case STATUS_BINDING:
-                    TransactionSubsystemRootResourceDefinition.STATUS_BINDING.parseAndSetParameter(value, operation, location);
+                    TransactionSubsystemRootResourceDefinition.STATUS_BINDING.parseAndSetParameter(value, operation, reader);
                     break;
                 case RECOVERY_LISTENER:
-                    TransactionSubsystemRootResourceDefinition.RECOVERY_LISTENER.parseAndSetParameter(value, operation, location);
+                    TransactionSubsystemRootResourceDefinition.RECOVERY_LISTENER.parseAndSetParameter(value, operation, reader);
                     break;
                 default:
                     unexpectedAttribute(reader, i);

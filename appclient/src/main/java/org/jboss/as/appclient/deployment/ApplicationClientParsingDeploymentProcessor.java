@@ -29,9 +29,12 @@ import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 
 import org.jboss.as.ee.component.DeploymentDescriptorEnvironment;
+import org.jboss.as.ee.component.EEModuleDescription;
 import org.jboss.as.ee.metadata.MetadataCompleteMarker;
 import org.jboss.as.ee.structure.DeploymentType;
 import org.jboss.as.ee.structure.DeploymentTypeMarker;
+import org.jboss.as.ee.structure.JBossDescriptorPropertyReplacement;
+import org.jboss.as.ee.structure.SpecDescriptorPropertyReplacement;
 import org.jboss.as.server.deployment.Attachments;
 import org.jboss.as.server.deployment.DeploymentPhaseContext;
 import org.jboss.as.server.deployment.DeploymentUnit;
@@ -43,7 +46,8 @@ import org.jboss.metadata.appclient.parser.jboss.JBossClientMetaDataParser;
 import org.jboss.metadata.appclient.parser.spec.ApplicationClientMetaDataParser;
 import org.jboss.metadata.appclient.spec.AppClientEnvironmentRefsGroupMetaData;
 import org.jboss.metadata.appclient.spec.ApplicationClientMetaData;
-import org.jboss.metadata.parser.util.NoopXmlResolver;
+import org.jboss.metadata.parser.util.NoopXMLResolver;
+import org.jboss.metadata.property.PropertyReplacer;
 import org.jboss.vfs.VirtualFile;
 
 import static org.jboss.as.appclient.logging.AppClientMessages.MESSAGES;
@@ -62,8 +66,9 @@ public class ApplicationClientParsingDeploymentProcessor implements DeploymentUn
         if (!DeploymentTypeMarker.isType(DeploymentType.APPLICATION_CLIENT, deploymentUnit)) {
             return;
         }
-        final ApplicationClientMetaData appClientMD = parseAppClient(deploymentUnit);
-        final JBossClientMetaData jbossClientMD = parseJBossClient(deploymentUnit);
+
+        final ApplicationClientMetaData appClientMD = parseAppClient(deploymentUnit, SpecDescriptorPropertyReplacement.propertyReplacer(deploymentUnit));
+        final JBossClientMetaData jbossClientMD = parseJBossClient(deploymentUnit, JBossDescriptorPropertyReplacement.propertyReplacer(deploymentUnit));
         final JBossClientMetaData merged;
         if (appClientMD == null && jbossClientMD == null) {
             return;
@@ -80,6 +85,14 @@ public class ApplicationClientParsingDeploymentProcessor implements DeploymentUn
         deploymentUnit.putAttachment(AppClientAttachments.APPLICATION_CLIENT_META_DATA, merged);
         final DeploymentDescriptorEnvironment environment = new DeploymentDescriptorEnvironment("java:module/env/", merged.getEnvironmentRefsGroupMetaData());
         deploymentUnit.putAttachment(org.jboss.as.ee.component.Attachments.MODULE_DEPLOYMENT_DESCRIPTOR_ENVIRONMENT, environment);
+
+
+        //override module name if applicable
+        if(merged.getModuleName() != null && !merged.getModuleName().isEmpty()) {
+            final EEModuleDescription description = deploymentUnit.getAttachment(org.jboss.as.ee.component.Attachments.EE_MODULE_DESCRIPTION);
+            description.setModuleName(merged.getModuleName());
+        }
+
     }
 
     @Override
@@ -87,7 +100,7 @@ public class ApplicationClientParsingDeploymentProcessor implements DeploymentUn
 
     }
 
-    private ApplicationClientMetaData parseAppClient(DeploymentUnit deploymentUnit) throws DeploymentUnitProcessingException {
+    private ApplicationClientMetaData parseAppClient(DeploymentUnit deploymentUnit, final PropertyReplacer propertyReplacer) throws DeploymentUnitProcessingException {
         final ResourceRoot deploymentRoot = deploymentUnit.getAttachment(Attachments.DEPLOYMENT_ROOT);
         final VirtualFile alternateDescriptor = deploymentRoot.getAttachment(org.jboss.as.ee.structure.Attachments.ALTERNATE_CLIENT_DEPLOYMENT_DESCRIPTOR);
         // Locate the descriptor
@@ -101,7 +114,7 @@ public class ApplicationClientParsingDeploymentProcessor implements DeploymentUn
             InputStream is = null;
             try {
                 is = descriptor.openStream();
-                ApplicationClientMetaData data = new ApplicationClientMetaDataParser().parse(getXMLStreamReader(is));
+                ApplicationClientMetaData data = new ApplicationClientMetaDataParser().parse(getXMLStreamReader(is), propertyReplacer);
                 return data;
             } catch (XMLStreamException e) {
                 throw MESSAGES.failedToParseXml(e, descriptor, e.getLocation().getLineNumber(), e.getLocation().getColumnNumber());
@@ -121,14 +134,14 @@ public class ApplicationClientParsingDeploymentProcessor implements DeploymentUn
         }
     }
 
-    private JBossClientMetaData parseJBossClient(DeploymentUnit deploymentUnit) throws DeploymentUnitProcessingException {
+    private JBossClientMetaData parseJBossClient(DeploymentUnit deploymentUnit, final PropertyReplacer propertyReplacer) throws DeploymentUnitProcessingException {
         final VirtualFile deploymentRoot = deploymentUnit.getAttachment(Attachments.DEPLOYMENT_ROOT).getRoot();
         final VirtualFile appXml = deploymentRoot.getChild(JBOSS_CLIENT_XML);
         if (appXml.exists()) {
             InputStream is = null;
             try {
                 is = appXml.openStream();
-                JBossClientMetaData data = new JBossClientMetaDataParser().parse(getXMLStreamReader(is));
+                JBossClientMetaData data = new JBossClientMetaDataParser().parse(getXMLStreamReader(is), propertyReplacer);
                 return data;
             } catch (XMLStreamException e) {
                 throw MESSAGES.failedToParseXml(e, appXml, e.getLocation().getLineNumber(), e.getLocation().getColumnNumber());
@@ -151,7 +164,7 @@ public class ApplicationClientParsingDeploymentProcessor implements DeploymentUn
 
     private XMLStreamReader getXMLStreamReader(InputStream is) throws XMLStreamException {
         final XMLInputFactory inputFactory = XMLInputFactory.newInstance();
-        inputFactory.setXMLResolver(NoopXmlResolver.create());
+        inputFactory.setXMLResolver(NoopXMLResolver.create());
         XMLStreamReader xmlReader = inputFactory.createXMLStreamReader(is);
         return xmlReader;
     }

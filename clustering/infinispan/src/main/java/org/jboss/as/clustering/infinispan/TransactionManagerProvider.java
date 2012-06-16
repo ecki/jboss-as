@@ -31,10 +31,10 @@ import org.infinispan.transaction.lookup.TransactionManagerLookup;
  */
 public class TransactionManagerProvider implements TransactionManagerLookup {
 
-    private final TransactionManager manager;
+    private final TransactionManager tm;
 
-    public TransactionManagerProvider(TransactionManager manager) {
-        this.manager = manager;
+    public TransactionManagerProvider(TransactionManager tm) {
+        this.tm = tm;
     }
 
     /**
@@ -43,6 +43,6 @@ public class TransactionManagerProvider implements TransactionManagerLookup {
      */
     @Override
     public TransactionManager getTransactionManager() throws Exception {
-        return this.manager;
+        return this.tm;
     }
 }

@@ -28,6 +28,7 @@ import org.jboss.as.cli.parsing.DefaultStateWithEndCharacter;
 import org.jboss.as.cli.parsing.GlobalCharacterHandlers;
 import org.jboss.as.cli.parsing.ParsingContext;
 import org.jboss.as.cli.parsing.QuotesState;
+import org.jboss.as.cli.parsing.WordCharacterHandler;
 
 /**
  *
@@ -57,6 +58,12 @@ public class PropertyValueState extends DefaultParsingState {
         enterState('[', new DefaultStateWithEndCharacter("BRACKETS", ']', true, true, enterStateHandlers));
         enterState('(', new DefaultStateWithEndCharacter("PARENTHESIS", ')', true, true, enterStateHandlers));
         enterState('{', new DefaultStateWithEndCharacter("BRACES", '}', true, true, enterStateHandlers));
-        setDefaultHandler(GlobalCharacterHandlers.CONTENT_CHARACTER_HANDLER);
+        setIgnoreWhitespaces(true);
+        setDefaultHandler(WordCharacterHandler.IGNORE_LB_ESCAPE_ON);
+    }
+
+    @Override
+    public boolean lockValueIndex() {
+        return true;
     }
 }

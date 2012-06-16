@@ -24,6 +24,7 @@ package org.jboss.as.clustering;
 
 import java.io.IOException;
 
+import org.jboss.marshalling.ClassResolver;
 import org.jboss.marshalling.Marshaller;
 import org.jboss.marshalling.MarshallerFactory;
 import org.jboss.marshalling.MarshallingConfiguration;
@@ -34,18 +35,32 @@ import org.jboss.marshalling.Unmarshaller;
  */
 public class MarshallingContext {
     private final MarshallerFactory factory;
-    private final MarshallingConfiguration configuration;
+    private final VersionedMarshallingConfiguration configuration;
 
-    public MarshallingContext(MarshallerFactory factory, MarshallingConfiguration configuration) {
+    public MarshallingContext(MarshallerFactory factory, VersionedMarshallingConfiguration configuration) {
         this.factory = factory;
         this.configuration = configuration;
     }
 
-    public Unmarshaller createUnmarshaller() throws IOException {
-        return this.factory.createUnmarshaller(this.configuration);
+    public int getCurrentVersion() {
+        return this.configuration.getCurrentMarshallingVersion();
     }
 
-    public Marshaller createMarshaller() throws IOException {
-        return this.factory.createMarshaller(this.configuration);
+    public Unmarshaller createUnmarshaller(int version) throws IOException {
+        return this.factory.createUnmarshaller(this.getMarshallingConfiguration(version));
+    }
+
+    public Marshaller createMarshaller(int version) throws IOException {
+        return this.factory.createMarshaller(this.getMarshallingConfiguration(version));
+    }
+
+    // AS7-2496 Workaround
+    public ClassLoader getContextClassLoader(int version) {
+        final ClassResolver resolver = this.getMarshallingConfiguration(version).getClassResolver();
+        return (resolver instanceof ClassLoaderProvider) ? ((ClassLoaderProvider) resolver).getClassLoader() : null;
+    }
+
+    private MarshallingConfiguration getMarshallingConfiguration(int version) {
+        return this.configuration.getMarshallingConfiguration(version);
     }
 }

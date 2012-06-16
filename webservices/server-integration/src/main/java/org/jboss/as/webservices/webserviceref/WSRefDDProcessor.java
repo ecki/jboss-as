@@ -22,11 +22,6 @@
 
 package org.jboss.as.webservices.webserviceref;
 
-import static org.jboss.as.ee.utils.InjectionUtils.getInjectionTarget;
-import static org.jboss.as.webservices.util.ASHelper.getWSRefRegistry;
-import static org.jboss.as.webservices.webserviceref.WSRefUtils.processAnnotatedElement;
-import static org.jboss.as.webservices.webserviceref.WSRefUtils.translate;
-
 import java.lang.reflect.AccessibleObject;
 import java.util.Collections;
 import java.util.LinkedList;
@@ -37,8 +32,9 @@ import org.jboss.as.ee.component.BindingConfiguration;
 import org.jboss.as.ee.component.ComponentDescription;
 import org.jboss.as.ee.component.DeploymentDescriptorEnvironment;
 import org.jboss.as.ee.component.EEApplicationClasses;
-import org.jboss.as.ee.component.EEModuleDescription;
+import org.jboss.as.ee.component.ResourceInjectionTarget;
 import org.jboss.as.ee.component.deployers.AbstractDeploymentDescriptorBindingsProcessor;
+import org.jboss.as.server.deployment.Attachments;
 import org.jboss.as.server.deployment.DeploymentUnit;
 import org.jboss.as.server.deployment.DeploymentUnitProcessingException;
 import org.jboss.as.server.deployment.module.ResourceRoot;
@@ -51,6 +47,11 @@ import org.jboss.modules.Module;
 import org.jboss.wsf.spi.deployment.UnifiedVirtualFile;
 import org.jboss.wsf.spi.metadata.j2ee.serviceref.UnifiedServiceRefMetaData;
 
+import static org.jboss.as.ee.utils.InjectionUtils.getInjectionTarget;
+import static org.jboss.as.webservices.util.ASHelper.getWSRefRegistry;
+import static org.jboss.as.webservices.webserviceref.WSRefUtils.processAnnotatedElement;
+import static org.jboss.as.webservices.webserviceref.WSRefUtils.translate;
+
 /**
  * WebServiceRef DD processor.
  *
@@ -59,7 +60,7 @@ import org.jboss.wsf.spi.metadata.j2ee.serviceref.UnifiedServiceRefMetaData;
 public final class WSRefDDProcessor extends AbstractDeploymentDescriptorBindingsProcessor {
 
     @Override
-    protected List<BindingConfiguration> processDescriptorEntries(final DeploymentUnit unit, final DeploymentDescriptorEnvironment environment, final EEModuleDescription moduleDescription, final ComponentDescription componentDescription, final ClassLoader classLoader, final DeploymentReflectionIndex deploymentReflectionIndex, final EEApplicationClasses applicationClasses) throws DeploymentUnitProcessingException {
+    protected List<BindingConfiguration> processDescriptorEntries(final DeploymentUnit unit, final DeploymentDescriptorEnvironment environment, final ResourceInjectionTarget resourceInjectionTarget, final ComponentDescription componentDescription, final ClassLoader classLoader, final DeploymentReflectionIndex deploymentReflectionIndex, final EEApplicationClasses applicationClasses) throws DeploymentUnitProcessingException {
         final ServiceReferencesMetaData serviceRefsMD = environment.getEnvironment().getServiceReferences();
         if (serviceRefsMD == null) {
             return Collections.<BindingConfiguration> emptyList();
@@ -68,12 +69,13 @@ public final class WSRefDDProcessor extends AbstractDeploymentDescriptorBindings
         final List<BindingConfiguration> bindingDescriptions = new LinkedList<BindingConfiguration>();
         for (final ServiceReferenceMetaData serviceRefMD : serviceRefsMD) {
             final UnifiedServiceRefMetaData serviceRefUMDM = getServiceRef(unit, componentDescription, serviceRefMD);
-            final WSRefValueSource valueSource = new WSRefValueSource(serviceRefUMDM);
+            final Module module = unit.getAttachment(Attachments.MODULE);
+            final WSRefValueSource valueSource = new WSRefValueSource(serviceRefUMDM, module.getClassLoader());
             final BindingConfiguration bindingConfiguration = new BindingConfiguration(serviceRefUMDM.getServiceRefName(), valueSource);
             bindingDescriptions.add(bindingConfiguration);
             final String serviceRefTypeName = serviceRefUMDM.getServiceRefType();
             final Class<?> serviceRefType = getClass(classLoader, serviceRefTypeName);
-            processInjectionTargets(moduleDescription, componentDescription, applicationClasses, valueSource, classLoader, deploymentReflectionIndex, serviceRefMD, serviceRefType);
+            processInjectionTargets(resourceInjectionTarget, valueSource, classLoader, deploymentReflectionIndex, serviceRefMD, serviceRefType);
         }
         return bindingDescriptions;
     }
@@ -85,18 +87,9 @@ public final class WSRefDDProcessor extends AbstractDeploymentDescriptorBindings
         processWSFeatures(unit, serviceRefMD.getInjectionTargets(), serviceRefUMDM);
         // register it
         final WSReferences wsRefRegistry = getWSRefRegistry(unit);
-        final String serviceRefName = getServiceRefName(componentDescription, serviceRefMD);
         final String cacheKey = getCacheKey(componentDescription, serviceRefUMDM);
         wsRefRegistry.add(cacheKey, serviceRefUMDM);
         return serviceRefUMDM;
-    }
-
-    private static String getServiceRefName(final ComponentDescription componentDescription, final ServiceReferenceMetaData serviceRefMD) {
-        if (componentDescription == null) {
-            return serviceRefMD.getName();
-        } else {
-            return componentDescription.getComponentClassName() + "/" + serviceRefMD.getName();
-        }
     }
 
     private static String getCacheKey(final ComponentDescription componentDescription, final UnifiedServiceRefMetaData serviceRefUMMD) {

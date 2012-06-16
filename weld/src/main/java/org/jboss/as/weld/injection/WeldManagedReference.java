@@ -21,19 +21,34 @@
  */
 package org.jboss.as.weld.injection;
 
-import org.jboss.as.naming.ManagedReference;
-
-import javax.enterprise.context.spi.CreationalContext;
+import java.io.Serializable;
 import java.util.Map;
 
+import javax.enterprise.context.spi.CreationalContext;
+
+import org.jboss.as.naming.ManagedReference;
+import org.jboss.as.weld.WeldMessages;
+
 /**
-* @author Stuart Douglas
-*/
-class WeldManagedReference implements ManagedReference {
+ * Managed reference that is used to instantiate components when CDI is in use. It needs to create the components
+ * so it can perform constructor injection.
+ *
+ * This class is serializable, as it is stored when replicating / passivating to make sure the CDI beans can be
+ * released correctly.
+ *
+ * @author Stuart Douglas
+ */
+class WeldManagedReference implements ManagedReference, Serializable {
+
+    private static final long serialVersionUID = 1L;
+
     private final CreationalContext<?> context;
     private final Object instance;
-    private final WeldEEInjection injectionTarget;
-    private final Map<Class<?>, WeldEEInjection> interceptorInjections;
+
+    //the following fields are transient, as they are only needed at creation time,
+    //and should not be needed after injection is complete
+    private final transient WeldEEInjection injectionTarget;
+    private final transient Map<Class<?>, WeldEEInjection> interceptorInjections;
 
     public WeldManagedReference(CreationalContext<?> ctx, Object instance, final WeldEEInjection injectionTarget, final Map<Class<?>, WeldEEInjection> interceptorInjections) {
         this.context = ctx;
@@ -51,10 +66,10 @@ class WeldManagedReference implements ManagedReference {
 
     public void injectInterceptor(Class<?> interceptorClass, Object instance) {
         final WeldEEInjection injection = interceptorInjections.get(interceptorClass);
-        if(injection != null) {
+        if (injection != null) {
             injection.inject(instance, context);
         } else {
-            throw new IllegalArgumentException("Unknown interceptor class for CDI injection " + interceptorClass);
+            throw WeldMessages.MESSAGES.unknownInterceptorClassForCDIInjection(interceptorClass);
         }
     }
 

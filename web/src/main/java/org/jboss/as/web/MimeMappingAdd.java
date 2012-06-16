@@ -23,37 +23,39 @@
 package org.jboss.as.web;
 
 import static org.jboss.as.web.Constants.MIME_MAPPING;
-
-import java.util.Locale;
+import static org.jboss.as.web.WebMessages.MESSAGES;
 
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.PathAddress;
-import org.jboss.as.controller.descriptions.DescriptionProvider;
 import org.jboss.dmr.ModelNode;
 
-// implements ModelQueryOperationHandler, DescriptionProvider
-public class MimeMappingAdd implements OperationStepHandler, DescriptionProvider{
+public class MimeMappingAdd implements OperationStepHandler{
 
     static final MimeMappingAdd INSTANCE = new MimeMappingAdd();
 
-    @Override
-    public ModelNode getModelDescription(Locale locale) {
-        return WebSubsystemDescriptions.getMimeMappingAddDescription(locale);
-    }
+
 
     @Override
     public void execute(OperationContext context, ModelNode operation)
             throws OperationFailedException {
-        if (context.getType() == OperationContext.Type.SERVER || context.getType() == OperationContext.Type.HOST) {
-            final ModelNode mimetypes = context.readResourceForUpdate(PathAddress.EMPTY_ADDRESS).getModel().get(MIME_MAPPING);
-            if (operation.hasDefined("name") && operation.hasDefined("value")) {
-                mimetypes.get(operation.get("name").asString()).set(operation.get("value").asString());
-            } else
-                throw new OperationFailedException(new ModelNode().set("name and value are needed for add-mime"));
+
+        final ModelNode mimetypes = context.readResourceForUpdate(PathAddress.EMPTY_ADDRESS).getModel().get(MIME_MAPPING);
+        if (operation.hasDefined("name") && operation.hasDefined("value")) {
+            mimetypes.get(operation.get("name").asString()).set(operation.get("value").asString());
+        } else {
+            throw new OperationFailedException(new ModelNode().set(MESSAGES.nameAndValueRequiredForAddMimeMapping()));
         }
 
-        context.completeStep();
+        // TODO deal with runtime https://issues.jboss.org/browse/AS7-3854
+
+        context.reloadRequired();
+        context.completeStep(new OperationContext.RollbackHandler() {
+            @Override
+            public void handleRollback(OperationContext context, ModelNode operation) {
+                context.revertReloadRequired();
+            }
+        });
     }
 }

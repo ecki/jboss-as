@@ -23,6 +23,8 @@
 package org.jboss.as.controller;
 
 import java.util.regex.Pattern;
+
+import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.Property;
 
 import static org.jboss.as.controller.ControllerMessages.MESSAGES;
@@ -34,7 +36,7 @@ import static org.jboss.as.controller.ControllerMessages.MESSAGES;
  */
 public class PathElement {
 
-    private static final String WILDCARD_VALUE = "*";
+    public static final String WILDCARD_VALUE = "*";
 
     private final String key;
     private final String value;
@@ -46,8 +48,6 @@ public class PathElement {
      * number, and cannot start or end with {@code -}.
      */
     private static final Pattern VALID_KEY_PATTERN = Pattern.compile("\\*|[_a-zA-Z](?:[-_a-zA-Z0-9]*[_a-zA-Z0-9])?");
-
-    private static final Pattern VALID_VALUE_PATTERN = Pattern.compile("\\*|[^*\\p{Space}\\p{Cntrl}]+");
 
     /**
      * Construct a new instance with a wildcard value.
@@ -83,10 +83,12 @@ public class PathElement {
      */
     PathElement(final String key, final String value) {
         if (key == null || !VALID_KEY_PATTERN.matcher(key).matches()) {
-            throw MESSAGES.invalidKey(key);
+            final String element = key + "=" + value;
+            throw new OperationClientIllegalArgumentException(MESSAGES.invalidPathElementKey(element, key));
         }
-        if (value == null || !VALID_VALUE_PATTERN.matcher(value).matches()) {
-            throw MESSAGES.invalidValue(value);
+        if (value == null) {
+            final String element = key + "=" + value;
+            throw new OperationClientIllegalArgumentException(MESSAGES.invalidPathElementValue(element, value, ' '));
         }
         boolean multiTarget = false;
         if(key.equals(WILDCARD_VALUE)) {
@@ -138,7 +140,7 @@ public class PathElement {
      * @return {@code true} if the value is the wildcard value
      */
     public boolean isWildcard() {
-        return WILDCARD_VALUE == value;
+        return WILDCARD_VALUE == value; //this is ok as we are expecting exact same object.
     }
 
     public boolean isMultiTarget() {
@@ -147,6 +149,10 @@ public class PathElement {
 
     public String[] getSegments() {
         return value.split(",");
+    }
+
+    public String[] getKeyValuePair(){
+        return new String[]{key,value};
     }
 
     @Override
@@ -175,5 +181,22 @@ public class PathElement {
     @Override
     public String toString() {
         return "\"" + key + "\" => \"" + value + "\"";
+    }
+
+    /**
+     * AS7-2905. An IAE that implements OperationClientException. Allows PathElement to continue to throw IAE
+     * in case client code expects that failure type, but lets operation handling code detect that the
+     * IAE is a client error.
+     */
+    private static class OperationClientIllegalArgumentException extends IllegalArgumentException implements OperationClientException {
+
+        private OperationClientIllegalArgumentException(final String msg) {
+            super(msg);
+        }
+
+        @Override
+        public ModelNode getFailureDescription() {
+            return new ModelNode(getLocalizedMessage());
+        }
     }
 }

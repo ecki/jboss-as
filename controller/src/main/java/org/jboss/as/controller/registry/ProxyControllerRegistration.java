@@ -22,25 +22,26 @@
 
 package org.jboss.as.controller.registry;
 
+import static org.jboss.as.controller.ControllerMessages.MESSAGES;
+
 import java.util.Collections;
 import java.util.EnumSet;
-import java.util.Iterator;
 import java.util.ListIterator;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
 import org.jboss.as.controller.AttributeDefinition;
+import org.jboss.as.controller.OperationDefinition;
 import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.PathElement;
 import org.jboss.as.controller.ProxyController;
 import org.jboss.as.controller.ProxyStepHandler;
 import org.jboss.as.controller.ResourceDefinition;
 import org.jboss.as.controller.descriptions.DescriptionProvider;
+import org.jboss.as.controller.descriptions.OverrideDescriptionProvider;
 import org.jboss.as.controller.registry.OperationEntry.EntryType;
 import org.jboss.dmr.ModelNode;
-
-import static org.jboss.as.controller.ControllerMessages.MESSAGES;
 
 /**
  * @author <a href="mailto:david.lloyd@redhat.com">David M. Lloyd</a>
@@ -72,6 +73,12 @@ final class ProxyControllerRegistration extends AbstractResourceRegistration imp
     }
 
     @Override
+    public void setRuntimeOnly(final boolean runtimeOnly) {
+
+    }
+
+
+    @Override
     public boolean isRemote() {
         return true;
     }
@@ -82,7 +89,17 @@ final class ProxyControllerRegistration extends AbstractResourceRegistration imp
     }
 
     @Override
-    public void registerSubModel(final PathElement address, final ManagementResourceRegistration subModel) {
+    public void unregisterSubModel(final PathElement address) throws IllegalArgumentException {
+        throw alreadyRegistered();
+    }
+
+    @Override
+    public ManagementResourceRegistration registerOverrideModel(String name, OverrideDescriptionProvider descriptionProvider) {
+        throw alreadyRegistered();
+    }
+
+    @Override
+    public void unregisterOverrideModel(String name) {
         throw alreadyRegistered();
     }
 
@@ -94,6 +111,16 @@ final class ProxyControllerRegistration extends AbstractResourceRegistration imp
     @Override
     public void registerOperationHandler(final String operationName, final OperationStepHandler handler, final DescriptionProvider descriptionProvider, final boolean inherited, EntryType entryType, EnumSet<OperationEntry.Flag> flags) {
         throw alreadyRegistered();
+    }
+
+    @Override
+    public void registerOperationHandler(OperationDefinition definition, OperationStepHandler handler, boolean inherited) {
+        throw alreadyRegistered();
+    }
+
+    @Override
+    public void unregisterOperationHandler(final String operationName) {
+
     }
 
     @Override
@@ -142,6 +169,11 @@ final class ProxyControllerRegistration extends AbstractResourceRegistration imp
     }
 
     @Override
+    public void unregisterAttribute(String attributeName) {
+        alreadyRegistered();
+    }
+
+    @Override
     public void registerProxyController(final PathElement address, final ProxyController proxyController) throws IllegalArgumentException {
         throw alreadyRegistered();
     }
@@ -161,22 +193,22 @@ final class ProxyControllerRegistration extends AbstractResourceRegistration imp
     }
 
     @Override
-    DescriptionProvider getModelDescription(final Iterator<PathElement> iterator) {
+    DescriptionProvider getModelDescription(final ListIterator<PathElement> iterator) {
         return null;
     }
 
     @Override
-    Set<String> getAttributeNames(final Iterator<PathElement> iterator) {
+    Set<String> getAttributeNames(final ListIterator<PathElement> iterator) {
         return Collections.emptySet();
     }
 
     @Override
-    Set<String> getChildNames(final Iterator<PathElement> iterator) {
+    Set<String> getChildNames(final ListIterator<PathElement> iterator) {
         return Collections.emptySet();
     }
 
     @Override
-    Set<PathElement> getChildAddresses(final Iterator<PathElement> iterator) {
+    Set<PathElement> getChildAddresses(final ListIterator<PathElement> iterator) {
         return Collections.emptySet();
     }
 
@@ -186,17 +218,17 @@ final class ProxyControllerRegistration extends AbstractResourceRegistration imp
     }
 
     @Override
-    ProxyController getProxyController(Iterator<PathElement> iterator) {
+    ProxyController getProxyController(ListIterator<PathElement> iterator) {
         return proxyController;
     }
 
     @Override
-    void getProxyControllers(Iterator<PathElement> iterator, Set<ProxyController> controllers) {
+    void getProxyControllers(ListIterator<PathElement> iterator, Set<ProxyController> controllers) {
         controllers.add(proxyController);
     }
 
     @Override
-    ManagementResourceRegistration getResourceRegistration(Iterator<PathElement> iterator) {
+    AbstractResourceRegistration getResourceRegistration(ListIterator<PathElement> iterator) {
         // BES 2011/06/14 I do not see why the IAE makes sense, so...
 //        if (!iterator.hasNext()) {
 //            return this;
@@ -210,7 +242,6 @@ final class ProxyControllerRegistration extends AbstractResourceRegistration imp
     @Override
     public ModelNode getModelDescription(Locale locale) {
         //TODO
-        //return proxyController.execute(operation, handler, control, attachments);
         return new ModelNode();
     }
 

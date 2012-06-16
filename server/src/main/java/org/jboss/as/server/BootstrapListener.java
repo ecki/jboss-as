@@ -28,9 +28,9 @@ import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.jboss.as.controller.persistence.ConfigurationPersistenceException;
-import org.jboss.as.version.Version;
-import org.jboss.logging.Logger;
+import org.jboss.as.network.NetworkUtils;
+import org.jboss.as.server.mgmt.HttpManagementService;
+import org.jboss.as.server.mgmt.domain.HttpManagement;
 import org.jboss.msc.service.AbstractServiceListener;
 import org.jboss.msc.service.ServiceContainer;
 import org.jboss.msc.service.ServiceController;
@@ -39,9 +39,8 @@ import org.jboss.msc.service.ServiceTarget;
 
 /**
  * @author <a href="kabir.khan@jboss.com">Kabir Khan</a>
- * @version $Revision: 1.1 $
  */
-class BootstrapListener extends AbstractServiceListener<Object> {
+public class BootstrapListener extends AbstractServiceListener<Object> {
 
     private final AtomicInteger started = new AtomicInteger();
     private final AtomicInteger failed = new AtomicInteger();
@@ -55,15 +54,15 @@ class BootstrapListener extends AbstractServiceListener<Object> {
     private final long startTime;
     private volatile boolean cancelLikely;
 
-    final FutureServiceContainer futureContainer;
-    final Bootstrap.Configuration configuration;
+    private final FutureServiceContainer futureContainer;
+    private final String prettyVersion;
 
-    protected BootstrapListener(final ServiceContainer serviceContainer, final long startTime, final ServiceTarget serviceTarget, final FutureServiceContainer futureContainer, Bootstrap.Configuration configuration) {
+    public BootstrapListener(final ServiceContainer serviceContainer, final long startTime, final ServiceTarget serviceTarget, final FutureServiceContainer futureContainer, final String prettyVersion) {
         this.serviceContainer = serviceContainer;
         this.startTime = startTime;
         this.serviceTarget = serviceTarget;
         this.futureContainer = futureContainer;
-        this.configuration = configuration;
+        this.prettyVersion = prettyVersion;
         final EnumMap<ServiceController.Mode, AtomicInteger> map = new EnumMap<ServiceController.Mode, AtomicInteger>(ServiceController.Mode.class);
         for (ServiceController.Mode mode : ServiceController.Mode.values()) {
             map.put(mode, new AtomicInteger());
@@ -71,7 +70,6 @@ class BootstrapListener extends AbstractServiceListener<Object> {
         this.map = map;
     }
 
-    static int cnt = 0;
     @Override
     public void listenerAdded(final ServiceController<?> controller) {
         final ServiceController.Mode mode = controller.getMode();
@@ -123,7 +121,7 @@ class BootstrapListener extends AbstractServiceListener<Object> {
         }
     }
 
-    void tick() {
+    public void tick() {
         int outstanding = this.outstanding.decrementAndGet();
         if (outstanding != missingDeps.get()) {
             return;
@@ -148,15 +146,52 @@ class BootstrapListener extends AbstractServiceListener<Object> {
 
     protected void done(ServiceContainer container, long elapsedTime, int started, int failed, EnumMap<ServiceController.Mode, AtomicInteger> map, Set<ServiceName> missingDepsSet) {
         futureContainer.done(container);
-        final Logger log = Logger.getLogger("org.jboss.as");
+
+        logAdminConsole(container);
+
         final int active = map.get(ServiceController.Mode.ACTIVE).get();
         final int passive = map.get(ServiceController.Mode.PASSIVE).get();
         final int onDemand = map.get(ServiceController.Mode.ON_DEMAND).get();
         final int never = map.get(ServiceController.Mode.NEVER).get();
         if (failed == 0) {
-            log.infof("JBoss AS %s \"%s\" started in %dms - Started %d of %d services (%d services are passive or on-demand)", Version.AS_VERSION, Version.AS_RELEASE_CODENAME, Long.valueOf(elapsedTime), Integer.valueOf(started), Integer.valueOf(active + passive + onDemand + never), Integer.valueOf(onDemand + passive));
+            ServerLogger.AS_ROOT_LOGGER.startedClean(prettyVersion, elapsedTime, started, active + passive + onDemand + never, onDemand + passive);
         } else {
-            log.errorf("JBoss AS %s \"%s\" started (with errors) in %dms - Started %d of %d services (%d services failed or missing dependencies, %d services are passive or on-demand)", Version.AS_VERSION, Version.AS_RELEASE_CODENAME, Long.valueOf(elapsedTime), Integer.valueOf(started), Integer.valueOf(active + passive + onDemand + never), Integer.valueOf(failed), Integer.valueOf(onDemand + passive));
+            ServerLogger.AS_ROOT_LOGGER.startedWitErrors(prettyVersion, elapsedTime, started, active + passive + onDemand + never, failed, onDemand + passive);
+        }
+    }
+
+    private void logAdminConsole(ServiceContainer container) {
+        ServiceController<?> controller = container.getService(HttpManagementService.SERVICE_NAME);
+        if (controller != null) {
+            HttpManagement mgmt = (HttpManagement)controller.getValue();
+
+            boolean hasHttp = mgmt.getHttpNetworkInterfaceBinding() != null && mgmt.getHttpPort() > 0;
+            boolean hasHttps = mgmt.getHttpsNetworkInterfaceBinding() != null && mgmt.getHttpsPort() > 0;
+            if (hasHttp && hasHttps) {
+                ServerLogger.AS_ROOT_LOGGER.logHttpAndHttpsManagement(NetworkUtils.formatAddress(mgmt.getHttpNetworkInterfaceBinding().getAddress()), mgmt.getHttpPort(), NetworkUtils.formatAddress(mgmt.getHttpsNetworkInterfaceBinding().getAddress()), mgmt.getHttpsPort());
+                if (mgmt.hasConsole()) {
+                    ServerLogger.AS_ROOT_LOGGER.logHttpAndHttpsConsole(NetworkUtils.formatAddress(mgmt.getHttpNetworkInterfaceBinding().getAddress()), mgmt.getHttpPort(), NetworkUtils.formatAddress(mgmt.getHttpsNetworkInterfaceBinding().getAddress()), mgmt.getHttpsPort());
+                } else {
+                    ServerLogger.AS_ROOT_LOGGER.logNoConsole();
+                }
+            } else if (hasHttp) {
+                ServerLogger.AS_ROOT_LOGGER.logHttpManagement(NetworkUtils.formatAddress(mgmt.getHttpNetworkInterfaceBinding().getAddress()), mgmt.getHttpPort());
+                if (mgmt.hasConsole()) {
+                    ServerLogger.AS_ROOT_LOGGER.logHttpConsole(NetworkUtils.formatAddress(mgmt.getHttpNetworkInterfaceBinding().getAddress()), mgmt.getHttpPort());
+                } else {
+                    ServerLogger.AS_ROOT_LOGGER.logNoConsole();
+                }
+            } else if (hasHttps) {
+                ServerLogger.AS_ROOT_LOGGER.logHttpsManagement(NetworkUtils.formatAddress(mgmt.getHttpsNetworkInterfaceBinding().getAddress()), mgmt.getHttpsPort());
+                if (mgmt.hasConsole()) {
+                    ServerLogger.AS_ROOT_LOGGER.logHttpsConsole(NetworkUtils.formatAddress(mgmt.getHttpsNetworkInterfaceBinding().getAddress()), mgmt.getHttpsPort());
+                } else {
+                    ServerLogger.AS_ROOT_LOGGER.logNoConsole();
+                }
+            } else {
+                ServerLogger.AS_ROOT_LOGGER.logNoHttpManagement();
+                ServerLogger.AS_ROOT_LOGGER.logNoConsole();
+            }
         }
     }
 }

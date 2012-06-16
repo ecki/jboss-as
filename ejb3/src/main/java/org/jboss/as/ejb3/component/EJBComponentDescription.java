@@ -40,10 +40,13 @@ import javax.ejb.TimerService;
 import javax.ejb.TransactionAttributeType;
 import javax.ejb.TransactionManagementType;
 
+import org.jboss.as.ee.component.Attachments;
+import org.jboss.as.ee.component.BindingConfiguration;
 import org.jboss.as.ee.component.ComponentConfiguration;
 import org.jboss.as.ee.component.ComponentConfigurator;
 import org.jboss.as.ee.component.ComponentDescription;
 import org.jboss.as.ee.component.ComponentNamingMode;
+import org.jboss.as.ee.component.ComponentStartService;
 import org.jboss.as.ee.component.ComponentView;
 import org.jboss.as.ee.component.DependencyConfigurator;
 import org.jboss.as.ee.component.NamespaceConfigurator;
@@ -52,25 +55,36 @@ import org.jboss.as.ee.component.TCCLInterceptor;
 import org.jboss.as.ee.component.ViewConfiguration;
 import org.jboss.as.ee.component.ViewConfigurator;
 import org.jboss.as.ee.component.ViewDescription;
+import org.jboss.as.ee.component.ViewService;
+import org.jboss.as.ee.component.interceptors.ComponentDispatcherInterceptor;
 import org.jboss.as.ee.component.interceptors.InterceptorOrder;
-import org.jboss.as.ejb3.EJBMethodIdentifier;
+import org.jboss.as.ee.naming.ContextInjectionSource;
+import org.jboss.as.ejb3.component.interceptors.AdditionalSetupInterceptor;
+import org.jboss.as.ejb3.component.interceptors.CurrentInvocationContextInterceptor;
 import org.jboss.as.ejb3.component.interceptors.EjbExceptionTransformingInterceptorFactories;
 import org.jboss.as.ejb3.component.interceptors.LoggingInterceptor;
+import org.jboss.as.ejb3.component.interceptors.ShutDownInterceptorFactory;
+import org.jboss.as.ejb3.component.invocationmetrics.ExecutionTimeInterceptor;
+import org.jboss.as.ejb3.deployment.ApplicableMethodInformation;
 import org.jboss.as.ejb3.deployment.ApplicationExceptions;
 import org.jboss.as.ejb3.deployment.EjbDeploymentAttachmentKeys;
 import org.jboss.as.ejb3.deployment.EjbJarDescription;
+import org.jboss.as.ejb3.deployment.ModuleDeployment;
+import org.jboss.as.ejb3.remote.EJBRemoteConnectorService;
 import org.jboss.as.ejb3.remote.EJBRemoteTransactionsRepository;
 import org.jboss.as.ejb3.remote.EJBRemoteTransactionsViewConfigurator;
+import org.jboss.as.ejb3.security.EJBMethodSecurityAttribute;
 import org.jboss.as.ejb3.security.EJBSecurityViewConfigurator;
+import org.jboss.as.ejb3.security.SecurityContextInterceptorFactory;
 import org.jboss.as.ejb3.timerservice.AutoTimer;
 import org.jboss.as.ejb3.timerservice.NonFunctionalTimerService;
 import org.jboss.as.server.deployment.DeploymentPhaseContext;
 import org.jboss.as.server.deployment.DeploymentUnit;
 import org.jboss.as.server.deployment.DeploymentUnitProcessingException;
+import org.jboss.as.server.deployment.SetupAction;
 import org.jboss.invocation.ImmediateInterceptorFactory;
 import org.jboss.invocation.Interceptor;
 import org.jboss.invocation.InterceptorContext;
-import org.jboss.invocation.InterceptorFactory;
 import org.jboss.metadata.ejb.spec.EnterpriseBeanMetaData;
 import org.jboss.metadata.javaee.spec.SecurityRolesMetaData;
 import org.jboss.msc.service.ServiceBuilder;
@@ -82,16 +96,11 @@ import static org.jboss.as.ejb3.EjbMessages.MESSAGES;
  * @author <a href="mailto:cdewolf@redhat.com">Carlo de Wolf</a>
  */
 public abstract class EJBComponentDescription extends ComponentDescription {
-    /**
-     * EJB 3.1 FR 13.3.7, the default transaction attribute is <i>REQUIRED</i>.
-     */
-    private TransactionAttributeType beanTransactionAttribute = TransactionAttributeType.REQUIRED;
+
     /**
      * EJB 3.1 FR 13.3.1, the default transaction management type is container-managed transaction demarcation.
      */
     private TransactionManagementType transactionManagementType = TransactionManagementType.CONTAINER;
-
-    private final Map<MethodIntf, TransactionAttributeType> txPerViewStyle1 = new HashMap<MethodIntf, TransactionAttributeType>();
 
     /**
      * The deployment descriptor information for this bean, if any
@@ -119,52 +128,18 @@ public abstract class EJBComponentDescription extends ComponentDescription {
     private String runAsPrincipal;
 
     /**
-     * Roles mapped with secuirty-role
+     * Roles mapped with security-role
      */
     private SecurityRolesMetaData securityRoles;
-
-    /**
-     * The @DenyAll/exclude-list map of methods. The key is the view class name and the value is a collection of EJB methods
-     * which are marked for @DenyAll/exclude-list
-     */
-    private final Map<String, Collection<EJBMethodIdentifier>> methodLevelDenyAll = new HashMap<String, Collection<EJBMethodIdentifier>>();
-
-    /**
-     * The class level @DenyAll/exclude-list map. The key is the view class name and the value is a collection of classes,
-     * in the class hierarchy of the EJB implementation class (ex: EJB implementation class' super class),
-     * which have been marked with @DenyAll.
-     */
-    private final Map<String, Collection<String>> classLevelDenyAll = new HashMap<String, Collection<String>>();
-
-    /**
-     * Method level roles allowed, per view. The key is the view class name and the value is a Map whose key is the EJB
-     * method identifier and the value is the collection of role names.
-     */
-    private final Map<String, Map<EJBMethodIdentifier, Set<String>>> methodLevelRolesAllowed = new HashMap<String, Map<EJBMethodIdentifier, Set<String>>>();
-
-    /**
-     * Class level roles allowed, per view. The key is the view class name and the value is a Map whose key is the class
-     * name on which the @RolesAllowed is applied and the value is the collection of role names
-     */
-    private final Map<String, Map<String, Set<String>>> classLevelRolesAllowed = new HashMap<String, Map<String, Set<String>>>();
 
     /**
      * Security role links. The key is the "from" role name and the value is a collection of "to" role names of the link.
      */
     private final Map<String, Collection<String>> securityRoleLinks = new HashMap<String, Collection<String>>();
 
-    /**
-     * The @PermitAll map of methods. The key is the view class name and the value is a collection of EJB methods
-     * which are marked for @PermitAll
-     */
-    private final Map<String, Collection<EJBMethodIdentifier>> methodLevelPermitAll = new HashMap<String, Collection<EJBMethodIdentifier>>();
 
-    /**
-     * The class level @PermitAll map. The key is the view class name and the value is a collection of classes,
-     * in the class hierarchy of the EJB implementation class (ex: EJB implementation class' super class),
-     * which have been marked with @PermitAll.
-     */
-    private final Map<String, Collection<String>> classLevelPermitAll = new HashMap<String, Collection<String>>();
+    private final ApplicableMethodInformation<EJBMethodSecurityAttribute> descriptorMethodPermissions;
+    private final ApplicableMethodInformation<EJBMethodSecurityAttribute> annotationMethodPermissions;
 
 
     /**
@@ -206,48 +181,33 @@ public abstract class EJBComponentDescription extends ComponentDescription {
      */
     private boolean exposedViaIiop = false;
 
+    /**
+     * The transaction attributes
+     */
+    private final ApplicableMethodInformation<TransactionAttributeType> transactionAttributes;
 
-    private final PopulatingMap<MethodIntf, Map<String, TransactionAttributeType>> txPerViewStyle2 = new PopulatingMap<MethodIntf, Map<String, TransactionAttributeType>>() {
-        @Override
-        Map<String, TransactionAttributeType> populate() {
-            return new HashMap<String, TransactionAttributeType>();
-        }
-    };
-    private final PopulatingMap<MethodIntf, PopulatingMap<String, Map<ArrayKey, TransactionAttributeType>>> txPerViewStyle3 = new PopulatingMap<MethodIntf, PopulatingMap<String, Map<ArrayKey, TransactionAttributeType>>>() {
-        @Override
-        PopulatingMap<String, Map<ArrayKey, TransactionAttributeType>> populate() {
-            return new PopulatingMap<String, Map<ArrayKey, TransactionAttributeType>>() {
-                @Override
-                Map<ArrayKey, TransactionAttributeType> populate() {
-                    return new HashMap<ArrayKey, TransactionAttributeType>();
-                }
-            };
-        }
-    };
+    /**
+     * The transaction timeouts
+     */
+    private final ApplicableMethodInformation<Integer> transactionTimeouts;
 
-    private final Map<String, TransactionAttributeType> txStyle1 = new HashMap<String, TransactionAttributeType>();
-    private final Map<String, TransactionAttributeType> txStyle2 = new HashMap<String, TransactionAttributeType>();
-    private final PopulatingMap<String, PopulatingMap<String, Map<ArrayKey, TransactionAttributeType>>> txStyle3 = new PopulatingMap<String, PopulatingMap<String, Map<ArrayKey, TransactionAttributeType>>>() {
-        @Override
-        PopulatingMap<String, Map<ArrayKey, TransactionAttributeType>> populate() {
-            return new PopulatingMap<String, Map<ArrayKey, TransactionAttributeType>>() {
-                @Override
-                Map<ArrayKey, TransactionAttributeType> populate() {
-                    return new HashMap<ArrayKey, TransactionAttributeType>();
-                }
-            };
-        }
-    };
+    /**
+     * The shutdown interceptor factory
+     */
+    private final ShutDownInterceptorFactory shutDownInterceptorFactory = new ShutDownInterceptorFactory();
 
     /**
      * Construct a new instance.
      *
-     * @param componentName      the component name
-     * @param componentClassName the component instance class name
-     * @param ejbJarDescription  the module
+     * @param componentName             the component name
+     * @param componentClassName        the component instance class name
+     * @param ejbJarDescription         the module
+     * @param deploymentUnitServiceName
+     * @param descriptorData            the optional descriptor metadata
      */
-    public EJBComponentDescription(final String componentName, final String componentClassName, final EjbJarDescription ejbJarDescription, final ServiceName deploymentUnitServiceName) {
+    public EJBComponentDescription(final String componentName, final String componentClassName, final EjbJarDescription ejbJarDescription, final ServiceName deploymentUnitServiceName, final EnterpriseBeanMetaData descriptorData) {
         super(componentName, componentClassName, ejbJarDescription.getEEModuleDescription(), deploymentUnitServiceName);
+        this.descriptorData = descriptorData;
         if (ejbJarDescription.isWar()) {
             setNamingMode(ComponentNamingMode.USE_MODULE);
         } else {
@@ -263,49 +223,65 @@ public abstract class EJBComponentDescription extends ComponentDescription {
         this.addCurrentInvocationContextFactory();
         // setup a dependency on EJB remote tx repository service, if this EJB exposes atleast one remote view
         this.addRemoteTransactionsRepositoryDependency();
+        this.transactionAttributes = new ApplicableMethodInformation<TransactionAttributeType>(componentName, TransactionAttributeType.REQUIRED);
+        this.transactionTimeouts = new ApplicableMethodInformation<Integer>(componentName, null);
+        this.descriptorMethodPermissions = new ApplicableMethodInformation<EJBMethodSecurityAttribute>(componentName, null);
+        this.annotationMethodPermissions = new ApplicableMethodInformation<EJBMethodSecurityAttribute>(componentName, null);
 
+
+        //add a dependency on the module deployment service
+        //we need to make sure this is up before the EJB starts, so that remote invocations are available
+        addDependency(deploymentUnitServiceName.append(ModuleDeployment.SERVICE_NAME), ServiceBuilder.DependencyType.REQUIRED);
+
+        getConfigurators().add(new ComponentConfigurator() {
+            @Override
+            public void configure(final DeploymentPhaseContext context, final ComponentDescription description, final ComponentConfiguration configuration) throws DeploymentUnitProcessingException {
+
+                //make sure java:comp/env is always available, even if nothing is bound there
+                if (description.getNamingMode() == ComponentNamingMode.CREATE) {
+                    description.getBindingConfigurations().add(new BindingConfiguration("java:comp/env", new ContextInjectionSource("env", "java:comp/env")));
+                }
+                final List<SetupAction> ejbSetupActions = context.getDeploymentUnit().getAttachmentList(Attachments.OTHER_EE_SETUP_ACTIONS);
+
+                if (description.isTimerServiceApplicable()) {
+
+                    if (!ejbSetupActions.isEmpty()) {
+                        configuration.addTimeoutViewInterceptor(AdditionalSetupInterceptor.factory(ejbSetupActions), InterceptorOrder.View.EE_SETUP);
+                    }
+                    configuration.addTimeoutViewInterceptor(shutDownInterceptorFactory, InterceptorOrder.View.SHUTDOWN_INTERCEPTOR);
+                    configuration.addTimeoutViewInterceptor(new ImmediateInterceptorFactory(new TCCLInterceptor(configuration.getModuleClassLoader())), InterceptorOrder.View.TCCL_INTERCEPTOR);
+                    configuration.addTimeoutViewInterceptor(configuration.getNamespaceContextInterceptorFactory(), InterceptorOrder.View.JNDI_NAMESPACE_INTERCEPTOR);
+                    configuration.addTimeoutViewInterceptor(CurrentInvocationContextInterceptor.FACTORY, InterceptorOrder.View.INVOCATION_CONTEXT_INTERCEPTOR);
+                    if (isSecurityEnabled()) {
+                        configuration.addTimeoutViewInterceptor(new SecurityContextInterceptorFactory(), InterceptorOrder.View.SECURITY_CONTEXT);
+                    }
+                    for (final Method method : configuration.getClassIndex().getClassMethods()) {
+                        configuration.addTimeoutViewInterceptor(method, new ImmediateInterceptorFactory(new ComponentDispatcherInterceptor(method)), InterceptorOrder.View.COMPONENT_DISPATCHER);
+                    }
+                }
+                if (!ejbSetupActions.isEmpty()) {
+                    configuration.getStartDependencies().add(new DependencyConfigurator<ComponentStartService>() {
+                        @Override
+                        public void configureDependency(final ServiceBuilder<?> serviceBuilder, final ComponentStartService service) throws DeploymentUnitProcessingException {
+                            for (final SetupAction setupAction : ejbSetupActions) {
+                                serviceBuilder.addDependencies(setupAction.dependencies());
+                            }
+                        }
+                    });
+                }
+
+                configuration.addComponentInterceptor(ExecutionTimeInterceptor.FACTORY, InterceptorOrder.Component.EJB_EXECUTION_TIME_INTERCEPTOR, true);
+            }
+        });
     }
 
-    private static <K, V> V get(Map<K, V> map, K key) {
-        if (map == null)
-            return null;
-        return map.get(key);
-    }
-
-    public TransactionAttributeType getTransactionAttribute(MethodIntf methodIntf, String className, String methodName, String... methodParams) {
-        assert methodIntf != null : "methodIntf is null";
-        assert methodName != null : "methodName is null";
-        assert methodParams != null : "methodParams is null";
-
-        ArrayKey methodParamsKey = new ArrayKey((Object[]) methodParams);
-        TransactionAttributeType txAttr = get(get(get(txPerViewStyle3, methodIntf), methodName), methodParamsKey);
-        if (txAttr != null)
-            return txAttr;
-        txAttr = get(get(txPerViewStyle2, methodIntf), methodName);
-        if (txAttr != null)
-            return txAttr;
-        txAttr = get(txPerViewStyle1, methodIntf);
-        if (txAttr != null)
-            return txAttr;
-        txAttr = get(get(get(txStyle3, className), methodName), methodParamsKey);
-        if (txAttr != null)
-            return txAttr;
-        txAttr = get(txStyle2, methodName);
-        if (txAttr != null)
-            return txAttr;
-        txAttr = get(txStyle1, className);
-        if (txAttr != null)
-            return txAttr;
-        return beanTransactionAttribute;
-    }
 
     public void addLocalHome(final String localHome) {
         final EjbHomeViewDescription view = new EjbHomeViewDescription(this, localHome, MethodIntf.LOCAL_HOME);
+        view.getConfigurators().add(new Ejb2ViewTypeConfigurator(Ejb2xViewType.LOCAL_HOME));
         getViews().add(view);
         // setup server side view interceptors
         setupViewInterceptors(view);
-        // setup server side home view interceptors
-        this.setupHomeViewInterceptors(view);
         // setup client side view interceptors
         setupClientViewInterceptors(view);
         // return created view
@@ -314,11 +290,10 @@ public abstract class EJBComponentDescription extends ComponentDescription {
 
     public void addRemoteHome(final String remoteHome) {
         final EjbHomeViewDescription view = new EjbHomeViewDescription(this, remoteHome, MethodIntf.HOME);
+        view.getConfigurators().add(new Ejb2ViewTypeConfigurator(Ejb2xViewType.HOME));
         getViews().add(view);
         // setup server side view interceptors
         setupViewInterceptors(view);
-        // setup server side home view interceptors
-        this.setupHomeViewInterceptors(view);
         // setup client side view interceptors
         setupClientViewInterceptors(view);
 
@@ -328,61 +303,18 @@ public abstract class EJBComponentDescription extends ComponentDescription {
 
     public void addEjbLocalObjectView(final String viewClassName) {
         final EJBViewDescription view = registerView(viewClassName, MethodIntf.LOCAL, true);
+        view.getConfigurators().add(new Ejb2ViewTypeConfigurator(Ejb2xViewType.LOCAL));
         this.ejbLocalView = view;
     }
 
     public void addEjbObjectView(final String viewClassName) {
         final EJBViewDescription view = registerView(viewClassName, MethodIntf.REMOTE, true);
+        view.getConfigurators().add(new Ejb2ViewTypeConfigurator(Ejb2xViewType.REMOTE));
         this.ejbRemoteView = view;
     }
 
     public TransactionManagementType getTransactionManagementType() {
         return transactionManagementType;
-    }
-
-    /**
-     * Style 1 (13.3.7.2.1 @1)
-     *
-     * @param methodIntf           the method-intf the annotations apply to or null if EJB class itself
-     * @param transactionAttribute
-     */
-    public void setTransactionAttribute(MethodIntf methodIntf, String className, TransactionAttributeType transactionAttribute) {
-        if (methodIntf != null && className != null)
-            throw MESSAGES.bothMethodIntAndClassNameSet(getComponentName());
-        if (methodIntf == null) {
-            txStyle1.put(className, transactionAttribute);
-        } else
-            txPerViewStyle1.put(methodIntf, transactionAttribute);
-    }
-
-    /**
-     * Style 2 (13.3.7.2.1 @2)
-     *
-     * @param methodIntf           the method-intf the annotations apply to or null if EJB class itself
-     * @param transactionAttribute
-     * @param methodName
-     */
-    public void setTransactionAttribute(MethodIntf methodIntf, TransactionAttributeType transactionAttribute, String methodName) {
-        if (methodIntf == null)
-            txStyle2.put(methodName, transactionAttribute);
-        else
-            txPerViewStyle2.pick(methodIntf).put(methodName, transactionAttribute);
-    }
-
-    /**
-     * Style 3 (13.3.7.2.1 @3)
-     *
-     * @param methodIntf           the method-intf the annotations apply to or null if EJB class itself
-     * @param transactionAttribute
-     * @param methodName
-     * @param methodParams
-     */
-    public void setTransactionAttribute(MethodIntf methodIntf, TransactionAttributeType transactionAttribute, final String className, String methodName, String... methodParams) {
-        ArrayKey methodParamsKey = new ArrayKey((Object[]) methodParams);
-        if (methodIntf == null)
-            txStyle3.pick(className).pick(methodName).put(methodParamsKey, transactionAttribute);
-        else
-            txPerViewStyle3.pick(methodIntf).pick(methodName).put(methodParamsKey, transactionAttribute);
     }
 
     public void setTransactionManagementType(TransactionManagementType transactionManagementType) {
@@ -403,6 +335,7 @@ public abstract class EJBComponentDescription extends ComponentDescription {
             @Override
             public void configure(DeploymentPhaseContext context, ComponentConfiguration componentConfiguration, ViewDescription description, ViewConfiguration viewConfiguration) throws DeploymentUnitProcessingException {
                 viewConfiguration.addViewInterceptor(LoggingInterceptor.FACTORY, InterceptorOrder.View.EJB_EXCEPTION_LOGGING_INTERCEPTOR);
+                viewConfiguration.addViewInterceptor(new ImmediateInterceptorFactory(new TCCLInterceptor(componentConfiguration.getModuleClassLoader())), InterceptorOrder.View.TCCL_INTERCEPTOR);
 
                 //If this is the EJB 2.x local or home view add the exception transformer interceptor
                 if (view.getMethodIntf() == MethodIntf.LOCAL && EJBLocalObject.class.isAssignableFrom(viewConfiguration.getViewClass())) {
@@ -410,6 +343,13 @@ public abstract class EJBComponentDescription extends ComponentDescription {
                 } else if (view.getMethodIntf() == MethodIntf.LOCAL_HOME) {
                     viewConfiguration.addViewInterceptor(EjbExceptionTransformingInterceptorFactories.LOCAL_INSTANCE, InterceptorOrder.View.REMOTE_EXCEPTION_TRANSFORMER);
                 }
+
+                final List<SetupAction> ejbSetupActions = context.getDeploymentUnit().getAttachmentList(Attachments.OTHER_EE_SETUP_ACTIONS);
+                if (!ejbSetupActions.isEmpty()) {
+                    viewConfiguration.addViewInterceptor(AdditionalSetupInterceptor.factory(ejbSetupActions), InterceptorOrder.View.EE_SETUP);
+                }
+
+                viewConfiguration.addViewInterceptor(shutDownInterceptorFactory, InterceptorOrder.View.SHUTDOWN_INTERCEPTOR);
             }
         });
         this.addCurrentInvocationContextFactory(view);
@@ -441,24 +381,10 @@ public abstract class EJBComponentDescription extends ComponentDescription {
                     }
                 });
             }
-            // add the remote tx propogating interceptor
+            // add the remote tx propagating interceptor
             view.getConfigurators().add(new EJBRemoteTransactionsViewConfigurator());
         }
 
-    }
-
-    private void setupHomeViewInterceptors(final EjbHomeViewDescription ejbHomeViewDescription) {
-        // setup the TCCL interceptor, which usually would have been setup by the ComponentDescription.DefaultConfigurator
-        // but since the DefaultConfiguration is skipped for EJBHomeViewDescription (@see EJBHomeViewDescription.isDefaultConfiguratorRequired())
-        // we add this interceptor here explicitly
-        ejbHomeViewDescription.getConfigurators().add(new ViewConfigurator() {
-            @Override
-            public void configure(DeploymentPhaseContext context, ComponentConfiguration componentConfiguration, ViewDescription description, ViewConfiguration viewConfiguration) throws DeploymentUnitProcessingException {
-                final ClassLoader componentClassLoader = componentConfiguration.getModuleClassLoder();
-                final InterceptorFactory tcclInterceptorFactory = new ImmediateInterceptorFactory(new TCCLInterceptor(componentClassLoader));
-                viewConfiguration.addViewInterceptor(tcclInterceptorFactory, InterceptorOrder.View.TCCL_INTERCEPTOR);
-            }
-        });
     }
 
     protected void setupClientViewInterceptors(ViewDescription view) {
@@ -545,7 +471,15 @@ public abstract class EJBComponentDescription extends ComponentDescription {
         });
     }
 
+    public boolean isEntity() {
+        return false;
+    }
+
     public boolean isMessageDriven() {
+        return false;
+    }
+
+    public boolean isSession() {
         return false;
     }
 
@@ -609,219 +543,6 @@ public abstract class EJBComponentDescription extends ComponentDescription {
         this.securityRoles = securityRoles;
     }
 
-    public void applyDenyAllOnAllViewsForClass(final String className) {
-        if (className == null || className.trim().isEmpty()) {
-            throw MESSAGES.classnameIsNull(className);
-        }
-        for (final ViewDescription view : this.getViews()) {
-            Collection<String> denyAllClasses = this.classLevelDenyAll.get(view.getViewClassName());
-            if (denyAllClasses == null) {
-                denyAllClasses = new HashSet<String>();
-                this.classLevelDenyAll.put(view.getViewClassName(), denyAllClasses);
-            }
-            denyAllClasses.add(className);
-        }
-    }
-
-    public void applyDenyAllOnAllViewsForMethod(final EJBMethodIdentifier ejbMethodIdentifier) {
-        for (final ViewDescription view : this.getViews()) {
-            Collection<EJBMethodIdentifier> denyAllViewMethods = this.methodLevelDenyAll.get(view.getViewClassName());
-            if (denyAllViewMethods == null) {
-                denyAllViewMethods = new ArrayList<EJBMethodIdentifier>();
-                this.methodLevelDenyAll.put(view.getViewClassName(), denyAllViewMethods);
-            }
-            denyAllViewMethods.add(ejbMethodIdentifier);
-        }
-    }
-
-    public void applyDenyAllOnViewTypeForMethod(final MethodIntf viewType, final EJBMethodIdentifier ejbMethodIdentifier) {
-        // find the right view(s) to apply the @DenyAll
-        for (final ViewDescription view : this.getViews()) {
-            // shouldn't really happen
-            if (view instanceof EJBViewDescription == false) {
-                continue;
-            }
-            final EJBViewDescription ejbView = (EJBViewDescription) view;
-            // skip irrelevant views
-            if (ejbView.getMethodIntf() != viewType) {
-                continue;
-            }
-            Collection<EJBMethodIdentifier> denyAllViewMethods = this.methodLevelDenyAll.get(view.getViewClassName());
-            if (denyAllViewMethods == null) {
-                denyAllViewMethods = new ArrayList<EJBMethodIdentifier>();
-                this.methodLevelDenyAll.put(view.getViewClassName(), denyAllViewMethods);
-            }
-            denyAllViewMethods.add(ejbMethodIdentifier);
-        }
-    }
-
-    public void applyDenyAllOnAllMethodsOfAllViews() {
-        // "All methods" implies a class level @DenyAll (a.k.a exclude-list)
-        this.applyDenyAllOnAllViewsForClass(this.getEJBClassName());
-    }
-
-    public void applyDenyAllOnAllMethodsOfViewType(final MethodIntf viewType) {
-        // find the right view(s) to apply the @DenyAll
-        for (final ViewDescription view : this.getViews()) {
-            // shouldn't really happen
-            if (view instanceof EJBViewDescription == false) {
-                continue;
-            }
-            final EJBViewDescription ejbView = (EJBViewDescription) view;
-            // skip irrelevant views
-            if (ejbView.getMethodIntf() != viewType) {
-                continue;
-            }
-            // now apply the @DenyAll on class level for this view
-            Collection<String> denyAllApplicableClasses = this.classLevelDenyAll.get(ejbView.getViewClassName());
-            if (denyAllApplicableClasses == null) {
-                denyAllApplicableClasses = new HashSet<String>();
-                this.classLevelDenyAll.put(ejbView.getViewClassName(), denyAllApplicableClasses);
-            }
-            denyAllApplicableClasses.add(this.getEJBClassName());
-        }
-    }
-
-    public Collection<EJBMethodIdentifier> getDenyAllMethodsForView(final String viewClassName) {
-        final Collection<EJBMethodIdentifier> denyAllMethods = this.methodLevelDenyAll.get(viewClassName);
-        if (denyAllMethods != null) {
-            return Collections.unmodifiableCollection(denyAllMethods);
-        }
-        return Collections.emptySet();
-    }
-
-    public boolean isDenyAllApplicableToClass(final String viewClassName, final String className) {
-        final Collection<String> denyAllApplicableClasses = this.classLevelDenyAll.get(viewClassName);
-        if (denyAllApplicableClasses == null) {
-            return false;
-        }
-        return denyAllApplicableClasses.contains(className);
-    }
-
-    public void setRolesAllowedOnAllViewsForClass(final String className, final Set<String> roles) {
-        if (className == null || className.trim().isEmpty()) {
-            MESSAGES.classnameIsNull(className);
-        }
-        if (roles == null) {
-            throw MESSAGES.setRolesForClassIsNull(className);
-        }
-        for (final ViewDescription view : this.getViews()) {
-            Map<String, Set<String>> perViewRoles = this.classLevelRolesAllowed.get(view.getViewClassName());
-            if (perViewRoles == null) {
-                perViewRoles = new HashMap<String, Set<String>>();
-                this.classLevelRolesAllowed.put(view.getViewClassName(), perViewRoles);
-            }
-            // set the roles for the classname
-            perViewRoles.put(className, roles);
-        }
-    }
-
-    public void setRolesAllowedForAllMethodsOfAllViews(final Set<String> roles) {
-        // "All methods" implies a class level @RolesAllowed (a.k.a security-role)
-        this.setRolesAllowedOnAllViewsForClass(this.getEJBClassName(), roles);
-    }
-
-    public void setRolesAllowedOnAllViewsForMethod(final EJBMethodIdentifier ejbMethodIdentifier, final Set<String> roles) {
-        if (ejbMethodIdentifier == null) {
-            throw MESSAGES.ejbMethodIsNull();
-        }
-        if (roles == null) {
-            throw MESSAGES.rolesIsNull(ejbMethodIdentifier);
-        }
-        for (final ViewDescription view : this.getViews()) {
-            Map<EJBMethodIdentifier, Set<String>> perViewMethodRoles = this.methodLevelRolesAllowed.get(view.getViewClassName());
-            if (perViewMethodRoles == null) {
-                perViewMethodRoles = new HashMap<EJBMethodIdentifier, Set<String>>();
-                this.methodLevelRolesAllowed.put(view.getViewClassName(), perViewMethodRoles);
-            }
-            // set the roles on the method
-            perViewMethodRoles.put(ejbMethodIdentifier, roles);
-        }
-    }
-
-    public void setRolesAllowedForAllMethodsOnViewType(final MethodIntf viewType, final Set<String> roles) {
-        if (roles == null) {
-            throw MESSAGES.rolesIsNullOnViewType(viewType);
-        }
-        // find the right view(s) to apply the @RolesAllowed
-        for (final ViewDescription view : this.getViews()) {
-            // shouldn't really happen
-            if (view instanceof EJBViewDescription == false) {
-                continue;
-            }
-            final EJBViewDescription ejbView = (EJBViewDescription) view;
-            // skip irrelevant views
-            if (ejbView.getMethodIntf() != viewType) {
-                continue;
-            }
-            // now apply the @RolesAllowed on class level for this view
-            Map<String, Set<String>> perViewRoles = this.classLevelRolesAllowed.get(view.getViewClassName());
-            if (perViewRoles == null) {
-                perViewRoles = new HashMap<String, Set<String>>();
-                this.classLevelRolesAllowed.put(view.getViewClassName(), perViewRoles);
-            }
-            // set the roles for the view class
-            perViewRoles.put(view.getViewClassName(), roles);
-
-        }
-    }
-
-    public void setRolesAllowedForMethodOnViewType(final MethodIntf viewType, final EJBMethodIdentifier ejbMethodIdentifier, final Set<String> roles) {
-        if (ejbMethodIdentifier == null) {
-            throw MESSAGES.ejbMethodIsNullForViewType(viewType);
-        }
-        if (roles == null) {
-            throw MESSAGES.rolesIsNullOnViewTypeAndMethod(viewType, ejbMethodIdentifier);
-        }
-
-        // find the right view(s) to apply the @RolesAllowed
-        for (final ViewDescription view : this.getViews()) {
-            // shouldn't really happen
-            if (view instanceof EJBViewDescription == false) {
-                continue;
-            }
-            final EJBViewDescription ejbView = (EJBViewDescription) view;
-            // skip irrelevant views
-            if (ejbView.getMethodIntf() != viewType) {
-                continue;
-            }
-            Map<EJBMethodIdentifier, Set<String>> perViewMethodRoles = this.methodLevelRolesAllowed.get(view.getViewClassName());
-            if (perViewMethodRoles == null) {
-                perViewMethodRoles = new HashMap<EJBMethodIdentifier, Set<String>>();
-                this.methodLevelRolesAllowed.put(view.getViewClassName(), perViewMethodRoles);
-            }
-            // set the roles on the method
-            perViewMethodRoles.put(ejbMethodIdentifier, roles);
-        }
-    }
-
-    public Set<String> getRolesAllowed(final String viewClassName, final EJBMethodIdentifier method) {
-        final Map<EJBMethodIdentifier, Set<String>> methods = this.methodLevelRolesAllowed.get(viewClassName);
-        if (methods == null || methods.get(method) == null) {
-            return Collections.emptySet();
-        }
-
-        return methods.get(method);
-    }
-
-    public Map<EJBMethodIdentifier, Set<String>> getRolesAllowed(final String viewClassName) {
-        final Map<EJBMethodIdentifier, Set<String>> methods = this.methodLevelRolesAllowed.get(viewClassName);
-        if (methods == null) {
-            return Collections.emptyMap();
-        }
-
-        return methods;
-    }
-
-    public Set<String> getRolesAllowedForClass(final String viewClassName, final String className) {
-        final Map<String, Set<String>> perClassRoles = this.classLevelRolesAllowed.get(viewClassName);
-        if (perClassRoles == null || perClassRoles.get(className) == null) {
-            return Collections.emptySet();
-        }
-
-        return perClassRoles.get(className);
-    }
-
     public void linkSecurityRoles(final String fromRole, final String toRole) {
         if (fromRole == null || fromRole.trim().isEmpty()) {
             throw MESSAGES.failToLinkFromEmptySecurityRole(fromRole);
@@ -851,53 +572,33 @@ public abstract class EJBComponentDescription extends ComponentDescription {
         // setup client side view interceptors
         setupClientViewInterceptors(viewDescription);
         // return created view
+
+        if (viewType == MethodIntf.REMOTE ||
+                viewType == MethodIntf.HOME) {
+            setupRemoteView(viewDescription);
+        }
+
         return viewDescription;
+    }
+
+    protected void setupRemoteView(final EJBViewDescription viewDescription) {
+        viewDescription.getConfigurators().add(new ViewConfigurator() {
+            @Override
+            public void configure(final DeploymentPhaseContext context, final ComponentConfiguration componentConfiguration, final ViewDescription description, final ViewConfiguration configuration) throws DeploymentUnitProcessingException {
+                configuration.getDependencies().add(new DependencyConfigurator<ViewService>() {
+                    @Override
+                    public void configureDependency(final ServiceBuilder<?> serviceBuilder, final ViewService service) throws DeploymentUnitProcessingException {
+                        serviceBuilder.addDependency(EJBRemoteConnectorService.SERVICE_NAME);
+                    }
+                });
+            }
+        });
     }
 
     public Map<String, Collection<String>> getSecurityRoleLinks() {
         return Collections.unmodifiableMap(this.securityRoleLinks);
     }
 
-    public void applyPermitAllOnAllViewsForClass(final String className) {
-        if (className == null || className.trim().isEmpty()) {
-            throw MESSAGES.classnameIsNull(className);
-        }
-        for (final ViewDescription view : this.getViews()) {
-            Collection<String> permitAllClasses = this.classLevelPermitAll.get(view.getViewClassName());
-            if (permitAllClasses == null) {
-                permitAllClasses = new HashSet<String>();
-                this.classLevelPermitAll.put(view.getViewClassName(), permitAllClasses);
-            }
-            permitAllClasses.add(className);
-        }
-    }
-
-    public void applyPermitAllOnAllViewsForMethod(final EJBMethodIdentifier ejbMethodIdentifier) {
-        for (final ViewDescription view : this.getViews()) {
-            Collection<EJBMethodIdentifier> permitAllMethods = this.methodLevelPermitAll.get(view.getViewClassName());
-            if (permitAllMethods == null) {
-                permitAllMethods = new ArrayList<EJBMethodIdentifier>();
-                this.methodLevelPermitAll.put(view.getViewClassName(), permitAllMethods);
-            }
-            permitAllMethods.add(ejbMethodIdentifier);
-        }
-    }
-
-    public Collection<EJBMethodIdentifier> getPermitAllMethodsForView(final String viewClassName) {
-        final Collection<EJBMethodIdentifier> permitAllMethods = this.methodLevelPermitAll.get(viewClassName);
-        if (permitAllMethods != null) {
-            return Collections.unmodifiableCollection(permitAllMethods);
-        }
-        return Collections.emptySet();
-    }
-
-    public boolean isPermitAllApplicableToClass(final String viewClassName, final String className) {
-        final Collection<String> permitAllApplicationClasses = this.classLevelPermitAll.get(viewClassName);
-        if (permitAllApplicationClasses == null) {
-            return false;
-        }
-        return permitAllApplicationClasses.contains(className);
-    }
 
     /**
      * Returns true if this bean is secured. Else returns false.
@@ -906,6 +607,20 @@ public abstract class EJBComponentDescription extends ComponentDescription {
      */
     public boolean isSecurityEnabled() {
         return this.securityDomain != null;
+    }
+
+    private static class Ejb2ViewTypeConfigurator implements ViewConfigurator {
+        private final Ejb2xViewType local;
+
+        public Ejb2ViewTypeConfigurator(final Ejb2xViewType local) {
+            this.local = local;
+        }
+
+        @Override
+        public void configure(final DeploymentPhaseContext context, final ComponentConfiguration componentConfiguration, final ViewDescription description, final ViewConfiguration configuration) throws DeploymentUnitProcessingException {
+
+            configuration.putPrivateData(Ejb2xViewType.class, local);
+        }
     }
 
     /**
@@ -968,10 +683,6 @@ public abstract class EJBComponentDescription extends ComponentDescription {
         return descriptorData;
     }
 
-    public void setDescriptorData(final EnterpriseBeanMetaData descriptorData) {
-        this.descriptorData = descriptorData;
-    }
-
     public Method getTimeoutMethod() {
         return timeoutMethod;
     }
@@ -1014,6 +725,26 @@ public abstract class EJBComponentDescription extends ComponentDescription {
 
     public void setExposedViaIiop(final boolean exposedViaIiop) {
         this.exposedViaIiop = exposedViaIiop;
+    }
+
+    public ApplicableMethodInformation<TransactionAttributeType> getTransactionAttributes() {
+        return transactionAttributes;
+    }
+
+    public ApplicableMethodInformation<Integer> getTransactionTimeouts() {
+        return transactionTimeouts;
+    }
+
+    public ApplicableMethodInformation<EJBMethodSecurityAttribute> getDescriptorMethodPermissions() {
+        return descriptorMethodPermissions;
+    }
+
+    public ApplicableMethodInformation<EJBMethodSecurityAttribute> getAnnotationMethodPermissions() {
+        return annotationMethodPermissions;
+    }
+
+    public ShutDownInterceptorFactory getShutDownInterceptorFactory() {
+        return shutDownInterceptorFactory;
     }
 
     @Override

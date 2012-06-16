@@ -30,6 +30,7 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.NAM
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.NATIVE_INTERFACE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PORT;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.REMOTE;
+import static org.jboss.as.host.controller.HostControllerMessages.MESSAGES;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -39,7 +40,7 @@ import java.util.List;
 import java.util.NoSuchElementException;
 
 import org.jboss.as.controller.ServiceVerificationHandler;
-import org.jboss.as.domain.controller.FileRepository;
+import org.jboss.as.repository.HostFileRepository;
 import org.jboss.dmr.ModelNode;
 import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceTarget;
@@ -92,13 +93,13 @@ public class DomainControllerAddUtil {
         return controllers;
     }
 
-    static ServiceController<?> installRemoteDomainControllerConnection(final ModelNode host, final ServiceTarget serviceTarget, final FileRepository localFileRepository) {
+    static ServiceController<?> installRemoteDomainControllerConnection(final ModelNode host, final ServiceTarget serviceTarget, final HostFileRepository localFileRepository) {
 
         final String name;
         try {
             name = host.require(NAME).asString();
         } catch (NoSuchElementException e1) {
-            throw new IllegalArgumentException("A host connecting to a remote domain controller must have its name attribute set");
+            throw MESSAGES.noNameAttributeOnHost();
         }
 
         final ModelNode dc = host.require(DOMAIN_CONTROLLER).require(REMOTE);

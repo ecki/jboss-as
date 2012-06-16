@@ -37,9 +37,9 @@ import org.jboss.as.server.deployment.module.ResourceRoot;
 import org.jboss.as.server.deployment.reflect.DeploymentClassIndex;
 import org.jboss.as.server.deployment.reflect.DeploymentReflectionIndex;
 import org.jboss.as.server.deployment.reflect.ProxyMetadataSource;
-import org.jboss.as.server.deployment.repository.api.ServerDeploymentRepository;
 import org.jboss.as.server.moduleservice.ExternalModuleService;
 import org.jboss.as.server.moduleservice.ServiceModuleLoader;
+import org.jboss.as.server.services.security.AbstractVaultReader;
 import org.jboss.jandex.Index;
 import org.jboss.modules.Module;
 import org.jboss.modules.ModuleIdentifier;
@@ -62,6 +62,12 @@ public final class Attachments {
      * A list of service dependencies that must be satisfied before the next deployment phase can begin executing.
      */
     public static final AttachmentKey<AttachmentList<AttachableDependency>> NEXT_PHASE_ATTACHABLE_DEPS = AttachmentKey.createList(AttachableDependency.class);
+
+    /**
+     * A set of subsystem names that should not be processed. Any subsystem whos name is in this list will not have
+     * its deployment unit processors run.
+     */
+    public static final AttachmentKey<Set<String>> EXCLUDED_SUBSYSTEMS = AttachmentKey.create(Set.class);
 
     /**
      * The deployments runtime name
@@ -130,6 +136,15 @@ public final class Attachments {
      * Module identifiers for Class-Path information
      */
     public static final AttachmentKey<AttachmentList<ModuleIdentifier>> CLASS_PATH_ENTRIES = AttachmentKey.createList(ModuleIdentifier.class);
+
+    /**
+     * Resource roots for additional modules referenced via Class-Path.
+     *
+     * These are attached to the resource root that actually defined the class path entry, and are used to transitively resolve
+     * the annotation index for class path items.
+     */
+    public static final AttachmentKey<AttachmentList<ResourceRoot>> CLASS_PATH_RESOURCE_ROOTS = AttachmentKey.createList(ResourceRoot.class);
+
     /**
      * The list of extensions given in the manifest and structure configurations.
      */
@@ -142,7 +157,7 @@ public final class Attachments {
     /**
      * The server deployment repository
      */
-    public static final AttachmentKey<ServerDeploymentRepository> SERVER_DEPLOYMENT_REPOSITORY = AttachmentKey.create(ServerDeploymentRepository.class);
+    public static final AttachmentKey<DeploymentMountProvider> SERVER_DEPLOYMENT_REPOSITORY = AttachmentKey.create(DeploymentMountProvider.class);
 
     /**
      * An annotation index for a (@link ResourceRoot). This is attached to the {@link ResourceRoot}s of the deployment that contain
@@ -173,14 +188,6 @@ public final class Attachments {
     public static final AttachmentKey<AttachmentList<String>> INDEX_IGNORE_PATHS = AttachmentKey.createList(String.class);
 
     /**
-     * Flag to determine whether to process the child annotation indexes as part of the parent deployment.
-     * Ex.  An EAR deployment should not processes nested JAR index when checking for deployable annotations.
-     * It should rely on the child actually being deployed.  WARs and RARs on the other hand should process all the
-     * children as though the are all one index.
-     */
-    public static final AttachmentKey<Boolean> PROCESS_CHILD_ANNOTATION_INDEX = AttachmentKey.create(Boolean.class);
-
-    /**
      * Sub deployment services
      */
     public static final AttachmentKey<AttachmentList<DeploymentUnit>> SUB_DEPLOYMENTS = AttachmentKey.createList(DeploymentUnit.class);
@@ -199,6 +206,8 @@ public final class Attachments {
     // PARSE
     //
 
+    public static final AttachmentKey<AbstractVaultReader> VAULT_READER_ATTACHMENT_KEY = AttachmentKey.create(AbstractVaultReader.class);
+
     //
     // DEPENDENCIES
     //
@@ -208,7 +217,7 @@ public final class Attachments {
     // CONFIGURE
     //
     /**
-     * The module idetifier.
+     * The module identifier.
      */
 
     public static final AttachmentKey<ModuleIdentifier> MODULE_IDENTIFIER = AttachmentKey.create(ModuleIdentifier.class);
@@ -223,17 +232,12 @@ public final class Attachments {
     public static final AttachmentKey<Module> MODULE = AttachmentKey.create(Module.class);
 
     /**
-     * Information about a modules dependencies used to setup transitive deps
-     */
-    public static final AttachmentKey<AttachmentList<ModuleSpecification>> MODULE_DEPENDENCY_INFORMATION = AttachmentKey.createList(ModuleSpecification.class);
-
-    /**
      * The module loader for the deployment
      */
     public static final AttachmentKey<ServiceModuleLoader> SERVICE_MODULE_LOADER  = AttachmentKey.create(ServiceModuleLoader.class);
 
     /**
-     * The extenal module service
+     * The external module service
      */
     public static final AttachmentKey<ExternalModuleService> EXTERNAL_MODULE_SERVICE  = AttachmentKey.create(ExternalModuleService.class);
 
@@ -277,7 +281,7 @@ public final class Attachments {
      */
     public static final AttachmentKey<DeploymentClassIndex> CLASS_INDEX = AttachmentKey.create(DeploymentClassIndex.class);
     /**
-     * The reflection index used to generate jboss-invoation proxies
+     * The reflection index used to generate jboss-invocation proxies
      */
     public static final AttachmentKey<ProxyMetadataSource> PROXY_REFLECTION_INDEX = AttachmentKey.create(ProxyMetadataSource.class);
 

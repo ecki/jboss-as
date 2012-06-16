@@ -137,6 +137,9 @@ class TransportConfigOperationHandlers {
         if(node.hasDefined(CommonAttributes.SERVER_ID.getName())) {
             operation.get(CommonAttributes.SERVER_ID.getName()).set(node.get(CommonAttributes.SERVER_ID.getName()));
         }
+        if(node.hasDefined(CommonAttributes.FACTORY_CLASS.getName())) {
+            operation.get(CommonAttributes.FACTORY_CLASS.getName()).set(node.get(CommonAttributes.FACTORY_CLASS.getName()));
+        }
         if(node.hasDefined(CommonAttributes.PARAM)) {
             for(final Property param : node.get(CommonAttributes.PARAM).asPropertyList()) {
                 operation.get(CommonAttributes.PARAM, param.getName()).set(param.getValue().get(ModelDescriptionConstants.VALUE));
@@ -153,7 +156,7 @@ class TransportConfigOperationHandlers {
      * @param context the operation context
      */
     static void reloadRequiredStep(final OperationContext context) {
-        if(context.getType() == OperationContext.Type.SERVER) {
+        if(context.isNormalServer()) {
             context.addStep(new OperationStepHandler() {
                 @Override
                 public void execute(final OperationContext context, final ModelNode operation) throws OperationFailedException {
@@ -306,7 +309,7 @@ class TransportConfigOperationHandlers {
     }
 
     interface SelfRegisteringAttributeHandler extends OperationStepHandler {
-        void registerAttributes(final ManagementResourceRegistration registry);
+        void registerAttributes(final ManagementResourceRegistration registry, boolean registerRuntimeOnly);
     }
 
     static class AttributeWriteHandler extends ReloadRequiredWriteAttributeHandler implements SelfRegisteringAttributeHandler {
@@ -317,10 +320,12 @@ class TransportConfigOperationHandlers {
             this.attributes = attributes;
         }
 
-        public void registerAttributes(final ManagementResourceRegistration registry) {
+        public void registerAttributes(final ManagementResourceRegistration registry, boolean registerRuntimeOnly) {
             final EnumSet<AttributeAccess.Flag> flags = EnumSet.of(AttributeAccess.Flag.RESTART_ALL_SERVICES);
             for (AttributeDefinition attr : attributes) {
-                registry.registerReadWriteAttribute(attr.getName(), null, this, flags);
+                if (registerRuntimeOnly || !attr.getFlags().contains(AttributeAccess.Flag.STORAGE_RUNTIME)) {
+                    registry.registerReadWriteAttribute(attr.getName(), null, this, flags);
+                }
             }
         }
     }

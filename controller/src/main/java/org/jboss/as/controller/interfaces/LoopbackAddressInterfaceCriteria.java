@@ -18,15 +18,15 @@
  */
 package org.jboss.as.controller.interfaces;
 
-import org.jboss.dmr.ModelNode;
+import static org.jboss.as.controller.ControllerLogger.SERVER_LOGGER;
+import static org.jboss.as.controller.ControllerMessages.MESSAGES;
 
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
 import java.net.UnknownHostException;
 
-import static org.jboss.as.controller.ControllerLogger.SERVER_LOGGER;
-import static org.jboss.as.controller.ControllerMessages.MESSAGES;
+import org.jboss.dmr.ModelNode;
 
 /**
  * A loopback criteria with a specified bind address.
@@ -34,14 +34,28 @@ import static org.jboss.as.controller.ControllerMessages.MESSAGES;
  * @author Scott stark (sstark@redhat.com) (C) 2011 Red Hat Inc.
  * @version $Revision:$
  */
-public class LoopbackAddressInterfaceCriteria implements InterfaceCriteria {
+public class LoopbackAddressInterfaceCriteria extends AbstractInterfaceCriteria {
 
     private static final long serialVersionUID = 1L;
 
     private ModelNode address;
     private InetAddress resolved;
     private boolean unknownHostLogged;
-    private boolean anyLocalLogged;
+
+    /**
+     * Creates a new LoopbackAddressInterfaceCriteria
+     *
+     * @param address a valid value to pass to {@link InetAddress#getByName(String)}
+     *                Cannot be {@code null}
+     *
+     * @throws IllegalArgumentException if <code>network</code> is <code>null</code>
+     */
+    public LoopbackAddressInterfaceCriteria(final InetAddress address) {
+        if (address == null)
+            throw MESSAGES.nullVar("address");
+        this.resolved = address;
+        this.address = new ModelNode(resolved.getHostAddress());
+    }
 
     /**
      * Creates a new LoopbackAddressInterfaceCriteria
@@ -70,12 +84,11 @@ public class LoopbackAddressInterfaceCriteria implements InterfaceCriteria {
      * @return <code>{@link #getAddress()}()</code> if {@link NetworkInterface#isLoopback()} is true, null otherwise.
      */
     @Override
-    public InetAddress isAcceptable(NetworkInterface networkInterface, InetAddress address) throws SocketException {
+    protected InetAddress isAcceptable(NetworkInterface networkInterface, InetAddress address) throws SocketException {
 
         try {
             if( networkInterface.isLoopback() ) {
-                InetAddress resolved = getAddress();
-                return resolved;
+                return getAddress();
             }
         } catch (UnknownHostException e) {
             // One time only log a warning
@@ -95,5 +108,16 @@ public class LoopbackAddressInterfaceCriteria implements InterfaceCriteria {
         sb.append(resolved);
         sb.append(')');
         return sb.toString();
+    }
+
+    @Override
+    public int hashCode() {
+        return address.hashCode();
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        return (o instanceof LoopbackAddressInterfaceCriteria)
+                && address.equals(((LoopbackAddressInterfaceCriteria)o).address);
     }
 }

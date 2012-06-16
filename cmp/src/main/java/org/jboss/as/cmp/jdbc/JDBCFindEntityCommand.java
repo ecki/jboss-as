@@ -24,12 +24,12 @@ package org.jboss.as.cmp.jdbc;
 import java.lang.reflect.Method;
 import java.util.Collection;
 import javax.ejb.FinderException;
-import javax.ejb.ObjectNotFoundException;
+import org.jboss.as.cmp.CmpMessages;
 import org.jboss.as.cmp.context.CmpEntityBeanContext;
 
 
 /**
- * JDBCFindEntityCommand finds a single entity, by deligating to
+ * JDBCFindEntityCommand finds a single entity, by delegating to
  * find entities and checking that only entity is returned.
  *
  * @author <a href="mailto:dain@daingroup.com">Dain Sundstrom</a>
@@ -40,8 +40,6 @@ import org.jboss.as.cmp.context.CmpEntityBeanContext;
  * @version $Revision: 81030 $
  */
 public final class JDBCFindEntityCommand {
-    private static final String NO_SUCH_ENTITY = "No such entity!";
-
     private final JDBCStoreManager manager;
 
     public JDBCFindEntityCommand(JDBCStoreManager manager) {
@@ -52,11 +50,11 @@ public final class JDBCFindEntityCommand {
         JDBCQueryCommand query = manager.getQueryManager().getQueryCommand(finderMethod);
         Collection result = query.execute(finderMethod, args, ctx, factory);
         if (result.isEmpty()) {
-            throw new ObjectNotFoundException(NO_SUCH_ENTITY);
+            throw CmpMessages.MESSAGES.noSuchEntity();
         } else if (result.size() == 1) {
             return result.iterator().next();
         } else {
-            throw new FinderException("More than one entity matches the finder criteria: " + result);
+            throw CmpMessages.MESSAGES.moreThanOneEntityMatch(result);
         }
     }
 }

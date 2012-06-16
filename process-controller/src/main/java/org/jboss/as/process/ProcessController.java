@@ -86,18 +86,16 @@ public final class ProcessController {
     }
 
     void removeManagedConnection(final Connection connection) {
-        synchronized (lock) {
-            managedConnections.remove(connection);
-        }
+        managedConnections.remove(connection);
     }
 
     public void addProcess(final String processName, final List<String> command, final Map<String, String> env, final String workingDirectory, final boolean isPrivileged, final boolean respawn) {
-        synchronized (lock) {
-            for (String s : command) {
-                if (s == null) {
-                    throw MESSAGES.nullCommandComponent();
-                }
+        for (String s : command) {
+            if (s == null) {
+                throw MESSAGES.nullCommandComponent();
             }
+        }
+        synchronized (lock) {
             if (shutdown) {
                 return;
             }
@@ -112,20 +110,7 @@ public final class ProcessController {
             final ManagedProcess process = new ManagedProcess(processName, command, env, workingDirectory, lock, this, authKey, isPrivileged, respawn);
             processes.put(processName, process);
             processesByKey.put(new Key(authKey), process);
-            for (Connection connection : managedConnections) {
-                try {
-                    final OutputStream os = connection.writeMessage();
-                    try {
-                        os.write(Protocol.PROCESS_ADDED);
-                        StreamUtils.writeUTFZBytes(os, processName);
-                        os.close();
-                    } finally {
-                        StreamUtils.safeClose(os);
-                    }
-                } catch (IOException e) {
-                    ROOT_LOGGER.failedToWriteMessage("PROCESS_ADDED", e);
-                }
-            }
+            processAdded(processName);
         }
     }
 
@@ -147,9 +132,6 @@ public final class ProcessController {
 
     public void stopProcess(final String processName) {
         synchronized (lock) {
-            if (shutdown) {
-                return;
-            }
             final Map<String, ManagedProcess> processes = this.processes;
             final ManagedProcess process = processes.get(processName);
             if (process == null) {
@@ -170,14 +152,16 @@ public final class ProcessController {
                 // ignore
                 return;
             }
-            processes.remove(processName);
+            boolean removed = processes.remove(processName) != null;
             processesByKey.remove(new Key(process.getAuthKey()));
-            processRemoved(processName);
+            if(removed) {
+                processRemoved(processName);
+            }
             lock.notifyAll();
         }
     }
 
-    public void sendStdin(final String recipient, final InputStream source) {
+    public void sendStdin(final String recipient, final InputStream source) throws IOException {
         synchronized (lock) {
             if (shutdown) {
                 return;
@@ -200,10 +184,20 @@ public final class ProcessController {
             ROOT_LOGGER.shuttingDown();
             shutdown = true;
 
-            final ManagedProcess hc = processesByKey.get(Main.HOST_CONTROLLER_PROCESS_NAME);
+            // In order to do a controlled shutdown we stop the host controller first
+            // it will stop all managed servers and wait until they shutdown
+            final ManagedProcess hc = processes.get(Main.HOST_CONTROLLER_PROCESS_NAME);
             if(hc != null && hc.isRunning()) {
                 hc.shutdown();
+                while(processes.containsKey(Main.HOST_CONTROLLER_PROCESS_NAME)) {
+                    try {
+                        lock.wait();
+                    } catch (InterruptedException e) {
+                        // ignore
+                    }
+                }
             }
+            // Shutdown remaining processes (if any)
             for (ManagedProcess process : processes.values()) {
                 process.shutdown();
             }
@@ -221,6 +215,25 @@ public final class ProcessController {
     public ManagedProcess getServerByAuthCode(final byte[] code) {
         synchronized (lock) {
             return processesByKey.get(new Key(code));
+        }
+    }
+
+    void processAdded(final String processName) {
+        synchronized (lock) {
+            for (Connection connection : managedConnections) {
+                try {
+                    final OutputStream os = connection.writeMessage();
+                    try {
+                        os.write(Protocol.PROCESS_ADDED);
+                        StreamUtils.writeUTFZBytes(os, processName);
+                        os.close();
+                    } finally {
+                        StreamUtils.safeClose(os);
+                    }
+                } catch (IOException e) {
+                    ROOT_LOGGER.failedToWriteMessage("PROCESS_ADDED", e);
+                }
+            }
         }
     }
 
@@ -278,7 +291,8 @@ public final class ProcessController {
                         StreamUtils.safeClose(os);
                     }
                 } catch (IOException e) {
-                    ROOT_LOGGER.failedToWriteMessage("PROCESS_REMOVED", e);
+                    ROOT_LOGGER.failedToWriteMessage("PROCESS_REMOVED " + processName, e);
+                    e.printStackTrace();
                     removeManagedConnection(connection);
                 }
             }
@@ -320,6 +334,27 @@ public final class ProcessController {
                 return;
             }
             process.reconnect(hostName, port, managementSubsystemEndpoint, asAuthKey);
+        }
+    }
+
+    void operationFailed(final String processName, final ProcessMessageHandler.OperationType operationType) {
+        synchronized (lock) {
+            for (Connection connection : managedConnections) {
+                try {
+                    final OutputStream os = connection.writeMessage();
+                    try {
+                        os.write(Protocol.OPERATION_FAILED);
+                        os.write(operationType.getCode());
+                        StreamUtils.writeUTFZBytes(os, processName);
+                        os.close();
+                    } finally {
+                        StreamUtils.safeClose(os);
+                    }
+                } catch (IOException e) {
+                    ROOT_LOGGER.failedToWriteMessage("OPERATION_FAILED", e);
+                    removeManagedConnection(connection);
+                }
+            }
         }
     }
 

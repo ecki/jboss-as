@@ -23,7 +23,6 @@ package org.jboss.as.osgi.parser;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
 
 import junit.framework.Assert;
 
@@ -34,7 +33,6 @@ import org.jboss.as.controller.operations.common.Util;
 import org.jboss.as.osgi.parser.SubsystemState.OSGiCapability;
 import org.jboss.dmr.ModelNode;
 import org.junit.Test;
-import org.mockito.Mockito;
 
 /**
  * @author David Bosschaert
@@ -57,7 +55,7 @@ public class OSGiCapabilityAddRemoveTestCase extends ResourceAddRemoveTestBase {
         execute(addedSteps.get(0), context, op);
         Assert.assertEquals(1, stateService.getCapabilities().size());
         OSGiCapability module = stateService.getCapabilities().get(0);
-        Assert.assertEquals("org.acme.module1:main", module.getIdentifier().toString());
+        Assert.assertEquals("org.acme.module1", module.getIdentifier());
         Assert.assertEquals(new Integer(4), module.getStartLevel());
 
         execute(OSGiCapabilityRemove.INSTANCE, context, op);

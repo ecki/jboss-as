@@ -21,9 +21,10 @@
  */
 package org.jboss.as.domain.management;
 
-import javax.net.ssl.SSLContext;
+import java.util.Map;
+import java.util.Set;
 
-import org.jboss.as.domain.management.security.DomainCallbackHandler;
+import javax.net.ssl.SSLContext;
 
 /**
  * Interface to the security realm.
@@ -38,9 +39,28 @@ public interface SecurityRealm {
     String getName();
 
     /**
-     * @return The CallbackHandler for the realm
+     * @return The set of authentication mechanisms supported by this realm.
      */
-    DomainCallbackHandler getCallbackHandler();
+    Set<AuthenticationMechanism> getSupportedAuthenticationMechanisms();
+
+    /**
+     * @return A Map containing the combined configuration options for the specified mechanisms.
+     */
+    Map<String, String> getMechanismConfig(final AuthenticationMechanism mechanism);
+
+    /**
+     * @param mechanism - The mechanism being used for authentication.
+     * @return The {@link AuthorizingCallbackHandler} for the specified mechanism.
+     * @throws IllegalArgumentException If the mechanism is not supported by this realm.
+     */
+    AuthorizingCallbackHandler getAuthorizingCallbackHandler(final AuthenticationMechanism mechanism);
+
+    /**
+     * Indicate that all supported mechanisms are ready.
+     *
+     * @return true if all mechanisms are ready to handle requests.
+     */
+    boolean isReady();
 
     /**
      * Used to obtain the SSLContext as configured for this security realm.

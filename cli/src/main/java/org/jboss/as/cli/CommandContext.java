@@ -21,6 +21,7 @@
  */
 package org.jboss.as.cli;
 
+import java.io.File;
 import java.util.Collection;
 
 import org.jboss.as.cli.batch.BatchManager;
@@ -29,8 +30,9 @@ import org.jboss.as.cli.operation.OperationCandidatesProvider;
 import org.jboss.as.cli.operation.OperationRequestAddress;
 import org.jboss.as.cli.operation.CommandLineParser;
 import org.jboss.as.cli.operation.ParsedCommandLine;
-import org.jboss.as.cli.operation.PrefixFormatter;
+import org.jboss.as.cli.operation.NodePathFormatter;
 import org.jboss.as.controller.client.ModelControllerClient;
+import org.jboss.dmr.ModelNode;
 
 
 /**
@@ -38,6 +40,12 @@ import org.jboss.as.controller.client.ModelControllerClient;
  * @author Alexey Loubyansky
  */
 public interface CommandContext {
+
+    /**
+     * Returns the JBoss CLI configuration.
+     * @return  CLI configuration
+     */
+    CliConfig getConfig();
 
     /**
      * Returns the current command's arguments as a string.
@@ -70,6 +78,7 @@ public interface CommandContext {
 
     /**
      * Terminates the command line session.
+     * Also closes the connection to the controller if it's still open.
      */
     void terminateSession();
 
@@ -109,8 +118,22 @@ public interface CommandContext {
      *
      * @param host the host to connect with
      * @param port the port to connect on
+     * @throws CommandLineException  in case the attempt to connect failed
      */
-    void connectController(String host, int port);
+    void connectController(String host, int port) throws CommandLineException;
+
+    /**
+     * Bind the controller to an existing, connected client.
+     */
+    void bindClient(ModelControllerClient newClient);
+
+    /**
+     * Connects the controller client using the default host and the port.
+     * It simply calls connectController(null, -1).
+     *
+     * @throws CommandLineException  in case the attempt to connect failed
+     */
+    void connectController() throws CommandLineException;
 
     /**
      * Closes the previously established connection with the controller client.
@@ -162,13 +185,13 @@ public interface CommandContext {
      * Returns the current prefix.
      * @return current prefix
      */
-    OperationRequestAddress getPrefix();
+    OperationRequestAddress getCurrentNodePath();
 
     /**
      * Returns the prefix formatter.
      * @return the prefix formatter.
      */
-    PrefixFormatter getPrefixFormatter();
+    NodePathFormatter getNodePathFormatter();
 
     /**
      * Returns the provider of operation request candidates for tab-completion.
@@ -196,12 +219,28 @@ public interface CommandContext {
 
     /**
      * Builds an operation request from the passed in command line.
+     * If the line contains a command, the command must supported the batch mode,
+     * otherwise an exception will thrown.
      *
      * @param line the command line which can be an operation request or a command that can be translated into an operation request.
      * @return  the operation request
      * @throws CommandFormatException  if the operation request couldn't be built.
      */
     BatchedCommand toBatchedCommand(String line) throws CommandFormatException;
+
+    /**
+     * Builds a DMR request corresponding to the command or the operation.
+     * If the line contains a command, the corresponding command handler
+     * must implement org.jboss.cli.OperationCommand interface,
+     * in other words the command must translate into an operation request,
+     * otherwise an exception will be thrown.
+     *
+     * @param line  command or an operation to build a DMR request for
+     * @return  DMR request corresponding to the line
+     * @throws CommandFormatException  thrown in case the line couldn't be
+     * translated into a DMR request
+     */
+    ModelNode buildRequest(String line) throws CommandFormatException;
 
     /**
      * Returns the default command line completer.
@@ -221,4 +260,55 @@ public interface CommandContext {
      * @param listener  the listener
      */
     void addEventListener(CliEventListener listener);
+
+    /**
+     * Returns value that should be used as the exit code of the JVM process.
+     * @return  JVM exit code
+     */
+    int getExitCode();
+
+    /**
+     * Executes a command or an operation. Or, if the context is in the batch mode
+     * and the command is allowed in the batch, adds the command (or the operation)
+     * to the currently active batch.
+     * NOTE: errors are not handled by this method, they won't affect the exit code or
+     * even be logged. Error handling is the responsibility of the caller.
+     *
+     * @param line  command or operation to handle
+     * @throws CommandFormatException  in case there was an error handling the command or operation
+     */
+    void handle(String line) throws CommandLineException;
+
+    /**
+     * Executes a command or an operation. Or, if the context is in the batch mode
+     * and the command is allowed in the batch, adds the command (or the operation)
+     * to the currently active batch.
+     * NOTE: unlike handle(String line), this method catches CommandLineException
+     * exceptions thrown by command handlers, logs them and sets the exit code
+     * status to indicate that the command or the operation has failed.
+     * It's up to the caller to check the exit code with getExitCode()
+     * to find out whether the command or the operation succeeded or failed.
+     *
+     * @param line  command or operation to handle
+     * @throws CommandFormatException  in case there was an error handling the command or operation
+     */
+    void handleSafe(String line);
+
+    /**
+     * This method will start an interactive session.
+     * It requires an initialized at the construction time console.
+     */
+    void interact();
+
+    /**
+     * Returns current default filesystem directory.
+     * @return  current default filesystem directory.
+     */
+    File getCurrentDir();
+
+    /**
+     * Changes the current default filesystem directory to the argument.
+     * @param dir  the new default directory
+     */
+    void setCurrentDir(File dir);
 }

@@ -33,7 +33,6 @@ import org.jboss.as.server.deployment.module.ModuleRootMarker;
 import org.jboss.as.server.deployment.module.ResourceRoot;
 import org.jboss.jandex.DotName;
 import org.jboss.jandex.Index;
-import org.jboss.metadata.ear.spec.EarMetaData;
 import org.jboss.vfs.VirtualFile;
 
 /**
@@ -47,18 +46,20 @@ import org.jboss.vfs.VirtualFile;
 public class EjbJarDeploymentProcessor implements DeploymentUnitProcessor {
 
     private static final DotName STATELESS = DotName.createSimple("javax.ejb.Stateless");
-    private static final DotName STATEFULL = DotName.createSimple("javax.ejb.Stateful");
+    private static final DotName STATEFUL = DotName.createSimple("javax.ejb.Stateful");
     private static final DotName MESSAGE_DRIVEN = DotName.createSimple("javax.ejb.MessageDriven");
     private static final DotName SINGLETON = DotName.createSimple("javax.ejb.Singleton");
 
     @Override
     public void deploy(DeploymentPhaseContext phaseContext) throws DeploymentUnitProcessingException {
         final DeploymentUnit deploymentUnit = phaseContext.getDeploymentUnit();
+        final ResourceRoot deploymentRoot = deploymentUnit.getAttachment(org.jboss.as.server.deployment.Attachments.DEPLOYMENT_ROOT);
         if (!DeploymentTypeMarker.isType(DeploymentType.EAR, deploymentUnit)) {
             return;
         }
-        final EarMetaData md =deploymentUnit.getAttachment(org.jboss.as.ee.structure.Attachments.EAR_METADATA);
-        if(md != null) {
+        //we don't check for the metadata attachment
+        //cause this could come from a jboss-app.xml instead
+        if(deploymentRoot.getRoot().getChild("META-INF/application.xml").exists()) {
             //if we have an application.xml we don't scan
             return;
         }
@@ -79,7 +80,7 @@ public class EjbJarDeploymentProcessor implements DeploymentUnitProcessor {
             } else {
                 final Index index = resourceRoot.getAttachment(Attachments.ANNOTATION_INDEX);
                 if (index != null) {
-                    if (!index.getAnnotations(STATEFULL).isEmpty() ||
+                    if (!index.getAnnotations(STATEFUL).isEmpty() ||
                             !index.getAnnotations(STATELESS).isEmpty() ||
                             !index.getAnnotations(MESSAGE_DRIVEN).isEmpty() ||
                             !index.getAnnotations(SINGLETON).isEmpty()) {

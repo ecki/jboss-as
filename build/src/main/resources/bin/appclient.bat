@@ -15,28 +15,38 @@ if "%OS%" == "Windows_NT" (
 )
 
 rem Read an optional configuration file.
-if "x%STANDALONE_CONF%" == "x" (   
-   set "STANDALONE_CONF=%DIRNAME%standalone.conf.bat"
+if "x%APPCLIENT_CONF%" == "x" (
+   set "APPCLIENT_CONF=%DIRNAME%appclient.conf.bat"
 )
-if exist "%STANDALONE_CONF%" (
-   echo Calling %STANDALONE_CONF%
-   call "%STANDALONE_CONF%" %*
+if exist "%APPCLIENT_CONF%" (
+   echo Calling %APPCLIENT_CONF%
+   call "%APPCLIENT_CONF%" %*
 ) else (
-   echo Config file not found %STANDALONE_CONF%
+   echo Config file not found %APPCLIENT_CONF%
 )
 
 pushd %DIRNAME%..
-if "x%JBOSS_HOME%" == "x" (
-  set "JBOSS_HOME=%CD%"
-)
+set "RESOLVED_JBOSS_HOME=%CD%"
 popd
+
+if "x%JBOSS_HOME%" == "x" (
+  set "JBOSS_HOME=%RESOLVED_JBOSS_HOME%"
+)
+
+pushd "%JBOSS_HOME%"
+set "SANITIZED_JBOSS_HOME=%CD%"
+popd
+
+if "%RESOLVED_JBOSS_HOME%" NEQ "%SANITIZED_JBOSS_HOME%" (
+    echo WARNING JBOSS_HOME may be pointing to a different installation - unpredictable results may occur.
+)
 
 set DIRNAME=
 
 if "%OS%" == "Windows_NT" (
   set "PROGNAME=%~nx0%"
 ) else (
-  set "PROGNAME=standalone.bat"
+  set "PROGNAME=appclient.bat"
 )
 
 rem Setup JBoss specific properties
@@ -71,19 +81,18 @@ rem Setup the java endorsed dirs
 set JBOSS_ENDORSED_DIRS=%JBOSS_HOME%\lib\endorsed
 
 rem Set default module root paths
-if "x%MODULEPATH%" == "x" (
-  set  "MODULEPATH=%JBOSS_HOME%\modules"
+if "x%JBOSS_MODULEPATH%" == "x" (
+  set  "JBOSS_MODULEPATH=%JBOSS_HOME%\modules"
 )
 
 
 "%JAVA%" %JAVA_OPTS% ^
- "-Dorg.jboss.boot.log.file=%JBOSS_HOME%\standalone\log\boot.log" ^
- "-Dlogging.configuration=file:%JBOSS_HOME%/standalone/configuration/logging.properties" ^
+ "-Dorg.jboss.boot.log.file=%JBOSS_HOME%\appclient\log\boot.log" ^
+ "-Dlogging.configuration=file:%JBOSS_HOME%/appclient/configuration/logging.properties" ^
     -jar "%JBOSS_HOME%\jboss-modules.jar" ^
-    -mp "%MODULEPATH%" ^
-    -logmodule "org.jboss.logmanager" ^
+    -mp "%JBOSS_MODULEPATH%" ^
     -jaxpmodule "javax.xml.jaxp-provider" ^
-     org.jboss.as.standalone ^
+     org.jboss.as.appclient ^
     -Djboss.home.dir="%JBOSS_HOME%" ^
     -Djboss.server.base.dir="%JBOSS_HOME%\appclient" ^
      %*

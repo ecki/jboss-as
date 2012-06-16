@@ -22,9 +22,10 @@
 
 package org.jboss.as.ejb3.remote.protocol.versionone;
 
+import org.jboss.as.ejb3.EjbLogger;
 import org.jboss.as.ejb3.remote.EJBRemoteTransactionsRepository;
 import org.jboss.ejb.client.UserTransactionID;
-import org.jboss.remoting3.Channel;
+import org.jboss.marshalling.MarshallerFactory;
 
 import javax.transaction.Transaction;
 
@@ -33,14 +34,21 @@ import javax.transaction.Transaction;
  */
 class UserTransactionCommitTask extends UserTransactionManagementTask {
 
-    UserTransactionCommitTask(final TransactionRequestHandler transactionRequestHandler, final EJBRemoteTransactionsRepository transactionsRepository, final UserTransactionID userTransactionID, final Channel channel, final short invocationId) {
-        super(transactionRequestHandler, transactionsRepository, userTransactionID, channel, invocationId);
+    UserTransactionCommitTask(final TransactionRequestHandler transactionRequestHandler, final EJBRemoteTransactionsRepository transactionsRepository,
+                              final MarshallerFactory marshallerFactory, final UserTransactionID userTransactionID,
+                              final ChannelAssociation channelAssociation, final short invocationId) {
+        super(transactionRequestHandler, transactionsRepository, marshallerFactory, userTransactionID, channelAssociation, invocationId);
     }
 
     @Override
     protected void manageTransaction() throws Throwable {
         final Transaction transaction = this.transactionsRepository.removeTransaction(this.userTransactionID);
-        this.resumeTransaction(transaction);
-        this.transactionsRepository.getTransactionManager().commit();
+        if(transaction != null) {
+            this.resumeTransaction(transaction);
+            this.transactionsRepository.getTransactionManager().commit();
+        } else if(EjbLogger.EJB3_INVOCATION_LOGGER.isDebugEnabled()) {
+            //this happens if no ejb invocations where made within the TX
+            EjbLogger.EJB3_INVOCATION_LOGGER.debug("Not committing transaction " + this.userTransactionID + " as is was not found on the server");
+        }
     }
 }

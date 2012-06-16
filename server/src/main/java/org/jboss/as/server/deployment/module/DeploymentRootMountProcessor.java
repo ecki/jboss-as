@@ -22,19 +22,21 @@
 
 package org.jboss.as.server.deployment.module;
 
+import java.io.Closeable;
+import java.io.IOException;
+
+import org.jboss.as.server.ServerMessages;
 import org.jboss.as.server.deployment.Attachments;
+import org.jboss.as.server.deployment.DeploymentMountProvider;
 import org.jboss.as.server.deployment.DeploymentPhaseContext;
 import org.jboss.as.server.deployment.DeploymentUnit;
 import org.jboss.as.server.deployment.DeploymentUnitProcessingException;
 import org.jboss.as.server.deployment.DeploymentUnitProcessor;
 import org.jboss.as.server.deployment.MountExplodedMarker;
-import org.jboss.as.server.deployment.repository.api.ServerDeploymentRepository;
+import org.jboss.as.server.deployment.MountType;
 import org.jboss.vfs.VFS;
 import org.jboss.vfs.VFSUtils;
 import org.jboss.vfs.VirtualFile;
-
-import java.io.Closeable;
-import java.io.IOException;
 
 /**
  * Deployment processor responsible for mounting and attaching the resource root for this deployment.
@@ -48,9 +50,9 @@ public class DeploymentRootMountProcessor implements DeploymentUnitProcessor {
         if(deploymentUnit.getAttachment(Attachments.DEPLOYMENT_ROOT) != null) {
             return;
         }
-        final ServerDeploymentRepository serverDeploymentRepository = deploymentUnit.getAttachment(Attachments.SERVER_DEPLOYMENT_REPOSITORY);
-        if(serverDeploymentRepository == null) {
-            throw new DeploymentUnitProcessingException("No deployment repository available.");
+        final DeploymentMountProvider deploymentMountProvider = deploymentUnit.getAttachment(Attachments.SERVER_DEPLOYMENT_REPOSITORY);
+        if(deploymentMountProvider == null) {
+            throw ServerMessages.MESSAGES.noDeploymentRepositoryAvailable();
         }
 
         final String deploymentName = deploymentUnit.getName();
@@ -75,11 +77,19 @@ public class DeploymentRootMountProcessor implements DeploymentUnitProcessor {
             Closeable handle = null;
             try {
                 final boolean mountExploded = MountExplodedMarker.isMountExploded(deploymentUnit);
-                handle = serverDeploymentRepository.mountDeploymentContent(deploymentContents, deploymentRoot, mountExploded);
+                final MountType type;
+                if(mountExploded) {
+                    type = MountType.EXPANDED;
+                } else if (deploymentName.endsWith(".xml")) {
+                    type = MountType.REAL;
+                } else {
+                    type = MountType.ZIP;
+                }
+                handle = deploymentMountProvider.mountDeploymentContent(deploymentContents, deploymentRoot, type);
                 mountHandle = new MountHandle(handle);
             } catch (IOException e) {
                 failed = true;
-                throw new DeploymentUnitProcessingException("Failed to mount deployment content", e);
+                throw ServerMessages.MESSAGES.deploymentMountFailed(e);
             } finally {
                 if(failed) {
                     VFSUtils.safeClose(handle);

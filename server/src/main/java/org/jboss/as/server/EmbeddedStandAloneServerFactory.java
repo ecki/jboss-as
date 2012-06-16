@@ -45,6 +45,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
+import org.jboss.as.controller.extension.ExtensionRegistry;
 import org.jboss.as.controller.ModelController;
 import org.jboss.as.controller.client.ModelControllerClient;
 import org.jboss.as.controller.client.helpers.standalone.DeploymentPlan;
@@ -109,9 +110,17 @@ public class EmbeddedStandAloneServerFactory {
             @Override
             public void deploy(File file) throws IOException, ExecutionException, InterruptedException {
                 // the current deployment manager only accepts jar input stream, so hack one together
-                execute(serverDeploymentManager.newDeploymentPlan()
-                        .add(file.getName(), VFSUtils.createJarFileInputStream(VFS.getChild(file.toURI()))).andDeploy()
-                        .build());
+                final InputStream is = VFSUtils.createJarFileInputStream(VFS.getChild(file.toURI()));
+                try {
+                    execute(serverDeploymentManager.newDeploymentPlan().add(file.getName(), is).andDeploy().build());
+                } finally {
+                    if(is != null) try {
+                        is.close();
+                    } catch (IOException ignore) {
+                        //
+                    }
+                }
+
             }
 
             private ServerDeploymentPlanResult execute(DeploymentPlan deploymentPlan) throws ExecutionException, InterruptedException {
@@ -120,7 +129,10 @@ public class EmbeddedStandAloneServerFactory {
 
             @Override
             public Context getContext() {
-                return ifSet(context, "Server has not been started");
+                if (context == null) {
+                    throw ServerMessages.MESSAGES.namingContextHasNotBeenSet();
+                }
+                return context;
             }
 
             @Override
@@ -136,20 +148,26 @@ public class EmbeddedStandAloneServerFactory {
 
                     Bootstrap bootstrap = Bootstrap.Factory.newInstance();
 
-                    Bootstrap.Configuration configuration = new Bootstrap.Configuration();
+                    Bootstrap.Configuration configuration = new Bootstrap.Configuration(serverEnvironment);
 
+                    final ExtensionRegistry extensionRegistry = configuration.getExtensionRegistry();
                     // do not persist anything in embedded mode
                     final Bootstrap.ConfigurationPersisterFactory configurationPersisterFactory = new Bootstrap.ConfigurationPersisterFactory() {
                         @Override
                         public ExtensibleConfigurationPersister createConfigurationPersister(ServerEnvironment serverEnvironment, ExecutorService executorService) {
                             final QName rootElement = new QName(Namespace.CURRENT.getUriString(), "server");
-                            final StandaloneXml parser = new StandaloneXml(Module.getBootModuleLoader(), executorService);
-                            return new TransientConfigurationPersister(serverEnvironment.getServerConfigurationFile(), rootElement, parser, parser);
+                            final StandaloneXml parser = new StandaloneXml(Module.getBootModuleLoader(), executorService, extensionRegistry);
+                            TransientConfigurationPersister persister = new TransientConfigurationPersister(serverEnvironment.getServerConfigurationFile(), rootElement, parser, parser);
+                            for (Namespace namespace : Namespace.domainValues()) {
+                                if (!namespace.equals(Namespace.CURRENT)) {
+                                    persister.registerAdditionalRootElement(new QName(namespace.getUriString(), "server"), parser);
+                                }
+                            }
+                            extensionRegistry.setWriterRegistry(persister);
+                            return persister;
                         }
                     };
                     configuration.setConfigurationPersisterFactory(configurationPersisterFactory);
-
-                    configuration.setServerEnvironment(serverEnvironment);
 
                     configuration.setModuleLoader(moduleLoader);
 
@@ -157,6 +175,7 @@ public class EmbeddedStandAloneServerFactory {
 
                     serviceContainer = future.get();
 
+                    @SuppressWarnings("unchecked")
                     final Value<ModelController> controllerService = (Value<ModelController>) serviceContainer.getRequiredService(Services.JBOSS_SERVER_CONTROLLER);
                     final ModelController controller = controllerService.getValue();
                     serverDeploymentManager = new ModelControllerServerDeploymentManager(controller);
@@ -206,12 +225,6 @@ public class EmbeddedStandAloneServerFactory {
         return standaloneServer;
     }
 
-    private static <T> T ifSet(T value, String message) {
-        if (value == null)
-            throw new IllegalStateException(message);
-        return value;
-    }
-
     public static void setupCleanDirectories(Properties props) {
         File jbossHomeDir = new File(props.getProperty(ServerEnvironment.HOME_DIR));
         setupCleanDirectories(jbossHomeDir, props);
@@ -250,9 +263,9 @@ public class EmbeddedStandAloneServerFactory {
         if (prop == null) {
             prop = props.getProperty(ServerEnvironment.SERVER_BASE_DIR, null);
             if (prop == null) {
-                File dir = new File(jbossHomeDir, "standalone/" + relativeLocation);
+                File dir = new File(jbossHomeDir, "standalone" + File.separator + relativeLocation);
                 if (mustExist && (!dir.exists() || !dir.isDirectory())) {
-                    throw new IllegalArgumentException("No directory called 'standalone/' " + relativeLocation + " under " + jbossHomeDir.getAbsolutePath());
+                    throw ServerMessages.MESSAGES.embeddedServerDirectoryNotFound("standalone" + File.separator + relativeLocation, jbossHomeDir.getAbsolutePath());
                 }
                 return dir;
             } else {
@@ -290,10 +303,10 @@ public class EmbeddedStandAloneServerFactory {
 
     private static void validateDirectory(String property, File file) {
         if (!file.exists()) {
-            throw new IllegalArgumentException("-D" + property + "=" + file.getAbsolutePath() + " does not exist");
+            throw ServerMessages.MESSAGES.propertySpecifiedFileDoesNotExist(property, file.getAbsolutePath());
         }
         if (!file.isDirectory()) {
-            throw new IllegalArgumentException("-D" + property + "=" + file.getAbsolutePath() + " is not a directory");
+            throw ServerMessages.MESSAGES.propertySpecifiedFileIsNotADirectory(property, file.getAbsolutePath());
         }
     }
 
@@ -316,7 +329,7 @@ public class EmbeddedStandAloneServerFactory {
                             out.write(i);
                         }
                     } catch (IOException e) {
-                        throw new RuntimeException("Error copying " + srcFile.getAbsolutePath() + " to " + destFile.getAbsolutePath(), e);
+                        throw ServerMessages.MESSAGES.errorCopyingFile(srcFile.getAbsolutePath(), destFile.getAbsolutePath(), e);
                     } finally {
                         StreamUtils.safeClose(in);
                         StreamUtils.safeClose(out);

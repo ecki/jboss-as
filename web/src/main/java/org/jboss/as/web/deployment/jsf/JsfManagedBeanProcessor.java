@@ -21,6 +21,8 @@
  */
 package org.jboss.as.web.deployment.jsf;
 
+import static org.jboss.as.web.WebMessages.MESSAGES;
+
 import org.jboss.as.ee.component.ComponentDescription;
 import org.jboss.as.ee.component.EEApplicationClasses;
 import org.jboss.as.ee.component.EEModuleDescription;
@@ -34,6 +36,7 @@ import org.jboss.as.server.deployment.DeploymentUnitProcessor;
 import org.jboss.as.server.deployment.DeploymentUtils;
 import org.jboss.as.server.deployment.annotation.CompositeIndex;
 import org.jboss.as.server.deployment.module.ResourceRoot;
+import org.jboss.as.web.WebLogger;
 import org.jboss.as.web.deployment.WarMetaData;
 import org.jboss.as.web.deployment.WebAttachments;
 import org.jboss.as.web.deployment.component.WebComponentDescription;
@@ -44,7 +47,7 @@ import org.jboss.jandex.ClassInfo;
 import org.jboss.jandex.DotName;
 import org.jboss.logging.Logger;
 import org.jboss.metadata.javaee.spec.ParamValueMetaData;
-import org.jboss.metadata.parser.util.NoopXmlResolver;
+import org.jboss.metadata.parser.util.NoopXMLResolver;
 import org.jboss.metadata.web.spec.WebMetaData;
 import org.jboss.modules.Module;
 import org.jboss.vfs.VirtualFile;
@@ -104,10 +107,10 @@ public class JsfManagedBeanProcessor implements DeploymentUnitProcessor {
                 final Class<?> componentClass = module.getClassLoader().loadClass(managedBean);
                 componentClass.getConstructor();
             } catch (ClassNotFoundException e) {
-                log.error("Could not load JSF managed bean class " + managedBean);
+                WebLogger.WEB_LOGGER.managedBeanLoadFail(managedBean);
                 continue;
             } catch (NoSuchMethodException e) {
-                log.error("JSF managed bean class " + managedBean + " has no default constructor");
+                WebLogger.WEB_LOGGER.managedBeanNoDefaultConstructor(managedBean);
                 continue;
             }
             installManagedBeanComponent(managedBean, moduleDescription, deploymentUnit, applicationClassesDescription);
@@ -125,7 +128,7 @@ public class JsfManagedBeanProcessor implements DeploymentUnitProcessor {
             try {
                 is = facesConfig.openStream();
                 final XMLInputFactory inputFactory = XMLInputFactory.newInstance();
-                inputFactory.setXMLResolver(NoopXmlResolver.create());
+                inputFactory.setXMLResolver(NoopXMLResolver.create());
                 XMLStreamReader parser = inputFactory.createXMLStreamReader(is);
                 StringBuilder className = null;
                 int indent = 0;
@@ -165,7 +168,7 @@ public class JsfManagedBeanProcessor implements DeploymentUnitProcessor {
                     }
                 }
             } catch (Exception e) {
-                log.error("Failed to parse " + facesConfig + " injection into manage beans defined in this file will not be available");
+                WebLogger.WEB_LOGGER.managedBeansConfigParseFailed(facesConfig);
             } finally {
                 try {
                     if (is != null) {
@@ -238,7 +241,7 @@ public class JsfManagedBeanProcessor implements DeploymentUnitProcessor {
                     final String className = ((ClassInfo) target).name().toString();
                     managedBeanClasses.add(className);
                 } else {
-                    throw new DeploymentUnitProcessingException("@ManagedBean can only be placed on a class");
+                    throw new DeploymentUnitProcessingException(MESSAGES.invalidManagedBeanAnnotation(target));
                 }
             }
         }

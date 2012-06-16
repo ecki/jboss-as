@@ -22,26 +22,6 @@
 
 package org.jboss.as.web.security.jaspi;
 
-import org.apache.catalina.Session;
-import org.apache.catalina.authenticator.AuthenticatorBase;
-import org.apache.catalina.authenticator.Constants;
-import org.apache.catalina.connector.Request;
-import org.apache.catalina.deploy.LoginConfig;
-import org.jboss.as.web.security.JBossGenericPrincipal;
-import org.jboss.as.web.security.JBossWebRealm;
-import org.jboss.logging.Logger;
-import org.jboss.security.SecurityContext;
-import org.jboss.security.ServerAuthenticationManager;
-import org.jboss.security.SimplePrincipal;
-import org.jboss.security.auth.callback.JBossCallbackHandler;
-import org.jboss.security.auth.message.GenericMessageInfo;
-import org.jboss.security.plugins.auth.JASPIServerAuthenticationManager;
-
-import javax.security.auth.Subject;
-import javax.security.auth.message.callback.CallerPrincipalCallback;
-import javax.security.auth.message.callback.PasswordValidationCallback;
-import javax.servlet.http.Cookie;
-import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.security.Principal;
 import java.security.acl.Group;
@@ -49,6 +29,28 @@ import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.Random;
+import java.util.Set;
+
+import javax.security.auth.Subject;
+import javax.security.auth.message.callback.CallerPrincipalCallback;
+import javax.security.auth.message.callback.PasswordValidationCallback;
+import javax.servlet.http.Cookie;
+import javax.servlet.http.HttpServletResponse;
+
+import org.apache.catalina.Session;
+import org.apache.catalina.authenticator.AuthenticatorBase;
+import org.apache.catalina.authenticator.Constants;
+import org.apache.catalina.connector.Request;
+import org.apache.catalina.deploy.LoginConfig;
+import org.jboss.as.web.WebLogger;
+import org.jboss.as.web.security.JBossGenericPrincipal;
+import org.jboss.as.web.security.JBossWebRealm;
+import org.jboss.security.SecurityContext;
+import org.jboss.security.ServerAuthenticationManager;
+import org.jboss.security.SimplePrincipal;
+import org.jboss.security.auth.callback.JBossCallbackHandler;
+import org.jboss.security.auth.message.GenericMessageInfo;
+import org.jboss.security.plugins.auth.JASPIServerAuthenticationManager;
 
 /**
  * <p>
@@ -60,8 +62,6 @@ import java.util.Random;
  */
 @SuppressWarnings("unused")
 public class WebJASPIAuthenticator extends AuthenticatorBase {
-
-    private static Logger log = Logger.getLogger("org.jboss.as.web.security");
 
     protected final String messageLayer = "HttpServlet";
 
@@ -79,7 +79,7 @@ public class WebJASPIAuthenticator extends AuthenticatorBase {
         Principal principal = request.getUserPrincipal();
         String ssoId = (String) request.getNote(Constants.REQ_SSOID_NOTE);
         if (principal != null) {
-            log.tracef("Already authenticated '%s'", principal.getName());
+            WebLogger.WEB_SECURITY_LOGGER.tracef("Already authenticated '%s'", principal.getName());
             // associate the session with any existing SSO session
             if (ssoId != null)
                 associate(ssoId, request.getSessionInternal(true));
@@ -89,7 +89,7 @@ public class WebJASPIAuthenticator extends AuthenticatorBase {
         if ("BASIC".equalsIgnoreCase(authMethod) || "FORM".equalsIgnoreCase(authMethod)) {
             // is there an SSO session against which we can try to reauthenticate?
             if (ssoId != null) {
-                log.tracef("SSO Id %s set; attempting reauthentication", ssoId);
+                WebLogger.WEB_SECURITY_LOGGER.tracef("SSO Id %s set; attempting reauthentication", ssoId);
                 /* Try to reauthenticate using data cached by SSO.  If this fails, either the original SSO logon was of
                    DIGEST or SSL (which we can't reauthenticate ourselves because there is no cached username and password),
                    or the realm denied the user's reauthentication for some reason. In either case we have to prompt the
@@ -178,7 +178,7 @@ public class WebJASPIAuthenticator extends AuthenticatorBase {
 
     /**
      * <p>
-     * Sets the flage that indicates whether JASPI should be used to secure the HTTP response or not.
+     * Sets the flag that indicates whether JASPI should be used to secure the HTTP response or not.
      * </p>
      *
      * @param secureResponse {@code true} if the authenticator is to secure the response; {@code false} otherwise.
@@ -200,12 +200,12 @@ public class WebJASPIAuthenticator extends AuthenticatorBase {
         if (this.serverAuthenticationManagerClass ==  null) {
             SecurityContext context = SecurityActions.getSecurityContext();
             if (context != null) {
-                log.debugf("Instantiating JASPI authentication manager with security domain %s",
+                WebLogger.WEB_SECURITY_LOGGER.debugf("Instantiating JASPI authentication manager with security domain %s",
                         context.getSecurityDomain());
                 sam = new JASPIServerAuthenticationManager(context.getSecurityDomain(), new JBossCallbackHandler());
             }
             else {
-                log.debugf("Security context is null, instantiating JASPI authentication manager with default domain");
+                WebLogger.WEB_SECURITY_LOGGER.debugf("Security context is null, instantiating JASPI authentication manager with default domain");
                 sam = new JASPIServerAuthenticationManager();
             }
         }
@@ -216,7 +216,7 @@ public class WebJASPIAuthenticator extends AuthenticatorBase {
                 clazz = SecurityActions.loadClass(this.serverAuthenticationManagerClass);
                 sam = (ServerAuthenticationManager) clazz.newInstance();
             } catch (Exception e) {
-                log.errorf("Exception in obtaining ServerAuthenticationManager: %s", e.getLocalizedMessage());
+                WebLogger.WEB_SECURITY_LOGGER.noServerAuthenticationManager(e);
             }
         }
         return sam;
@@ -238,10 +238,10 @@ public class WebJASPIAuthenticator extends AuthenticatorBase {
     protected void register(Request request, HttpServletResponse response, Principal principal, String authType,
                             String username, String password) {
 
-        if (log.isTraceEnabled()) {
+        if (WebLogger.WEB_SECURITY_LOGGER.isTraceEnabled()) {
             // Bugzilla 39255: http://issues.apache.org/bugzilla/show_bug.cgi?id=39255
             String name = (principal == null) ? "none" : principal.getName();
-            log.tracef("Authenticated '%s' with type '" + authType + "'", name, authType);
+            WebLogger.WEB_SECURITY_LOGGER.tracef("Authenticated '%s' with type '" + authType + "'", name, authType);
         }
 
         // cache the authentication information in our request
@@ -299,7 +299,7 @@ public class WebJASPIAuthenticator extends AuthenticatorBase {
             sso.update(ssoId, principal, authType, username, password);
         }
 
-        // fix for Bug 10040: always associate a session with a new SSO reqistration. SSO entries are only removed from
+        // fix for Bug 10040: always associate a session with a new SSO registration. SSO entries are only removed from
         // the SSO registry map when associated sessions are destroyed; if a new SSO entry is created above for this
         // request and the user never revisits the context, the SSO entry will never be cleared if we don't associate
         // the session
@@ -322,8 +322,9 @@ public class WebJASPIAuthenticator extends AuthenticatorBase {
 
         // if the subject didn't contain any roles, look for the roles declared in the deployment descriptor.
         JBossWebRealm realm = (JBossWebRealm) this.getContainer().getRealm();
-        if (roles.isEmpty())
-            roles.addAll(realm.getPrincipalVersusRolesMap().get(principal.getName()));
+        Set<String> descriptorRoles = realm.getPrincipalVersusRolesMap().get(principal.getName());
+        if (roles.isEmpty() && descriptorRoles != null)
+            roles.addAll(descriptorRoles);
 
         // build and return the JBossGenericPrincipal.
         return new JBossGenericPrincipal(realm, principal.getName(), null, roles, principal, null, null, null, subject);

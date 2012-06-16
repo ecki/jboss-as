@@ -22,7 +22,10 @@
 
 package org.jboss.as.messaging.jms;
 
-import static org.jboss.as.messaging.CommonAttributes.*;
+import static org.jboss.as.messaging.CommonAttributes.CLIENT_ID;
+import static org.jboss.as.messaging.CommonAttributes.FILTER;
+import static org.jboss.as.messaging.CommonAttributes.QUEUE_NAME;
+import static org.jboss.as.messaging.ManagementUtil.rollbackOperationWithNoHandler;
 import static org.jboss.as.messaging.MessagingMessages.MESSAGES;
 
 import java.util.EnumSet;
@@ -94,7 +97,8 @@ public class JMSTopicControlHandler extends AbstractRuntimeOnlyHandler {
 
     public void registerOperations(final ManagementResourceRegistration registry) {
 
-        final EnumSet<OperationEntry.Flag> readOnly = EnumSet.of(OperationEntry.Flag.READ_ONLY);
+        final EnumSet<OperationEntry.Flag> readOnly = EnumSet.of(OperationEntry.Flag.READ_ONLY, OperationEntry.Flag.RUNTIME_ONLY);
+        final EnumSet<OperationEntry.Flag> runtimeOnly = EnumSet.of(OperationEntry.Flag.RUNTIME_ONLY);
 
         registry.registerOperationHandler(LIST_ALL_SUBSCRIPTIONS, this, new DescriptionProvider() {
             @Override
@@ -167,21 +171,21 @@ public class JMSTopicControlHandler extends AbstractRuntimeOnlyHandler {
             public ModelNode getModelDescription(Locale locale) {
                 return MessagingDescriptions.getDropDurableSubscription(locale);
             }
-        });
+        }, runtimeOnly);
 
         registry.registerOperationHandler(DROP_ALL_SUBSCRIPTIONS, this, new DescriptionProvider() {
             @Override
             public ModelNode getModelDescription(Locale locale) {
                 return MessagingDescriptions.getDescriptionOnlyOperation(locale,  DROP_ALL_SUBSCRIPTIONS, TOPIC);
             }
-        });
+        }, runtimeOnly);
 
         registry.registerOperationHandler(REMOVE_MESSAGES, this, new DescriptionProvider() {
             @Override
             public ModelNode getModelDescription(Locale locale) {
                 return MessagingDescriptions.getRemoveMessages(locale);
             }
-        });
+        }, runtimeOnly);
     }
 
     @Override
@@ -194,6 +198,11 @@ public class JMSTopicControlHandler extends AbstractRuntimeOnlyHandler {
         ServiceController<?> hqService = context.getServiceRegistry(false).getService(hqServiceName);
         HornetQServer hqServer = HornetQServer.class.cast(hqService.getValue());
         TopicControl control = TopicControl.class.cast(hqServer.getManagementService().getResource(ResourceNames.JMS_TOPIC + topicName));
+
+        if (control == null) {
+            rollbackOperationWithNoHandler(context, operation);
+            return;
+        }
 
         try {
             if (LIST_ALL_SUBSCRIPTIONS.equals(operationName)) {

@@ -23,12 +23,15 @@ package org.jboss.as.webservices.util;
 
 import static org.jboss.as.webservices.WSMessages.MESSAGES;
 
+import java.io.File;
+import java.io.FileFilter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.ObjectStreamField;
 import java.io.OutputStream;
+import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.LinkedList;
@@ -42,6 +45,7 @@ import org.jboss.vfs.VFSUtils;
 import org.jboss.vfs.VirtualFile;
 import org.jboss.wsf.spi.deployment.UnifiedVirtualFile;
 import org.jboss.wsf.spi.deployment.WritableUnifiedVirtualFile;
+import org.jboss.wsf.spi.util.URLLoaderAdapter;
 
 /**
  * A VirtualFile adaptor.
@@ -92,7 +96,7 @@ public final class VirtualFileAdaptor implements WritableUnifiedVirtualFile {
         if (file == null) {
             VirtualFile root;
             try {
-                root = VFS.getChild(rootUrl);
+                root = VFS.getChild(rootUrl.toURI());
             } catch (URISyntaxException e) {
                 throw MESSAGES.cannotGetVirtualFile(e, rootUrl);
             }
@@ -170,7 +174,8 @@ public final class VirtualFileAdaptor implements WritableUnifiedVirtualFile {
         fields.put("rootUrl", url);
         fields.put("path", pathName);
 
-        VirtualFile newRoot = VFS.getChild(url);
+        URI uri = url != null ? url.toURI() : null;
+        VirtualFile newRoot = VFS.getChild(uri);
         VirtualFile newChild = newRoot.getChild(pathName);
         fields.put("requiresMount", isMounted(newRoot, newChild));
 
@@ -182,6 +187,27 @@ public final class VirtualFileAdaptor implements WritableUnifiedVirtualFile {
         rootUrl = (URL) fields.get("rootUrl", null);
         path = (String) fields.get("path", null);
         requiresMount = fields.get("requiresMount", false);
+    }
+
+    private Object writeReplace() {
+        // TODO: hack to enable remote tests
+        try {
+            File archive = file.getPhysicalFile();
+            if (archive.list().length == 0) {
+                final File parent = file.getPhysicalFile().getParentFile();
+                final File[] children = parent.listFiles(new FileFilter() {
+                    @Override
+                    public boolean accept(File fileOrDir) {
+                        return fileOrDir.isFile();
+                    }
+                });
+                archive = children[0];
+            }
+            // Offer different UnifiedVirtualFile implementation for deserialization process
+            return new URLLoaderAdapter(archive.toURI().toURL());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     public List<UnifiedVirtualFile> getChildren() throws IOException {

@@ -36,7 +36,7 @@ import javax.ejb.Singleton;
 @Singleton
 @LocalBean
 @Lock(value = LockType.READ)
-public class ReadOnlySingletonBean {
+public class ReadOnlySingletonBean implements ReadOnlySingleton{
 
 
     @AccessTimeout(value = 1, unit = TimeUnit.SECONDS)

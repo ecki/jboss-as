@@ -24,6 +24,7 @@
         <dependencies>
             <module name="deployment.module.ignored"/>
             <module name="deployment.aaa"/>
+            <module name="deployment.module.doesnotexist" optional="true" />
         </dependencies>
     </deployment>
     <sub-deployment name="ejb.jar">
@@ -32,7 +33,7 @@
         </resources>
         <dependencies>
             <module name="deployment.module.ignored"/>
-            <module name="deployment.aaa"/>
+            <module name="deployment.aaa" meta-inf="export"/>
         </dependencies>
         <module-alias name="deployment.bbb" />
     </sub-deployment>

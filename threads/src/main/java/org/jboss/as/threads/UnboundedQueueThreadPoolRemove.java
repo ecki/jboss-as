@@ -21,14 +21,9 @@
  */
 package org.jboss.as.threads;
 
-import java.util.Locale;
 import org.jboss.as.controller.AbstractRemoveStepHandler;
 import org.jboss.as.controller.OperationContext;
-import org.jboss.as.controller.PathAddress;
-import org.jboss.as.controller.descriptions.DescriptionProvider;
-
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
-
+import org.jboss.as.controller.OperationFailedException;
 import org.jboss.dmr.ModelNode;
 
 /**
@@ -36,24 +31,24 @@ import org.jboss.dmr.ModelNode;
  *
  * @author <a href="mailto:david.lloyd@redhat.com">David M. Lloyd</a>
  * @author <a href="kabir.khan@jboss.com">Kabir Khan</a>
- * @version $Revision: 1.1 $
  */
-public class UnboundedQueueThreadPoolRemove extends AbstractRemoveStepHandler implements DescriptionProvider {
+public class UnboundedQueueThreadPoolRemove extends AbstractRemoveStepHandler {
 
-    static final UnboundedQueueThreadPoolRemove INSTANCE = new UnboundedQueueThreadPoolRemove();
+    private final UnboundedQueueThreadPoolAdd addHandler;
 
-    protected void performRuntime(OperationContext context, ModelNode operation, ModelNode model) {
-        final PathAddress address = PathAddress.pathAddress(operation.require(OP_ADDR));
-        final String name = address.getLastElement().getValue();
-        context.removeService(ThreadsServices.threadFactoryName(name));
+    public UnboundedQueueThreadPoolRemove(UnboundedQueueThreadPoolAdd addHandler) {
+        this.addHandler = addHandler;
     }
 
-    protected void recoverServices(OperationContext context, ModelNode operation, ModelNode model) {
-        // TODO:  RE-ADD SERVICES
+    protected void performRuntime(OperationContext context, ModelNode operation, ModelNode model) throws OperationFailedException {
+        final ThreadPoolManagementUtils.BaseThreadPoolParameters params =
+                ThreadPoolManagementUtils.parseUnboundedQueueThreadPoolParameters(context, operation, model);
+        ThreadPoolManagementUtils.removeThreadPoolService(params.getName(), addHandler.getServiceNameBase(),
+                params.getThreadFactory(), addHandler.getThreadFactoryResolver(),
+                context);
     }
 
-    @Override
-    public ModelNode getModelDescription(Locale locale) {
-        return ThreadsSubsystemProviders.REMOVE_UNBOUNDED_QUEUE_THREAD_POOL_DESC.getModelDescription(locale);
+    protected void recoverServices(OperationContext context, ModelNode operation, ModelNode model) throws OperationFailedException {
+        addHandler.performRuntime(context, operation, model, null, null);
     }
 }

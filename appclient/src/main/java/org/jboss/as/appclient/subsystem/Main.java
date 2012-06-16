@@ -21,9 +21,6 @@
  */
 package org.jboss.as.appclient.subsystem;
 
-import static org.jboss.as.appclient.logging.AppClientMessages.MESSAGES;
-import static org.jboss.as.process.Main.getVersionString;
-
 import java.io.File;
 import java.io.IOException;
 import java.net.MalformedURLException;
@@ -37,20 +34,23 @@ import java.util.concurrent.ExecutorService;
 
 import javax.xml.namespace.QName;
 
+import org.jboss.as.appclient.logging.AppClientMessages;
 import org.jboss.as.appclient.subsystem.parsing.AppClientXml;
+import org.jboss.as.controller.extension.ExtensionRegistry;
 import org.jboss.as.controller.parsing.Namespace;
 import org.jboss.as.controller.persistence.ExtensibleConfigurationPersister;
 import org.jboss.as.process.CommandLineConstants;
 import org.jboss.as.server.Bootstrap;
 import org.jboss.as.server.ServerEnvironment;
 import org.jboss.as.server.SystemExiter;
+import org.jboss.as.version.ProductConfig;
 import org.jboss.logmanager.handlers.ConsoleHandler;
-import org.jboss.logmanager.log4j.BridgeRepositorySelector;
 import org.jboss.modules.Module;
 import org.jboss.modules.ModuleIdentifier;
 import org.jboss.msc.service.ServiceActivator;
-import org.jboss.sasl.JBossSaslProvider;
 import org.jboss.stdio.StdioContext;
+
+import static org.jboss.as.appclient.logging.AppClientMessages.MESSAGES;
 
 /**
  * The application client entry point
@@ -73,9 +73,6 @@ public final class Main {
      * @param args the command-line arguments
      */
     public static void main(String[] args) {
-        SecurityActions.addProvider(new JBossSaslProvider());
-        SecurityActions.setSystemProperty("log4j.defaultInitOverride", "true");
-        new BridgeRepositorySelector().start();
 
         // Make sure our original stdio is properly captured.
         try {
@@ -90,6 +87,10 @@ public final class Main {
             Module.registerURLStreamHandlerFactoryModule(Module.getBootModuleLoader().loadModule(ModuleIdentifier.create("org.jboss.vfs")));
 
             final ParsedOptions options = determineEnvironment(args, new Properties(SecurityActions.getSystemProperties()), SecurityActions.getSystemEnvironment(), ServerEnvironment.LaunchType.APPCLIENT);
+            if(options == null) {
+                //this happens if --version was specified
+                return;
+            }
             ServerEnvironment serverEnvironment = options.environment;
             final List<String> clientArgs = options.clientArguments;
 
@@ -117,20 +118,27 @@ public final class Main {
                 File realFile = new File(earPath);
 
                 if (!realFile.exists()) {
-                    throw MESSAGES.cannotFindAppClient(realFile.getAbsoluteFile());
+                    throw MESSAGES.cannotFindAppClientFile(realFile.getAbsoluteFile());
                 }
 
-                final AppClientXml parser = new AppClientXml(Module.getBootModuleLoader());
                 final Bootstrap bootstrap = Bootstrap.Factory.newInstance();
-                final Bootstrap.Configuration configuration = new Bootstrap.Configuration();
-                configuration.setServerEnvironment(serverEnvironment);
+                final Bootstrap.Configuration configuration = new Bootstrap.Configuration(serverEnvironment);
                 configuration.setModuleLoader(Module.getBootModuleLoader());
+                final ExtensionRegistry extensionRegistry = configuration.getExtensionRegistry();
+                final AppClientXml parser = new AppClientXml(Module.getBootModuleLoader(), extensionRegistry);
                 final Bootstrap.ConfigurationPersisterFactory configurationPersisterFactory = new Bootstrap.ConfigurationPersisterFactory() {
 
                     @Override
                     public ExtensibleConfigurationPersister createConfigurationPersister(ServerEnvironment serverEnvironment, ExecutorService executorService) {
-                        return new ApplicationClientConfigurationPersister(earPath, deploymentName, options.hostUrl, params,
+                        ApplicationClientConfigurationPersister persister = new ApplicationClientConfigurationPersister(earPath, deploymentName, options.hostUrl,options.propertiesFile, params,
                                 serverEnvironment.getServerConfigurationFile().getBootFile(), rootElement, parser);
+                        for (Namespace namespace : Namespace.domainValues()) {
+                            if (!namespace.equals(Namespace.CURRENT)) {
+                                persister.registerAdditionalRootElement(new QName(namespace.getUriString(), "server"), parser);
+                            }
+                        }
+                        extensionRegistry.setWriterRegistry(persister);
+                        return persister;
                     }
                 };
                 configuration.setConfigurationPersisterFactory(configurationPersisterFactory);
@@ -158,6 +166,9 @@ public final class Main {
         final int argsLength = args.length;
         String appClientConfig = "appclient.xml";
         boolean clientArgs = false;
+        ProductConfig productConfig;
+        boolean hostSet = false;
+
         for (int i = 0; i < argsLength; i++) {
             final String arg = args[i];
             try {
@@ -165,7 +176,8 @@ public final class Main {
                     clientArguments.add(arg);
                 } else if (CommandLineConstants.VERSION.equals(arg) || CommandLineConstants.SHORT_VERSION.equals(arg)
                         || CommandLineConstants.OLD_VERSION.equals(arg) || CommandLineConstants.OLD_SHORT_VERSION.equals(arg)) {
-                    System.out.println("JBoss Application Server " + getVersionString());
+                    productConfig = new ProductConfig(Module.getBootModuleLoader(), SecurityActions.getSystemProperty(ServerEnvironment.HOME_DIR));
+                    System.out.println(productConfig.getPrettyVersionString());
                     return null;
                 } else if (CommandLineConstants.HELP.equals(arg) || CommandLineConstants.SHORT_HELP.equals(arg) || CommandLineConstants.OLD_HELP.equals(arg)) {
                     usage();
@@ -191,12 +203,33 @@ public final class Main {
                     if (urlSpec == null || !processProperties(arg, urlSpec)) {
                         return null;
                     }
+                } else if (arg.equals(CommandLineConstants.SHORT_HOST) || arg.equals(CommandLineConstants.HOST)) {
+                    if(ret.propertiesFile != null) {
+                        throw AppClientMessages.MESSAGES.cannotSpecifyBothHostAndPropertiesFile();
+                    }
+                    hostSet = true;
+                    String urlSpec = args[++i];
+                    ret.hostUrl = urlSpec;
                 } else if (arg.startsWith(CommandLineConstants.SHORT_HOST)) {
+                    if(ret.propertiesFile != null) {
+                        throw AppClientMessages.MESSAGES.cannotSpecifyBothHostAndPropertiesFile();
+                    }
+                    hostSet = true;
                     String urlSpec = parseValue(arg, CommandLineConstants.SHORT_HOST);
                     ret.hostUrl = urlSpec;
                 } else if (arg.startsWith(CommandLineConstants.HOST)) {
+                    if(ret.propertiesFile != null) {
+                        throw AppClientMessages.MESSAGES.cannotSpecifyBothHostAndPropertiesFile();
+                    }
+                    hostSet = true;
                     String urlSpec = parseValue(arg, CommandLineConstants.HOST);
                     ret.hostUrl = urlSpec;
+                } else if (arg.startsWith(CommandLineConstants.CONNECTION_PROPERTIES)) {
+                    if(hostSet) {
+                        throw AppClientMessages.MESSAGES.cannotSpecifyBothHostAndPropertiesFile();
+                    }
+                    String fileUrl = parseValue(arg, CommandLineConstants.CONNECTION_PROPERTIES);
+                    ret.propertiesFile = fileUrl;
                 }else if (arg.startsWith(CommandLineConstants.SYS_PROP)) {
 
                     // set a system property
@@ -214,7 +247,7 @@ public final class Main {
                 } else if (arg.startsWith(CommandLineConstants.APPCLIENT_CONFIG)) {
                     appClientConfig = parseValue(arg, CommandLineConstants.APPCLIENT_CONFIG);
                 } else {
-                    if(arg.startsWith("-")) {
+                    if (arg.startsWith("-")) {
                         System.out.println(MESSAGES.unknownOption(arg));
                         usage();
 
@@ -230,7 +263,9 @@ public final class Main {
             }
         }
 
-        ret.environment = new ServerEnvironment(systemProperties, systemEnvironment, appClientConfig, launchType);
+        String hostControllerName = null; // No host controller unless in domain mode.
+        productConfig = new ProductConfig(Module.getBootModuleLoader(), SecurityActions.getSystemProperty(ServerEnvironment.HOME_DIR));
+        ret.environment = new ServerEnvironment(hostControllerName, systemProperties, systemEnvironment, appClientConfig, launchType, null, productConfig);
         return ret;
     }
 
@@ -292,5 +327,6 @@ public final class Main {
         ServerEnvironment environment;
         List<String> clientArguments;
         String hostUrl = "remote://localhost:4447";
+        String propertiesFile;
     }
 }

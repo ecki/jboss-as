@@ -30,10 +30,12 @@ import org.jboss.as.server.deployment.DeploymentUnit;
 import org.jboss.as.server.deployment.DeploymentUnitProcessingException;
 import org.jboss.as.server.deployment.DeploymentUnitProcessor;
 import org.jboss.as.server.deployment.module.ResourceRoot;
-import org.jboss.osgi.spi.util.BundleInfo;
+import org.jboss.osgi.spi.OSGiManifestBuilder;
 
 /**
  * Processes deployments that contain a valid OSGi manifest.
+ *
+ * If so it attaches the {@link Manifest} under key {@link Attachments#OSGI_MANIFEST}
  *
  * @author Thomas.Diesler@jboss.com
  * @since 02-Dec-2010
@@ -60,7 +62,7 @@ public class OSGiManifestStructureProcessor implements DeploymentUnitProcessor {
 
         // Check whether this is an OSGi manifest
         manifest = deploymentRoot.getAttachment(Attachments.MANIFEST);
-        if (BundleInfo.isValidBundleManifest(manifest)) {
+        if (OSGiManifestBuilder.isValidBundleManifest(manifest)) {
             deploymentUnit.putAttachment(Attachments.OSGI_MANIFEST, manifest);
         }
     }

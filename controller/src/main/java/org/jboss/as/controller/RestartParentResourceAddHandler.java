@@ -21,16 +21,8 @@
  */
 package org.jboss.as.controller;
 
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
-
-import java.util.List;
-import java.util.NoSuchElementException;
-
-import org.jboss.as.controller.operations.common.Util;
 import org.jboss.as.controller.registry.Resource;
 import org.jboss.dmr.ModelNode;
-import org.jboss.msc.service.ServiceController;
-import org.jboss.msc.service.ServiceName;
 
 /**
  * Simple add handler which, if allowed, restarts a parent resource when the child is added.
@@ -38,88 +30,25 @@ import org.jboss.msc.service.ServiceName;
  *
  * @author Jason T. Greene
  */
-public abstract class RestartParentResourceAddHandler extends AbstractAddStepHandler {
-    private final String parentKeyName;
+public abstract class RestartParentResourceAddHandler extends RestartParentResourceHandlerBase {
 
     protected RestartParentResourceAddHandler(String parentKeyName) {
-        this.parentKeyName = parentKeyName;
+        super(parentKeyName);
     }
 
     @Override
-    protected void performRuntime(OperationContext context, ModelNode operation, ModelNode model, ServiceVerificationHandler verificationHandler, List<ServiceController<?>> newControllers) throws OperationFailedException {
-        if (context.isBooting()) {
-            return;
-        }
-
-        PathAddress address = getParentAddress(PathAddress.pathAddress(operation.require(OP_ADDR)));
-        ServiceName serviceName = getParentServiceName(address);
-        ServiceController<?> service = serviceName != null ?
-                             context.getServiceRegistry(false).getService(serviceName) : null;
-
-        // No parent service, nothing to do
-        if (service == null) {
-            return;
-        }
-
-        if (context.isResourceServiceRestartAllowed()) {
-            ModelNode parentModel = getModel(context, address);
-            if (parentModel != null && context.markResourceRestarted(address, this)) {
-                context.removeService(serviceName);
-                recreateParentService(context, address, parentModel, verificationHandler);
-            }
-        }  else {
-            context.reloadRequired();
-        }
-
+    protected void updateModel(OperationContext context, ModelNode operation) throws OperationFailedException {
+        final Resource resource = context.createResource(PathAddress.EMPTY_ADDRESS);
+        populateModel(operation, resource.getModel());
     }
 
-    protected abstract void recreateParentService(OperationContext context, PathAddress parentAddress, ModelNode parentModel, ServiceVerificationHandler verificationHandler);
-
-    protected abstract ServiceName getParentServiceName(PathAddress parentAddress);
-
-
-    protected PathAddress getParentAddress(PathAddress address) {
-        return Util.getParentAddressByKey(address, parentKeyName);
-    }
-
-    @Override
-    protected void rollbackRuntime(OperationContext context, ModelNode operation, ModelNode model, List<ServiceController<?>> controllers) {
-        PathAddress address = getParentAddress(PathAddress.pathAddress(operation.require(OP_ADDR)));
-        ServiceName serviceName = getParentServiceName(address);
-        ServiceController<?> service = serviceName != null ?
-                             context.getServiceRegistry(false).getService(serviceName) : null;
-
-        // No parent service indicates boot
-        if (service == null) {
-            return;
-        }
-
-        if (context.isResourceServiceRestartAllowed()) {
-            ModelNode parentModel = getOriginalModel(context, address);
-            if (parentModel != null && context.revertResourceRestarted(address, this)) {
-                context.removeService(serviceName);
-                recreateParentService(context, address, parentModel, null);
-            }
-        }  else {
-            context.revertReloadRequired();
-        }
-    }
-
-     private ModelNode getModel(OperationContext ctx, PathAddress address) {
-        try {
-            Resource resource = ctx.getRootResource().navigate(address);
-            return Resource.Tools.readModel(resource);
-        } catch (NoSuchElementException e) {
-            return null;
-        }
-    }
-
-    private ModelNode getOriginalModel(OperationContext ctx, PathAddress address) {
-        try {
-            Resource resource = ctx.getOriginalRootResource().navigate(address);
-            return  Resource.Tools.readModel(resource);
-        } catch (NoSuchElementException e) {
-            return null;
-        }
-    }
+    /**
+     * Populate the given node in the persistent configuration model based on the values in the given operation.
+     *
+     * @param operation the operation
+     * @param model persistent configuration model node that corresponds to the address of {@code operation}
+     *
+     * @throws OperationFailedException if {@code operation} is invalid or populating the model otherwise fails
+     */
+    protected abstract void populateModel(final ModelNode operation, final ModelNode model) throws OperationFailedException;
 }

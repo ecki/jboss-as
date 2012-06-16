@@ -25,6 +25,8 @@ import java.lang.reflect.Method;
 
 import java.rmi.RemoteException;
 
+import org.jboss.as.jacorb.JacORBMessages;
+import org.jboss.com.sun.corba.se.impl.javax.rmi.RemoteObjectSubstitutionManager;
 import org.omg.CORBA.UserException;
 import org.omg.CORBA.portable.IDLEntity;
 import org.omg.CORBA.portable.UnknownException;
@@ -149,7 +151,8 @@ public class SkeletonStrategy {
      * @param retVal the value to be written.
      */
     public void writeRetval(OutputStream out, Object retVal) {
-        retvalWriter.write(out, retVal);
+
+        retvalWriter.write(out, RemoteObjectSubstitutionManager.writeReplaceRemote(retVal));
     }
 
     /**
@@ -216,11 +219,9 @@ public class SkeletonStrategy {
                             {org.omg.CORBA.portable.OutputStream.class, clz};
                     writeMethod = helperClass.getMethod("write", paramTypes);
                 } catch (ClassNotFoundException e) {
-                    throw new RuntimeException("Error loading class "
-                            + helperClassName + ": " + e);
+                    throw JacORBMessages.MESSAGES.errorLoadingClass(helperClassName, e);
                 } catch (NoSuchMethodException e) {
-                    throw new RuntimeException("No write method in helper class "
-                            + helperClassName + ": " + e);
+                    throw JacORBMessages.MESSAGES.noWriteMethodInHelper(helperClassName, e);
                 }
 
             } else {
@@ -230,9 +231,7 @@ public class SkeletonStrategy {
                     this.reposId = ExceptionAnalysis.getExceptionAnalysis(clz)
                             .getExceptionRepositoryId();
                 } catch (RMIIIOPViolationException e) {
-                    throw new RuntimeException("Cannot obtain "
-                            + "exception repository id for "
-                            + clz.getName() + ":\n" + e);
+                    throw JacORBMessages.MESSAGES.cannotObtainExceptionRepositoryID(clz.getName(),  e);
                 }
             }
         }
@@ -252,10 +251,9 @@ public class SkeletonStrategy {
                 try {
                     writeMethod.invoke(null, new Object[]{out, excep});
                 } catch (IllegalAccessException e) {
-                    throw new RuntimeException("Internal error: " + e);
+                    throw JacORBMessages.MESSAGES.unexpectedException(e);
                 } catch (java.lang.reflect.InvocationTargetException e) {
-                    throw new RuntimeException("Exception marshaling IDLEntity: "
-                            + e.getTargetException());
+                    throw JacORBMessages.MESSAGES.errorMarshaling(IDLEntity.class, e.getTargetException());
                 }
             } else {
                 out.write_string(reposId);

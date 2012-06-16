@@ -30,20 +30,20 @@
     <parent>
         <groupId>org.jboss.as</groupId>
         <artifactId>jboss-as-parent</artifactId>
-        <version>7.1.0.CR1-SNAPSHOT</version>
+        <version>7.2.0.Alpha1-SNAPSHOT</version>
     </parent>
 
     <groupId>org.jboss.as</groupId>
     <artifactId>jboss-as-dist</artifactId>
-    <version>7.1.0.CR1-SNAPSHOT</version>
+    <version>7.2.0.Alpha1-SNAPSHOT</version>
 
     <name>JBoss Application Server: Distribution</name>
     <packaging>pom</packaging>
 
     <dependencies>
         <dependency>
-            <groupId>org.jboss.as</groupId> 
-            <artifactId>jboss-as-build</artifactId> 
+            <groupId>org.jboss.as</groupId>
+            <artifactId>jboss-as-build</artifactId>
             <type>pom</type>
             <scope>provided</scope>
         </dependency>
@@ -78,6 +78,24 @@
                                     <appendAssemblyId>false</appendAssemblyId>
                                     <outputDirectory>target/</outputDirectory>
                                     <workDirectory>target/assembly/work</workDirectory>
+                                    <tarLongFileMode>gnu</tarLongFileMode>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>assemble-src</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>single</goal>
+                                </goals>
+                                <configuration>
+                                    <descriptors>
+                                        <descriptor>assembly-src.xml</descriptor>
+                                    </descriptors>
+                                    <finalName>jboss-as-${project.version}</finalName>
+                                    <appendAssemblyId>true</appendAssemblyId>
+                                    <outputDirectory>target/</outputDirectory>
+                                    <workDirectory>target/assembly-src/work</workDirectory>
+                                    <tarLongFileMode>gnu</tarLongFileMode>
                                 </configuration>
                             </execution>
                         </executions>

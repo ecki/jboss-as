@@ -21,51 +21,41 @@
  */
 package org.jboss.as.test.integration.management.api.security;
 
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.Ignore;
-import java.io.PrintWriter;
-import org.jboss.as.test.integration.management.cli.GlobalOpsTestCase;
-import org.jboss.shrinkwrap.api.spec.JavaArchive;
-import java.io.IOException;
-import java.io.StringWriter;
-import java.net.URL;
 import java.util.concurrent.TimeUnit;
+
 import org.jboss.arquillian.container.test.api.Deployer;
 import org.jboss.arquillian.container.test.api.Deployment;
 import org.jboss.arquillian.container.test.api.RunAsClient;
 import org.jboss.arquillian.junit.Arquillian;
 import org.jboss.arquillian.test.api.ArquillianResource;
+import org.jboss.as.arquillian.api.ContainerResource;
+import org.jboss.as.arquillian.container.ManagementClient;
 import org.jboss.as.test.integration.common.HttpRequest;
-import org.jboss.as.test.integration.management.api.AbstractMgmtTestBase;
+import org.jboss.as.test.integration.management.base.ContainerResourceMgmtTestBase;
+import org.jboss.as.test.integration.management.util.ModelUtil;
 import org.jboss.as.test.integration.management.util.SecuredServlet;
 import org.jboss.dmr.ModelNode;
 import org.jboss.shrinkwrap.api.Archive;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
 import org.jboss.shrinkwrap.api.asset.StringAsset;
 import org.jboss.shrinkwrap.api.spec.WebArchive;
-import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import static org.junit.Assert.*;
+
+import static org.jboss.as.test.integration.management.util.ModelUtil.createOpNode;
+import static org.junit.Assert.assertTrue;
+
 
 /**
- *
  * @author Dominik Pospisil <dpospisi@redhat.com>
  */
 @RunWith(Arquillian.class)
 @RunAsClient
-public class SecurityDomainTestCase extends AbstractMgmtTestBase {
+public class SecurityDomainTestCase extends ContainerResourceMgmtTestBase {
 
-    @ArquillianResource
-    URL url;
+    @ContainerResource
+    private ManagementClient managementClient;
 
-    @Deployment
-    public static Archive<?> getDeployment() {
-        JavaArchive ja = ShrinkWrap.create(JavaArchive.class, "dummy.jar");
-        ja.addClass(GlobalOpsTestCase.class);
-        return ja;
-    }
 
     @Deployment(name = "secured-servlet", managed = false)
     public static Archive<?> getDeployment2() {
@@ -77,29 +67,21 @@ public class SecurityDomainTestCase extends AbstractMgmtTestBase {
         return war;
     }
 
-    @Before
-    public void before() throws IOException {
-        initModelControllerClient(url.getHost(), MGMT_PORT);
-    }
-
-    @AfterClass
-    public static void after() throws IOException {
-        closeModelControllerClient();
-    }
-
     @Test
-    @Ignore("AS7-2602")
     public void testAddRemoveSecurityDomain(@ArquillianResource Deployer deployer) throws Exception {
 
-        // specify login module options
+
+        // add security domain
+        ModelNode addOp = createOpNode("subsystem=security/security-domain=test", "add");
+
+        // setup lospecify login module options
+        ModelNode addLoginModuleOp = createOpNode("subsystem=security/security-domain=test/authentication=classic", "add");
         ModelNode loginModule = new ModelNode();
         loginModule.get("code").set("Simple");
         loginModule.get("flag").set("required");
+        addLoginModuleOp.get("login-modules").add(loginModule);
 
-        // add security domain
-        ModelNode op = createOpNode("subsystem=security/security-domain=test", "add");
-        op.get("authentication").add(loginModule);
-        executeOperation(op);
+        executeOperation(ModelUtil.createCompositeNode(new ModelNode[]{addOp, addLoginModuleOp}));
 
         // deploy secured servlet
         deployer.deploy("secured-servlet");
@@ -107,7 +89,7 @@ public class SecurityDomainTestCase extends AbstractMgmtTestBase {
         // check that the servlet is secured
         boolean failed = false;
         try {
-            String response = HttpRequest.get(url.toString() + "/SecurityDomainTestCase/SecuredServlet", 10, TimeUnit.SECONDS);
+            String response = HttpRequest.get(managementClient.getWebUri() + "/SecurityDomainTestCase/SecuredServlet", 10, TimeUnit.SECONDS);
         } catch (Exception e) {
             assertTrue(e.toString().contains("Status 401"));
             failed = true;
@@ -116,7 +98,7 @@ public class SecurityDomainTestCase extends AbstractMgmtTestBase {
 
         // check that the security domain is active
         try {
-            String response = HttpRequest.get(url.toString() + "/SecurityDomainTestCase/SecuredServlet", "test", "test", 10, TimeUnit.SECONDS);
+            String response = HttpRequest.get(managementClient.getWebUri() + "/SecurityDomainTestCase/SecuredServlet", "test", "test", 10, TimeUnit.SECONDS);
         } catch (Exception e) {
             throw new Exception("Unable to access secured servlet.", e);
         }
@@ -126,7 +108,7 @@ public class SecurityDomainTestCase extends AbstractMgmtTestBase {
 
 
         // remove security domain
-        op = createOpNode("subsystem=security/security-domain=test", "remove");
+        ModelNode op = createOpNode("subsystem=security/security-domain=test", "remove");
         executeOperation(op);
 
         // check that the security domain is removed

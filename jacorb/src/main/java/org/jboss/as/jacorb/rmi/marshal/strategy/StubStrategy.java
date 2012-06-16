@@ -29,8 +29,11 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.rmi.UnexpectedException;
+
 import javax.rmi.PortableRemoteObject;
 
+import org.jboss.as.jacorb.JacORBMessages;
+import org.jboss.com.sun.corba.se.impl.javax.rmi.RemoteObjectSubstitutionManager;
 import org.omg.CORBA.UserException;
 import org.omg.CORBA.portable.IDLEntity;
 import org.omg.CORBA_2_3.portable.InputStream;
@@ -98,7 +101,7 @@ public class StubStrategy {
      *                   will be used)
      * @return an <code>StubStrategy</code> for the operation with the
      *         parameters, exceptions, and return value specified.
-     * @see org.jboss.iiop.marshal.CDRStream#abbrevFor(Class clz)
+     * @see org.jboss.as.jacorb.rmi.marshal.CDRStream#abbrevFor(Class clz)
      */
     public static StubStrategy forMethod(String[] paramTypes,
                                          String[] excepIds,
@@ -132,7 +135,7 @@ public class StubStrategy {
      * @param cl         a <code>ClassLoader</code> to load value classes
      *                   (if null, the current thread's context class loader
      *                   will be used)
-     * @see org.jboss.iiop.marshal.CDRStream#abbrevFor(Class clz)
+     * @see org.jboss.as.jacorb.rmi.marshal.CDRStream#abbrevFor(Class clz)
      */
     private StubStrategy(String[] paramTypes, String[] excepIds,
                          String[] excepTypes, String retvalType,
@@ -160,8 +163,7 @@ public class StubStrategy {
                         new ExceptionReader(clz, excepIds[i]);
                 exceptionMap.put(exceptionReader.getReposId(), exceptionReader);
             } catch (ClassNotFoundException e) {
-                throw new RuntimeException("Error loading class "
-                        + excepTypes[i] + ": " + e);
+                throw JacORBMessages.MESSAGES.errorLoadingClass(excepTypes[i], e);
             }
         }
 
@@ -173,8 +175,7 @@ public class StubStrategy {
             try {
                 retvalRemoteInterface = cl.loadClass(retvalType.substring(1));
             } catch (ClassNotFoundException e) {
-                throw new RuntimeException("Error loading class "
-                        + retvalType.substring(1) + ": " + e);
+                throw JacORBMessages.MESSAGES.errorLoadingClass(retvalType.substring(1), e);
             }
         }
     }
@@ -189,19 +190,18 @@ public class StubStrategy {
         int len = params.length;
 
         if (len != paramWriters.length) {
-            throw new RuntimeException("Cannot marshal parameters: "
-                    + "unexpected number of parameters");
+            throw JacORBMessages.MESSAGES.errorMashalingParams();
         }
         for (int i = 0; i < len; i++) {
             Object param = params[i];
-            if(param instanceof PortableRemoteObject) {
+            if (param instanceof PortableRemoteObject) {
                 try {
                     param = PortableRemoteObject.toStub((Remote) param);
                 } catch (NoSuchObjectException e) {
                     throw new RuntimeException(e);
                 }
             }
-            paramWriters[i].write(out, param);
+            paramWriters[i].write(out, RemoteObjectSubstitutionManager.writeReplaceRemote(param));
         }
     }
 
@@ -321,17 +321,13 @@ public class StubStrategy {
                             helperClass.getMethod("id", null);
                     this.reposId = (String) idMethod.invoke(null, null);
                 } catch (ClassNotFoundException e) {
-                    throw new RuntimeException("Error loading class "
-                            + helperClassName + ": " + e);
+                    throw JacORBMessages.MESSAGES.errorLoadingClass(helperClassName, e);
                 } catch (NoSuchMethodException e) {
-                    throw new RuntimeException("No read/id method in helper class "
-                            + helperClassName + ": " + e);
+                    throw JacORBMessages.MESSAGES.noReadMethodInHelper(helperClassName, e);
                 } catch (IllegalAccessException e) {
-                    throw new RuntimeException("Internal error: " + e);
+                    throw JacORBMessages.MESSAGES.unexpectedException(e);
                 } catch (java.lang.reflect.InvocationTargetException e) {
-                    throw new RuntimeException("Exception in call to "
-                            + helperClassName + ": "
-                            + e.getTargetException());
+                    throw JacORBMessages.MESSAGES.unexpectedException(e.getTargetException());
                 }
             } else {
                 // This ExceptionReader does not correspond to an IDL-defined
@@ -352,10 +348,9 @@ public class StubStrategy {
                 try {
                     return (Exception) readMethod.invoke(null, new Object[]{in});
                 } catch (IllegalAccessException e) {
-                    throw new RuntimeException("Internal error: " + e);
+                    throw JacORBMessages.MESSAGES.unexpectedException(e);
                 } catch (java.lang.reflect.InvocationTargetException e) {
-                    throw new RuntimeException("Exception unmarshaling IDLEntity: "
-                            + e.getTargetException());
+                    throw JacORBMessages.MESSAGES.errorUnmarshaling(IDLEntity.class, e.getTargetException());
                 }
             } else {
                 in.read_string(); // read and discard the repository id

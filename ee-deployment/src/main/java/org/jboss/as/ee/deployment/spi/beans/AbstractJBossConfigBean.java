@@ -84,7 +84,7 @@ public abstract class AbstractJBossConfigBean implements DConfigBean {
     }
 
     /**
-     * Removes the xpath of a given configbean from the list of this bean's xpaths (children so to speak). Then calls death.
+     * Removes the xpath of a given config bean from the list of this bean's xpaths (children so to speak). Then calls death.
      */
     public void removeDConfigBean(DConfigBean bean) throws BeanNotFoundException {
         // childList.remove(bean);
@@ -92,7 +92,7 @@ public abstract class AbstractJBossConfigBean implements DConfigBean {
         Object o = xpaths.get(b.getPath());
 
         if (o == null) {
-            throw new BeanNotFoundException("Not Found");
+            throw new BeanNotFoundException(b.getPath());
         }
         children.remove(bean);
         xpaths.remove(b.getPath());
@@ -140,7 +140,7 @@ public abstract class AbstractJBossConfigBean implements DConfigBean {
          * All children attempts will return null.
          */
         public DConfigBean getDConfigBean(DDBean bean) throws ConfigurationException {
-            throw new ConfigurationException("Bean not found");
+            throw new ConfigurationException(bean.getXpath());
         }
     }
 

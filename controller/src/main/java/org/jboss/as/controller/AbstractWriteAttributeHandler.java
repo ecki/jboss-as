@@ -22,12 +22,11 @@
 
 package org.jboss.as.controller;
 
-import static org.jboss.as.controller.ControllerLogger.ROOT_LOGGER;
+import static org.jboss.as.controller.ControllerLogger.MGMT_OP_LOGGER;
 import static org.jboss.as.controller.ControllerMessages.MESSAGES;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.NAME;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.VALUE;
 
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -36,6 +35,7 @@ import org.jboss.as.controller.operations.validation.ParameterValidator;
 import org.jboss.as.controller.operations.validation.ParametersValidator;
 import org.jboss.as.controller.operations.validation.StringLengthValidator;
 import org.jboss.as.controller.registry.ManagementResourceRegistration;
+import org.jboss.as.controller.registry.Resource;
 import org.jboss.dmr.ModelNode;
 
 /**
@@ -91,7 +91,8 @@ public abstract class AbstractWriteAttributeHandler<T> implements OperationStepH
         // Don't require VALUE. Let the validator decide if it's bothered by an undefined value
         final ModelNode newValue = operation.hasDefined(VALUE) ? operation.get(VALUE) : new ModelNode();
         validateUnresolvedValue(attributeName, newValue);
-        final ModelNode submodel = context.readResourceForUpdate(PathAddress.EMPTY_ADDRESS).getModel();
+        final Resource resource = context.readResourceForUpdate(PathAddress.EMPTY_ADDRESS);
+        final ModelNode submodel = resource.getModel();
         final ModelNode currentValue = submodel.get(attributeName).clone();
 
         final AttributeDefinition attributeDefinition = getAttributeDefinition(attributeName);
@@ -102,6 +103,8 @@ public abstract class AbstractWriteAttributeHandler<T> implements OperationStepH
         } else {
             submodel.get(attributeName).set(newValue);
         }
+
+        validateUpdatedModel(context, resource);
 
         if (requiresRuntime(context)) {
             context.addStep(new OperationStepHandler() {
@@ -120,9 +123,9 @@ public abstract class AbstractWriteAttributeHandler<T> implements OperationStepH
                         try {
                             revertUpdateToRuntime(context, operation, attributeName, valueToRestore, resolvedValue, handback.handback);
                         } catch (Exception e) {
-                            ROOT_LOGGER.errorRevertingOperation(e, getClass().getSimpleName(),
+                            MGMT_OP_LOGGER.errorRevertingOperation(e, getClass().getSimpleName(),
                                     operation.require(ModelDescriptionConstants.OP).asString(),
-                                    PathAddress.pathAddress(operation.require(ModelDescriptionConstants.OP_ADDR)));
+                                    PathAddress.pathAddress(operation.get(ModelDescriptionConstants.OP_ADDR)));
                         }
                         if (restartRequired) {
                             context.revertReloadRequired();
@@ -134,7 +137,6 @@ public abstract class AbstractWriteAttributeHandler<T> implements OperationStepH
 
         context.completeStep();
     }
-
 
 
     /**
@@ -198,17 +200,27 @@ public abstract class AbstractWriteAttributeHandler<T> implements OperationStepH
         }
     }
 
+    /**
+     * Hook to allow subclasses to validate the model following the application of the new attribute value.
+     * This default implementation does nothing.
+     *
+     * @param context the
+     * @param model the updated model resource
+     * @throws OperationFailedException
+     */
+    protected void validateUpdatedModel(final OperationContext context, final Resource model) throws OperationFailedException {
+        // default impl does nothing
+    }
+
 
     /**
-     * Gets whether a {@link OperationContext.Stage#RUNTIME} handler should be added. This default implementation
-     * returns {@code true} if the {@link OperationContext#getType() context type} is {@link OperationContext.Type#SERVER}
-     * and {@link OperationContext#isBooting() context.isBooting()} returns {@code false}.
+     * Gets whether a {@link OperationContext.Stage#RUNTIME} handler should be added.
      *
      * @param context operation context
      * @return {@code true} if a runtime stage handler should be added; {@code false} otherwise.
      */
     protected boolean requiresRuntime(OperationContext context) {
-        return context.getType() == OperationContext.Type.SERVER && !context.isBooting();
+        return context.isNormalServer() && !context.isBooting();
     }
 
     protected AttributeDefinition getAttributeDefinition(final String attributeName) {

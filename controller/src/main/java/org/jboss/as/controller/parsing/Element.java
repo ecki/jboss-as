@@ -26,7 +26,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * An enumeration of all the recognized XML element local names, by name.
+ * An enumeration of all the recognized core configuration XML element local names, by name.
  *
  * @author <a href="mailto:david.lloyd@redhat.com">David M. Lloyd</a>
  */
@@ -34,7 +34,7 @@ public enum Element {
     // must be first
     UNKNOWN(null),
 
-    // Domain 1.0 elements in alpha order
+    // Domain elements in alpha order
     ADVANCED_FILTER("advanced-filter"),
     AGENT_LIB("agent-lib"),
     AGENT_PATH("agent-path"),
@@ -43,14 +43,15 @@ public enum Element {
     ANY_IPV4_ADDRESS("any-ipv4-address"),
     ANY_IPV6_ADDRESS("any-ipv6-address"),
     AUTHENTICATION("authentication"),
+    AUTHORIZATION("authorization"),
 
+    CLIENT_MAPPING("client-mapping"),
     CONTENT("content"),
 
     DOMAIN("domain"),
     DOMAIN_CONTROLLER("domain-controller"),
     DEPLOYMENT("deployment"),
     DEPLOYMENTS("deployments"),
-    DEPLOYMENT_REPOSITORY("deployment-repository"),
 
     ENVIRONMENT_VARIABLES("environment-variables"),
     EXTENSION("extension"),
@@ -63,13 +64,15 @@ public enum Element {
     HOST("host"),
     HTTP_INTERFACE("http-interface"),
 
-
+    IGNORED_RESOURCE("ignored-resources"),
     INCLUDE("include"),
+    INSTANCE("instance"),
     INET_ADDRESS("inet-address"),
     INTERFACE("interface"),
     INTERFACE_SPECS("interface-specs"),
     INTERFACES("interfaces"),
 
+    JAAS("jaas"),
     JAVA_AGENT("java-agent"),
     JVM("jvm"),
     JVMS("jvms"),
@@ -85,6 +88,7 @@ public enum Element {
     LOOPBACK_ADDRESS("loopback-address"),
 
     MANAGEMENT("management"),
+    MANAGEMENT_CLIENT_CONTENT("management-client-content"),
     MANAGEMENT_INTERFACES("management-interfaces"),
     MULTICAST("multicast"),
 
@@ -99,13 +103,13 @@ public enum Element {
     OUTBOUND_CONNECTIONS("outbound-connections"),
     OUTBOUND_SOCKET_BINDING("outbound-socket-binding"),
 
-
     PASSWORD("password"),
     PATH("path"),
     PATHS("paths"),
-
-    POINT_TO_POINT("point-to-point"),
     PERMGEN("permgen"),
+    PLUG_IN("plug-in"),
+    PLUG_INS("plug-ins"),
+    POINT_TO_POINT("point-to-point"),
     PROFILE("profile"),
     PROFILES("profiles"),
     PROPERTY("property"),
@@ -114,8 +118,8 @@ public enum Element {
 
     REMOTE("remote"),
     REMOTE_DESTINATION("remote-destination"),
+    ROLLOUT_PLANS("rollout-plans"),
 
-    SCANNING("scanning"),
     SECRET("secret"),
     SECURITY_REALM("security-realm"),
     SECURITY_REALMS("security-realms"),
@@ -132,10 +136,11 @@ public enum Element {
     SOCKET_BINDING_GROUPS("socket-binding-groups"),
     SSL("ssl"),
     STACK("stack"),
-    STANDALONE("standalone"),
     SUBNET_MATCH("subnet-match"),
     SUBSYSTEM("subsystem"),
     SYSTEM_PROPERTIES("system-properties"),
+
+    TRUSTSTORE("truststore"),
 
     UP("up"),
     USER("user"),

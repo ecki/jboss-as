@@ -21,6 +21,8 @@
  */
 package org.jboss.as.web;
 
+import static org.jboss.as.web.WebMessages.MESSAGES;
+
 import java.io.IOException;
 import java.lang.reflect.Method;
 import java.net.InetAddress;
@@ -30,8 +32,8 @@ import java.util.concurrent.Executor;
 
 import org.apache.catalina.connector.Connector;
 import org.apache.coyote.ajp.AjpAprProtocol;
+import org.apache.coyote.ajp.AjpProtocol;
 import org.apache.coyote.http11.Http11AprProtocol;
-import org.apache.coyote.http11.Http11Protocol;
 import org.jboss.as.network.ManagedBinding;
 import org.jboss.as.network.SocketBinding;
 import org.jboss.dmr.ModelNode;
@@ -50,7 +52,6 @@ class WebConnectorService implements Service<Connector> {
 
     private volatile String protocol = "HTTP/1.1";
     private volatile String scheme = "http";
-    private final String unmaskedPassword;
 
     private Boolean enableLookups = null;
     private String proxyName = null;
@@ -69,10 +70,9 @@ class WebConnectorService implements Service<Connector> {
     private final InjectedValue<SocketBinding> binding = new InjectedValue<SocketBinding>();
     private final InjectedValue<WebServer> server = new InjectedValue<WebServer>();
 
-    public WebConnectorService(String protocol, String scheme, String unmaskedPassword) {
+    public WebConnectorService(String protocol, String scheme) {
         if(protocol != null) this.protocol = protocol;
         if(scheme != null) this.scheme = scheme;
-        this.unmaskedPassword = unmaskedPassword;
     }
 
     /**
@@ -140,8 +140,8 @@ class WebConnectorService implements Service<Connector> {
                 boolean nativeSSL = false;
                 if (connector.getProtocolHandler() instanceof Http11AprProtocol) {
                     nativeSSL = true;
-                } else if (!(connector.getProtocolHandler() instanceof Http11Protocol)) {
-                    throw new StartException("Non HTTP connectors do not support SSL");
+                } else if ((connector.getProtocolHandler() instanceof AjpProtocol) || (connector.getProtocolHandler() instanceof AjpAprProtocol)) {
+                    throw new StartException(MESSAGES.noSSLWithNonHTTPConnectors());
                 }
                 // Enable SSL
                 try {
@@ -149,14 +149,14 @@ class WebConnectorService implements Service<Connector> {
                     m.invoke(connector.getProtocolHandler(), true);
                 } catch (NoSuchMethodException e) {
                     // No SSL support
-                    throw new StartException(e);
+                    throw new StartException(MESSAGES.failedSSLConfiguration(), e);
                 }
                 if (nativeSSL) {
                     // OpenSSL configuration
                     try {
                         if (ssl.hasDefined(Constants.PASSWORD)) {
                             Method m = connector.getProtocolHandler().getClass().getMethod("setSSLPassword", String.class);
-                            m.invoke(connector.getProtocolHandler(), unmaskedPassword);
+                            m.invoke(connector.getProtocolHandler(), ssl.get(Constants.PASSWORD).asString());
                         }
                         if (ssl.hasDefined(Constants.CERTIFICATE_KEY_FILE)) {
                             Method m = connector.getProtocolHandler().getClass().getMethod("setSSLCertificateKeyFile", String.class);
@@ -191,7 +191,7 @@ class WebConnectorService implements Service<Connector> {
                             m.invoke(connector.getProtocolHandler(), ssl.get(Constants.CA_REVOCATION_URL).asString());
                         }
                    } catch (NoSuchMethodException e) {
-                        throw new StartException(e);
+                       throw new StartException(MESSAGES.failedSSLConfiguration(), e);
                     }
                 } else {
                     // JSSE configuration
@@ -202,7 +202,7 @@ class WebConnectorService implements Service<Connector> {
                         }
                         if (ssl.hasDefined(Constants.PASSWORD)) {
                             Method m = connector.getProtocolHandler().getClass().getMethod("setKeypass", String.class);
-                            m.invoke(connector.getProtocolHandler(), unmaskedPassword);
+                            m.invoke(connector.getProtocolHandler(), ssl.get(Constants.PASSWORD).asString());
                         }
                         if (ssl.hasDefined(Constants.CERTIFICATE_KEY_FILE)) {
                             Method m = connector.getProtocolHandler().getClass().getMethod("setKeystore", String.class);
@@ -253,9 +253,13 @@ class WebConnectorService implements Service<Connector> {
                             Method m = connector.getProtocolHandler().getClass().getMethod("setKeytype", String.class);
                             m.invoke(connector.getProtocolHandler(), ssl.get(Constants.KEYSTORE_TYPE).asString());
                         }
+                        if (ssl.hasDefined(Constants.CA_REVOCATION_URL)) {
+                            Method m = connector.getProtocolHandler().getClass().getMethod("setAttribute", String.class, Object.class);
+                            m.invoke(connector.getProtocolHandler(), "crlFile", ssl.get(Constants.CA_REVOCATION_URL).asString());
+                        }
 
                     } catch (NoSuchMethodException e) {
-                        throw new StartException(e);
+                        throw new StartException(MESSAGES.failedSSLConfiguration(), e);
                     }
                 }
             }
@@ -264,11 +268,13 @@ class WebConnectorService implements Service<Connector> {
             connector.start();
             this.connector = connector;
         } catch (Exception e) {
-            throw new StartException(e);
+            throw new StartException(MESSAGES.connectorStartError(), e);
         }
         // Register the binding after the connector is started
         binding.getSocketBindings().getNamedRegistry().registerBinding(new ConnectorBinding(binding));
     }
+
+
 
     /** {@inheritDoc} */
     public synchronized void stop(StopContext context) {
@@ -291,7 +297,7 @@ class WebConnectorService implements Service<Connector> {
     public synchronized Connector getValue() throws IllegalStateException {
         final Connector connector = this.connector;
         if (connector == null) {
-            throw new IllegalStateException();
+            throw MESSAGES.nullValue();
         }
         return connector;
     }

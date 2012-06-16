@@ -22,6 +22,8 @@
 
 package org.jboss.as.web.security;
 
+import static org.jboss.as.web.WebMessages.MESSAGES;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -49,10 +51,9 @@ import org.jboss.metadata.web.spec.WebResourceCollectionMetaData;
 
 /**
  * A service that creates JACC permissions for a web deployment
- *
- * @author <a href="mailto:mmoyses@redhat.com">Marcus Moyses</a>
  * @author Scott.Stark@jboss.org
  * @author Anil.Saldhana@jboss.org
+ * @author <a href="mailto:mmoyses@redhat.com">Marcus Moyses</a>
  */
 public class WarJaccService extends JaccService<WarMetaData> {
 
@@ -82,7 +83,7 @@ public class WarJaccService extends JaccService<WarMetaData> {
     @Override
     public void createPermissions(WarMetaData metaData, PolicyConfiguration pc) throws PolicyContextException {
         if (context == null) {
-            throw new IllegalStateException("Catalina Context is null while creating JACC permissions");
+            throw MESSAGES.noCatalinaContextForJacc();
         }
         HashMap<String, PatternInfo> patternMap = qualifyURLPatterns(context);
         log.debugf("Qualified url patterns: " + patternMap);
@@ -151,8 +152,8 @@ public class WarJaccService extends JaccService<WarMetaData> {
         // Create the permissions
         for (PatternInfo info : patternMap.values()) {
             String qurl = info.getQualifiedPattern();
-            if (info.isOverriden) {
-                log.debugf("Dropping overriden pattern: " + info);
+            if (info.isOverridden) {
+                log.debugf("Dropping overridden pattern: " + info);
                 continue;
             }
 
@@ -190,8 +191,10 @@ public class WarJaccService extends JaccService<WarMetaData> {
                 }
                 pc.addToRole(role, wrp);
 
+                //there are totally 7 http methods from the jacc spec (See WebResourceCollectionMetaData.ALL_HTTP_METHOD_NAMES)
+                final int NUMBER_OF_HTTP_METHODS = 7;
                 // JACC 1.1: create !(httpmethods) in unchecked perms
-                if (httpMethods != null) {
+                if (httpMethods != null && httpMethods.length != NUMBER_OF_HTTP_METHODS) {
                     WebResourcePermission wrpUnchecked = new WebResourcePermission(info.pattern, "!"
                             + getCommaSeparatedString(httpMethods));
                     pc.addToUncheckedPolicy(wrpUnchecked);
@@ -200,12 +203,15 @@ public class WarJaccService extends JaccService<WarMetaData> {
 
             // Create the unchecked permissions
             String[] missingHttpMethods = info.getMissingMethods();
-            if (missingHttpMethods.length > 0) {
+            int length = missingHttpMethods.length;
+            roles = info.getRoleMethods();
+            if( length > 0 && !roles.hasNext() ){
                 // Create the unchecked permissions WebResourcePermissions
                 WebResourcePermission wrp = new WebResourcePermission(qurl, missingHttpMethods);
                 pc.addToUncheckedPolicy(wrp);
-            } else
+            } else if( !roles.hasNext()) {
                 pc.addToUncheckedPolicy(new WebResourcePermission(qurl, (String) null));
+            }
 
             // SECURITY-63: Missing auth-constraint needs unchecked policy
             if (info.isMissingAuthConstraint) {
@@ -213,9 +219,9 @@ public class WarJaccService extends JaccService<WarMetaData> {
             }
 
             // Create the unchecked permissions WebUserDataPermissions
-            Iterator<Map.Entry<String, Set<String>>> transportContraints = info.getTransportMethods();
-            while (transportContraints.hasNext()) {
-                Map.Entry<String, Set<String>> transportMethods = transportContraints.next();
+            Iterator<Map.Entry<String, Set<String>>> transportConstraints = info.getTransportMethods();
+            while (transportConstraints.hasNext()) {
+                Map.Entry<String, Set<String>> transportMethods = transportConstraints.next();
                 String transport = transportMethods.getKey();
                 Set<String> methods = transportMethods.getValue();
                 httpMethods = new String[methods.size()];
@@ -223,7 +229,7 @@ public class WarJaccService extends JaccService<WarMetaData> {
                 WebUserDataPermission wudp = new WebUserDataPermission(qurl, httpMethods, transport);
                 pc.addToUncheckedPolicy(wudp);
 
-                // If the transport is "NONE", then add an exlusive WebUserDataPermission
+                // If the transport is "NONE", then add an exclusive WebUserDataPermission
                 // with the url pattern and null
                 if ("NONE".equals(transport)) {
                     WebUserDataPermission wudp1 = new WebUserDataPermission(info.pattern, null);
@@ -491,7 +497,7 @@ public class WarJaccService extends JaccService<WarMetaData> {
         /**
          * Does a qualifying pattern match this pattern and make this pattern obsolete?
          */
-        boolean isOverriden;
+        boolean isOverridden;
 
         /**
          * A Security Constraint is missing an <auth-constraint/>
@@ -633,7 +639,7 @@ public class WarJaccService extends JaccService<WarMetaData> {
             if (qualifiers.contains(info) == false) {
                 // See if this pattern is matched by the qualifier
                 if (info.type == PREFIX && info.matches(this))
-                    isOverriden = true;
+                    isOverridden = true;
                 qualifiers.add(info);
             }
         }
@@ -700,8 +706,8 @@ public class WarJaccService extends JaccService<WarMetaData> {
             tmp.append(pattern);
             tmp.append(",type=");
             tmp.append(type);
-            tmp.append(",isOverriden=");
-            tmp.append(isOverriden);
+            tmp.append(",isOverridden=");
+            tmp.append(isOverridden);
             tmp.append(",qualifiers=");
             tmp.append(qualifiers);
             tmp.append("]");

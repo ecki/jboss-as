@@ -21,13 +21,14 @@
  */
 package org.jboss.as.clustering.web;
 
+import org.jboss.marshalling.ClassResolver;
 import org.jboss.metadata.web.jboss.ReplicationConfig;
 
 /**
  * Callback interface to allow the distributed caching layer to invoke upon the local session manager.
  * @author Brian Stansberry
  */
-public interface LocalDistributableSessionManager {
+public interface LocalDistributableSessionManager extends SessionIdFactory {
     /**
      * Gets whether the webapp is configured for passivation.
      * @return <code>true</code> if passivation is enabled
@@ -35,22 +36,10 @@ public interface LocalDistributableSessionManager {
     boolean isPassivationEnabled();
 
     /**
-     * Returns the unique name of this session manager. Typically composed of host name and context name.
-     * @return a unique name
-     */
-    String getName();
-
-    /**
-     * Returns the name of the session manager's engine. The engine name should be the consistent on all nodes.
-     * @return an engine name.
-     */
-    String getEngineName();
-
-    /**
      * Get the classloader able to load application classes.
      * @return the classloader. Will not return <code>null</code>
      */
-    ClassLoader getApplicationClassLoader();
+    ClassResolver getApplicationClassResolver();
 
     /**
      * Gets the web application metadata.

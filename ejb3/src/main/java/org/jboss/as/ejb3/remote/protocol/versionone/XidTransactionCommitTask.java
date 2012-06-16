@@ -22,6 +22,13 @@
 
 package org.jboss.as.ejb3.remote.protocol.versionone;
 
+import com.arjuna.ats.internal.jta.transaction.arjunacore.jca.SubordinateTransaction;
+import com.arjuna.ats.internal.jta.transaction.arjunacore.jca.SubordinationManager;
+import org.jboss.as.ejb3.EjbLogger;
+import org.jboss.as.ejb3.remote.EJBRemoteTransactionsRepository;
+import org.jboss.ejb.client.XidTransactionID;
+import org.jboss.marshalling.MarshallerFactory;
+
 import javax.transaction.HeuristicCommitException;
 import javax.transaction.HeuristicMixedException;
 import javax.transaction.HeuristicRollbackException;
@@ -31,30 +38,17 @@ import javax.transaction.Transaction;
 import javax.transaction.xa.XAException;
 import javax.transaction.xa.Xid;
 
-import com.arjuna.ats.internal.jta.transaction.arjunacore.jca.SubordinateTransaction;
-import com.arjuna.ats.internal.jta.transaction.arjunacore.jca.SubordinationManager;
-import com.arjuna.ats.internal.jta.transaction.jts.TransactionImple;
-import com.arjuna.ats.internal.jts.ControlWrapper;
-import com.arjuna.ats.internal.jts.orbspecific.ControlImple;
-import com.arjuna.ats.internal.jts.orbspecific.coordinator.ArjunaTransactionImple;
-import org.jboss.as.ejb3.remote.EJBRemoteTransactionsRepository;
-import org.jboss.ejb.client.XidTransactionID;
-import org.jboss.logging.Logger;
-import org.jboss.remoting3.Channel;
-
 /**
  * @author Jaikiran Pai
  */
 class XidTransactionCommitTask extends XidTransactionManagementTask {
 
-    private static final Logger logger = Logger.getLogger(XidTransactionCommitTask.class);
-
     private final boolean onePhaseCommit;
 
     XidTransactionCommitTask(final TransactionRequestHandler txRequestHandler, final EJBRemoteTransactionsRepository transactionsRepository,
-                             final XidTransactionID xidTransactionID, final Channel channel,
+                             final MarshallerFactory marshallerFactory, final XidTransactionID xidTransactionID, final ChannelAssociation channelAssociation,
                              final short invocationId, final boolean onePhaseCommit) {
-        super(txRequestHandler, transactionsRepository, xidTransactionID, channel, invocationId);
+        super(txRequestHandler, transactionsRepository, marshallerFactory, xidTransactionID, channelAssociation, invocationId);
         this.onePhaseCommit = onePhaseCommit;
     }
 
@@ -62,6 +56,13 @@ class XidTransactionCommitTask extends XidTransactionManagementTask {
     protected void manageTransaction() throws Throwable {
         // first associate the tx on this thread, by resuming the tx
         final Transaction transaction = this.transactionsRepository.removeTransaction(this.xidTransactionID);
+        if(transaction == null) {
+            if(EjbLogger.EJB3_INVOCATION_LOGGER.isDebugEnabled()) {
+                //this happens if no ejb invocations where made within the TX
+                EjbLogger.EJB3_INVOCATION_LOGGER.debug("Not committing transaction " + this.xidTransactionID + " as is was not found on the server");
+            }
+            return;
+        }
         this.resumeTransaction(transaction);
         // now commit
         final Xid xid = this.xidTransactionID.getXid();
@@ -75,10 +76,6 @@ class XidTransactionCommitTask extends XidTransactionManagementTask {
             }
 
             if (subordinateTransaction.activated()) {
-                // We have a bug in JBoss TS. Till that is fixed, we need this call.
-                // See the comments on the hackJTS method for more details
-                this.hackJTS(subordinateTransaction);
-
                 if (this.onePhaseCommit) {
                     subordinateTransaction.doOnePhaseCommit();
                 } else {
@@ -138,64 +135,10 @@ class XidTransactionCommitTask extends XidTransactionManagementTask {
 
 
         } finally {
-            // disassociate the tx that was asssociated (resumed) on this thread.
+            // disassociate the tx that was associated (resumed) on this thread.
             // This needs to be done explicitly because the SubOrdinationManager isn't responsible
             // for clearing the tx context from the thread
             this.transactionsRepository.getTransactionManager().suspend();
-        }
-    }
-
-    // This is a hack (obviously!) to workaround a bug in JBoss TS which leads to a NullPointerException in
-    // com.arjuna.ats.internal.jts.orbspecific.coordinator.ArjunaTransactionImple.propagationContext() at the
-    // following line (controlHandle is null)
-    // Control currentControl = controlHandle.getControl();
-    //
-    // The bug appears to be in com.arjuna.ats.internal.jts.orbspecific.interposition.ServerControl constructor:
-    // public ServerControl (ServerTransaction stx)
-    // {
-    //  super();
-    //
-    //  _realCoordinator = null;
-    //  _realTerminator = null;
-    //  _isWrapper = false;
-    //
-    // _transactionHandle = stx;
-    // _theUid = stx.get_uid();
-    //
-    // createTransactionHandle();
-    //
-    // addControl();
-    //
-    // }
-    // com.arjuna.ats.internal.jts.orbspecific.ControlImple from which the ServerControl extends
-    // says this (in its protected no-arg constructor which the ServerControl calls above):
-    // /**
-    //  * Protected constructor for inheritance. The derived classes are
-    //  * responsible for setting everything up, including adding the control to
-    //  * the list of controls and assigning the Uid variable.
-    //  */
-    //
-    // So the public ServerControl (ServerTransaction stx) is expected to call _transactionHandle.setControlHandle(this);
-    // in that construct.
-    //
-    // This hack method does that job to workaround that bug
-    private void hackJTS(final SubordinateTransaction subordinateTransaction) {
-        if (subordinateTransaction instanceof TransactionImple) {
-            final TransactionImple txImple = (TransactionImple) subordinateTransaction;
-            final ControlWrapper controlWrapper = txImple.getControlWrapper();
-            if (controlWrapper == null) {
-                return;
-            }
-            final ControlImple controlImple = controlWrapper.getImple();
-            if (controlImple == null) {
-                return;
-            }
-            final ArjunaTransactionImple arjunaTransactionImple = controlImple.getImplHandle();
-            if (arjunaTransactionImple == null) {
-                return;
-            }
-            logger.debug("Applying a JTS hack to setControlHandle " + controlImple + " on subordinate tx " + subordinateTransaction);
-            arjunaTransactionImple.setControlHandle(controlImple);
         }
     }
 }

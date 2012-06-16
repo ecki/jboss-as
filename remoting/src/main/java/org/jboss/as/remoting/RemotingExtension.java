@@ -29,11 +29,14 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SUBSYSTEM;
 import static org.jboss.as.controller.parsing.ParseUtils.duplicateAttribute;
+import static org.jboss.as.controller.parsing.ParseUtils.duplicateNamedElement;
 import static org.jboss.as.controller.parsing.ParseUtils.missingRequired;
 import static org.jboss.as.controller.parsing.ParseUtils.readArrayAttributeElement;
 import static org.jboss.as.controller.parsing.ParseUtils.readBooleanAttributeElement;
 import static org.jboss.as.controller.parsing.ParseUtils.readProperty;
 import static org.jboss.as.controller.parsing.ParseUtils.readStringAttributeElement;
+import static org.jboss.as.controller.parsing.ParseUtils.requireNoAttributes;
+import static org.jboss.as.controller.parsing.ParseUtils.requireNoContent;
 import static org.jboss.as.controller.parsing.ParseUtils.requireNoNamespaceAttribute;
 import static org.jboss.as.controller.parsing.ParseUtils.unexpectedAttribute;
 import static org.jboss.as.controller.parsing.ParseUtils.unexpectedElement;
@@ -57,9 +60,11 @@ import static org.jboss.as.remoting.CommonAttributes.SERVER_AUTH;
 import static org.jboss.as.remoting.CommonAttributes.SOCKET_BINDING;
 import static org.jboss.as.remoting.CommonAttributes.STRENGTH;
 import static org.jboss.as.remoting.CommonAttributes.VALUE;
+import static org.jboss.as.remoting.RemotingMessages.MESSAGES;
 
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Locale;
 
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
@@ -97,34 +102,33 @@ public class RemotingExtension implements Extension {
 
     private static final String RESOURCE_NAME = RemotingExtension.class.getPackage().getName() + ".LocalDescriptions";
 
-    private static final String NODE_NAME_PROPERTY = "jboss.node.name";
-    static final String NODE_NAME;
-    static {
-        NODE_NAME = SecurityActions.getSystemProperty(RemotingExtension.NODE_NAME_PROPERTY);
-    }
+    static final String NODE_NAME_PROPERTY = "jboss.node.name";
 
     static ResourceDescriptionResolver getResourceDescriptionResolver(final String keyPrefix) {
         return new StandardResourceDescriptionResolver(keyPrefix, RESOURCE_NAME, RemotingExtension.class.getClassLoader(), true, false);
     }
 
+    private static final int MANAGEMENT_API_MAJOR_VERSION = 1;
+    private static final int MANAGEMENT_API_MINOR_VERSION = 1;
+
     @Override
     public void initialize(ExtensionContext context) {
 
         // Register the remoting subsystem
-        final SubsystemRegistration registration = context.registerSubsystem(SUBSYSTEM_NAME);
+        final SubsystemRegistration registration = context.registerSubsystem(SUBSYSTEM_NAME, MANAGEMENT_API_MAJOR_VERSION, MANAGEMENT_API_MINOR_VERSION);
         registration.registerXMLElementWriter(RemotingSubsystem11Parser.INSTANCE);
 
-        final ManagementResourceRegistration subsystem = registration.registerSubsystemModel(RemotingSubsystemRootResource.INSTANCE);
+        final ManagementResourceRegistration subsystem = registration.registerSubsystemModel(new RemotingSubsystemRootResource(context.getProcessType()));
         subsystem.registerOperationHandler(DESCRIBE, GenericSubsystemDescribeHandler.INSTANCE, GenericSubsystemDescribeHandler.INSTANCE, false, OperationEntry.EntryType.PRIVATE);
 
         final ManagementResourceRegistration connector = subsystem.registerSubModel(ConnectorResource.INSTANCE);
-        connector.registerSubModel(PropertyResource.INSTANCE);
+        connector.registerSubModel(PropertyResource.INSTANCE_CONNECTOR);
         final ManagementResourceRegistration sasl = connector.registerSubModel(SaslResource.INSTANCE);
         sasl.registerSubModel(SaslPolicyResource.INSTANCE);
-        sasl.registerSubModel(PropertyResource.INSTANCE);
+        sasl.registerSubModel(PropertyResource.INSTANCE_CONNECTOR);
 
         // remote outbound connection
-        subsystem.registerSubModel(RemoteOutboundConnnectionResourceDefinition.INSTANCE);
+        subsystem.registerSubModel(RemoteOutboundConnectionResourceDefinition.INSTANCE);
         // local outbound connection
         subsystem.registerSubModel(LocalOutboundConnectionResourceDefinition.INSTANCE);
         // (generic) outbound connection
@@ -136,8 +140,8 @@ public class RemotingExtension implements Extension {
      */
     @Override
     public void initializeParsers(ExtensionParsingContext context) {
-        context.setSubsystemXmlMapping(Namespace.REMOTING_1_0.getUriString(), RemotingSubsystem10Parser.INSTANCE);
-        context.setSubsystemXmlMapping(Namespace.REMOTING_1_1.getUriString(), RemotingSubsystem11Parser.INSTANCE);
+        context.setSubsystemXmlMapping(SUBSYSTEM_NAME, Namespace.REMOTING_1_0.getUriString(), RemotingSubsystem10Parser.INSTANCE);
+        context.setSubsystemXmlMapping(SUBSYSTEM_NAME, Namespace.REMOTING_1_1.getUriString(), RemotingSubsystem11Parser.INSTANCE);
     }
 
     /**
@@ -156,60 +160,22 @@ public class RemotingExtension implements Extension {
             final ModelNode subsystem = Util.getEmptyOperation(ADD, address);
             list.add(subsystem);
 
-            final int count = reader.getAttributeCount();
-            for (int i = 0; i < count; i++) {
-                requireNoNamespaceAttribute(reader, i);
-                final String value = reader.getAttributeValue(i);
-                final Attribute attribute = Attribute.forName(reader.getAttributeLocalName(i));
-                switch (attribute) {
-                case WORKER_READ_THREADS:
-                    if (subsystem.hasDefined(CommonAttributes.WORKER_READ_THREADS)) {
-                        throw duplicateAttribute(reader, CommonAttributes.WORKER_READ_THREADS);
-                    }
-                    RemotingSubsystemRootResource.WORKER_READ_THREADS.parseAndSetParameter(value, subsystem, reader.getLocation());
-                    break;
-                case WORKER_TASK_CORE_THREADS:
-                    if (subsystem.hasDefined(CommonAttributes.WORKER_TASK_CORE_THREADS)) {
-                        throw duplicateAttribute(reader, CommonAttributes.WORKER_TASK_CORE_THREADS);
-                    }
-                    RemotingSubsystemRootResource.WORKER_TASK_CORE_THREADS.parseAndSetParameter(value, subsystem, reader.getLocation());
-                    break;
-                case WORKER_TASK_KEEPALIVE:
-                    if (subsystem.hasDefined(CommonAttributes.WORKER_TASK_KEEPALIVE)) {
-                        throw duplicateAttribute(reader, CommonAttributes.WORKER_TASK_KEEPALIVE);
-                    }
-                    RemotingSubsystemRootResource.WORKER_TASK_KEEPALIVE.parseAndSetParameter(value, subsystem, reader.getLocation());
-                    break;
-                case WORKER_TASK_LIMIT:
-                    if (subsystem.hasDefined(CommonAttributes.WORKER_TASK_LIMIT)) {
-                        throw duplicateAttribute(reader, CommonAttributes.WORKER_TASK_LIMIT);
-                    }
-                    RemotingSubsystemRootResource.WORKER_TASK_LIMIT.parseAndSetParameter(value, subsystem, reader.getLocation());
-                    break;
-                case WORKER_TASK_MAX_THREADS:
-                    if (subsystem.hasDefined(CommonAttributes.WORKER_TASK_MAX_THREADS)) {
-                        throw duplicateAttribute(reader, CommonAttributes.WORKER_TASK_MAX_THREADS);
-                    }
-                    RemotingSubsystemRootResource.WORKER_TASK_MAX_THREADS.parseAndSetParameter(value, subsystem, reader.getLocation());
-                    break;
-                case WORKER_WRITE_THREADS:
-                    if (subsystem.hasDefined(CommonAttributes.WORKER_WRITE_THREADS)) {
-                        throw duplicateAttribute(reader, CommonAttributes.WORKER_WRITE_THREADS);
-                    }
-                    RemotingSubsystemRootResource.WORKER_WRITE_THREADS.parseAndSetParameter(value, subsystem, reader.getLocation());
-                    break;
-                    default:
-                        throw unexpectedAttribute(reader, i);
-                }
-            }
-
+            requireNoAttributes(reader);
 
             // Handle elements
             while (reader.hasNext() && reader.nextTag() != END_ELEMENT) {
+                boolean doneWorkerThreadPool = false;
                 switch (Namespace.forUri(reader.getNamespaceURI())) {
                     case REMOTING_1_0: {
                         final Element element = Element.forName(reader.getLocalName());
                         switch (element) {
+                            case WORKER_THREAD_POOL:
+                                if (doneWorkerThreadPool) {
+                                    throw duplicateNamedElement(reader, Element.WORKER_THREAD_POOL.getLocalName());
+                                }
+                                doneWorkerThreadPool = true;
+                                parseWorkerThreadPool(reader, subsystem);
+                                break;
                             case CONNECTOR: {
                                 // Add connector updates
                                 parseConnector(reader, address, list);
@@ -227,6 +193,60 @@ public class RemotingExtension implements Extension {
                 }
             }
 
+        }
+
+
+        /**
+         * Adds the worker thread pool attributes to the subysystem add method
+         */
+        void parseWorkerThreadPool(final XMLExtendedStreamReader reader, final ModelNode subsystemAdd) throws XMLStreamException {
+            final int count = reader.getAttributeCount();
+            for (int i = 0; i < count; i++) {
+                requireNoNamespaceAttribute(reader, i);
+                final String value = reader.getAttributeValue(i);
+                final Attribute attribute = Attribute.forName(reader.getAttributeLocalName(i));
+                switch (attribute) {
+                    case WORKER_READ_THREADS:
+                        if (subsystemAdd.hasDefined(CommonAttributes.WORKER_READ_THREADS)) {
+                            throw duplicateAttribute(reader, CommonAttributes.WORKER_READ_THREADS);
+                        }
+                        RemotingSubsystemRootResource.WORKER_READ_THREADS.parseAndSetParameter(value, subsystemAdd, reader);
+                        break;
+                    case WORKER_TASK_CORE_THREADS:
+                        if (subsystemAdd.hasDefined(CommonAttributes.WORKER_TASK_CORE_THREADS)) {
+                            throw duplicateAttribute(reader, CommonAttributes.WORKER_TASK_CORE_THREADS);
+                        }
+                        RemotingSubsystemRootResource.WORKER_TASK_CORE_THREADS.parseAndSetParameter(value, subsystemAdd, reader);
+                        break;
+                    case WORKER_TASK_KEEPALIVE:
+                        if (subsystemAdd.hasDefined(CommonAttributes.WORKER_TASK_KEEPALIVE)) {
+                            throw duplicateAttribute(reader, CommonAttributes.WORKER_TASK_KEEPALIVE);
+                        }
+                        RemotingSubsystemRootResource.WORKER_TASK_KEEPALIVE.parseAndSetParameter(value, subsystemAdd, reader);
+                        break;
+                    case WORKER_TASK_LIMIT:
+                        if (subsystemAdd.hasDefined(CommonAttributes.WORKER_TASK_LIMIT)) {
+                            throw duplicateAttribute(reader, CommonAttributes.WORKER_TASK_LIMIT);
+                        }
+                        RemotingSubsystemRootResource.WORKER_TASK_LIMIT.parseAndSetParameter(value, subsystemAdd, reader);
+                        break;
+                    case WORKER_TASK_MAX_THREADS:
+                        if (subsystemAdd.hasDefined(CommonAttributes.WORKER_TASK_MAX_THREADS)) {
+                            throw duplicateAttribute(reader, CommonAttributes.WORKER_TASK_MAX_THREADS);
+                        }
+                        RemotingSubsystemRootResource.WORKER_TASK_MAX_THREADS.parseAndSetParameter(value, subsystemAdd, reader);
+                        break;
+                    case WORKER_WRITE_THREADS:
+                        if (subsystemAdd.hasDefined(CommonAttributes.WORKER_WRITE_THREADS)) {
+                            throw duplicateAttribute(reader, CommonAttributes.WORKER_WRITE_THREADS);
+                        }
+                        RemotingSubsystemRootResource.WORKER_WRITE_THREADS.parseAndSetParameter(value, subsystemAdd, reader);
+                        break;
+                    default:
+                        throw unexpectedAttribute(reader, i);
+                }
+            }
+            requireNoContent(reader);
         }
 
         void parseConnector(XMLExtendedStreamReader reader, final ModelNode address, final List<ModelNode> list) throws XMLStreamException {
@@ -343,9 +363,9 @@ public class RemotingExtension implements Extension {
                                 String[] qop = readArrayAttributeElement(reader, "value", String.class);
                                 for (String q : qop) {
                                     try {
-                                        saslElement.get(QOP).add(SaslQop.fromString(q).getString().toLowerCase());
+                                        saslElement.get(QOP).add(SaslQop.fromString(q).getString().toLowerCase(Locale.ENGLISH));
                                     } catch (IllegalArgumentException e) {
-                                        throw new IllegalArgumentException("Invalid QOP value: " + q);
+                                        throw MESSAGES.invalidQOPV(q);
                                     }
                                 }
                                 break;
@@ -363,9 +383,9 @@ public class RemotingExtension implements Extension {
                                 String[] strength = readArrayAttributeElement(reader, "value", String.class);
                                 for (String s : strength) {
                                     try {
-                                        saslElement.get(STRENGTH).add(SaslStrength.valueOf(s.toUpperCase()).name().toLowerCase());
+                                        saslElement.get(STRENGTH).add(SaslStrength.valueOf(s.toUpperCase(Locale.ENGLISH)).name().toLowerCase(Locale.ENGLISH));
                                     } catch (IllegalArgumentException e) {
-                                        throw new IllegalArgumentException("Invalid Strength value: " + s);
+                                        throw MESSAGES.invalidStrength(s);
                                     }
                                 }
                                 break;
@@ -457,25 +477,37 @@ public class RemotingExtension implements Extension {
          * {@inheritDoc}
          */
         @Override
-        public void writeContent(XMLExtendedStreamWriter writer, SubsystemMarshallingContext context) throws XMLStreamException {
+        public void writeContent(final XMLExtendedStreamWriter writer, final SubsystemMarshallingContext context) throws XMLStreamException {
             context.startSubsystemElement(Namespace.CURRENT.getUriString(), false);
-            final ModelNode node = context.getModelNode();
+            final ModelNode model = context.getModelNode();
 
-            RemotingSubsystemRootResource.WORKER_READ_THREADS.marshallAsAttribute(node, false, writer);
-            RemotingSubsystemRootResource.WORKER_TASK_CORE_THREADS.marshallAsAttribute(node, false, writer);
-            RemotingSubsystemRootResource.WORKER_TASK_KEEPALIVE.marshallAsAttribute(node, false, writer);
-            RemotingSubsystemRootResource.WORKER_TASK_LIMIT.marshallAsAttribute(node, false, writer);
-            RemotingSubsystemRootResource.WORKER_TASK_MAX_THREADS.marshallAsAttribute(node, false, writer);
-            RemotingSubsystemRootResource.WORKER_WRITE_THREADS.marshallAsAttribute(node, false, writer);
+            writeWorkerThreadPoolIfAttributesSet(writer, model);
 
-            if (node.hasDefined(CONNECTOR)) {
-                final ModelNode connector = node.get(CONNECTOR);
+            if (model.hasDefined(CONNECTOR)) {
+                final ModelNode connector = model.get(CONNECTOR);
                 for (String name : connector.keys()) {
                     writeConnector(writer, connector.require(name), name);
                 }
             }
 
             writer.writeEndElement();
+        }
+
+        private void writeWorkerThreadPoolIfAttributesSet(final XMLExtendedStreamWriter writer, final ModelNode model) throws XMLStreamException {
+            if (model.hasDefined(CommonAttributes.WORKER_READ_THREADS) || model.hasDefined(CommonAttributes.WORKER_TASK_CORE_THREADS) || model.hasDefined(CommonAttributes.WORKER_TASK_KEEPALIVE) ||
+                    model.hasDefined(CommonAttributes.WORKER_TASK_LIMIT) || model.hasDefined(CommonAttributes.WORKER_TASK_MAX_THREADS) || model.hasDefined(CommonAttributes.WORKER_WRITE_THREADS)) {
+
+                    writer.writeStartElement(Element.WORKER_THREAD_POOL.getLocalName());
+
+                    RemotingSubsystemRootResource.WORKER_READ_THREADS.marshallAsAttribute(model, false, writer);
+                    RemotingSubsystemRootResource.WORKER_TASK_CORE_THREADS.marshallAsAttribute(model, false, writer);
+                    RemotingSubsystemRootResource.WORKER_TASK_KEEPALIVE.marshallAsAttribute(model, false, writer);
+                    RemotingSubsystemRootResource.WORKER_TASK_LIMIT.marshallAsAttribute(model, false, writer);
+                    RemotingSubsystemRootResource.WORKER_TASK_MAX_THREADS.marshallAsAttribute(model, false, writer);
+                    RemotingSubsystemRootResource.WORKER_WRITE_THREADS.marshallAsAttribute(model, false, writer);
+
+                    writer.writeEndElement();
+                }
 
         }
 

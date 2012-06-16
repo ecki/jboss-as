@@ -24,6 +24,7 @@ package org.jboss.as.cli.parsing.operation;
 import org.jboss.as.cli.parsing.DefaultParsingState;
 import org.jboss.as.cli.parsing.GlobalCharacterHandlers;
 import org.jboss.as.cli.parsing.OutputTargetState;
+import org.jboss.as.cli.parsing.WordCharacterHandler;
 
 
 /**
@@ -37,8 +38,9 @@ public final class OperationNameState extends DefaultParsingState {
 
     public OperationNameState() {
         super(ID);
-        setEnterHandler(GlobalCharacterHandlers.CONTENT_CHARACTER_HANDLER);
-        setDefaultHandler(GlobalCharacterHandlers.CONTENT_CHARACTER_HANDLER);
+        setIgnoreWhitespaces(true);
+        setEnterHandler(WordCharacterHandler.IGNORE_LB_ESCAPE_ON);
+        setDefaultHandler(WordCharacterHandler.IGNORE_LB_ESCAPE_ON);
         putHandler('(', GlobalCharacterHandlers.LEAVE_STATE_HANDLER);
         putHandler('{', GlobalCharacterHandlers.LEAVE_STATE_HANDLER);
         putHandler(OutputTargetState.OUTPUT_REDIRECT_CHAR, GlobalCharacterHandlers.LEAVE_STATE_HANDLER);

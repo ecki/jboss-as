@@ -23,6 +23,10 @@
 package org.jboss.as.domain.controller;
 
 import org.jboss.as.controller.ProxyController;
+import org.jboss.as.controller.RunningMode;
+import org.jboss.as.controller.transform.Transformers;
+import org.jboss.as.protocol.mgmt.ManagementChannelHandler;
+import org.jboss.as.repository.HostFileRepository;
 import org.jboss.dmr.ModelNode;
 import org.jboss.msc.service.ServiceName;
 
@@ -40,6 +44,13 @@ public interface DomainController {
     ServiceName SERVICE_NAME = ServiceName.JBOSS.append("domain", "controller");
 
     /**
+     * Gets the domain controller's current running mode.
+     *
+     * @return  the running mode
+     */
+    RunningMode getCurrentRunningMode();
+
+    /**
      * Gets the local host controller info.
      *
      * @return the local host info
@@ -47,23 +58,42 @@ public interface DomainController {
      LocalHostControllerInfo getLocalHostInfo();
 
     /**
-     * Registers a Host Controller with this domain controller.
+     * Registers a slave Host Controller with this domain controller.
      *
-     * @param hostControllerClient client the domain controller can use to communicate with the Host Controller.
      *
-     * @throws IllegalArgumentException if there already exists a host controller with the same id as
-     *                                  <code>hostControllerClient</code>
-     * @throws UnsupportedOperationException is the host is not the master domain controller
+     * @param hostName the name of the slave host
+     * @param handler  handler for communications with the host
+     * @param transformers transformation handler for converting resources and operations to forms appropriate for the slave
+     * @param remoteConnectionId long identifying this specific connection to the host, or {@code null} if the host did not provide such an id
+     * @throws SlaveRegistrationException  if there is a problem registering the host
      */
-    void registerRemoteHost(final ProxyController hostControllerClient);
+    void registerRemoteHost(final String hostName, final ManagementChannelHandler handler, final Transformers transformers, Long remoteConnectionId) throws SlaveRegistrationException;
+
+    /**
+     * Check if a Host Controller is already registered with this domain controller.
+     *
+     * @param id the name of the host controller
+     * @return <code>true</code> if there is such a host controller registered, <code>false</code> otherwise
+     */
+    boolean isHostRegistered(String id);
 
     /**
      * Unregisters a previously registered Host Controller.
      *
      * @param id the name of the previously
      *           registered Host Controller
+     * @param remoteConnectionId long identifying the specific connection to the host, or {@code null}. If {@code null}
+     *                           the host's registration will be removed regardless of any remote connection id
+     *                           that was provided at registration. If not {@code null}, the registration will only
+     *                           be removed if the currently registered id matches the given id
      */
-    void unregisterRemoteHost(final String id);
+    void unregisterRemoteHost(final String id, Long remoteConnectionId);
+
+    /**
+     * Asynchronously ping the slave host with the given {@code hostName} to validate its connection.
+     * @param hostName the name of the slave host
+     */
+    void pingRemoteHost(String hostName);
 
     /**
      * Registers a running server in the domain model
@@ -93,7 +123,7 @@ public interface DomainController {
      *
      * @return the file repository
      */
-    FileRepository getLocalFileRepository();
+    HostFileRepository getLocalFileRepository();
 
     /**
      * Gets the file repository backing the master domain controller
@@ -104,10 +134,17 @@ public interface DomainController {
      *          {@link LocalHostControllerInfo#isMasterDomainController()} method would return {@code true}
      *
      */
-    FileRepository getRemoteFileRepository();
+    HostFileRepository getRemoteFileRepository();
 
     /**
      * Stops this host controller
      */
     void stopLocalHost();
+
+    /**
+     * Stop this host controller with a specific exit code.
+     *
+     * @param exitCode the exit code passed to the ProcessController
+     */
+    void stopLocalHost(int exitCode);
 }

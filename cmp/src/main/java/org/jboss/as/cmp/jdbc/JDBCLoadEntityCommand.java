@@ -26,7 +26,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.List;
 import javax.ejb.EJBException;
-import javax.ejb.NoSuchEntityException;
+import static org.jboss.as.cmp.CmpMessages.MESSAGES;
 import org.jboss.as.cmp.jdbc.bridge.JDBCCMPFieldBridge;
 import org.jboss.as.cmp.jdbc.bridge.JDBCEntityBridge;
 import org.jboss.as.cmp.jdbc.bridge.JDBCFieldBridge;
@@ -38,7 +38,7 @@ import org.jboss.logging.Logger;
  * JDBCLoadEntityCommand loads the data for an instance from the table.
  * This command implements specified eager loading. For CMP 2.x, the
  * entity can be configured to only load some of the fields, which is
- * helpful for entitys with lots of data.
+ * helpful for entities with lots of data.
  *
  * @author <a href="mailto:dain@daingroup.com">Dain Sundstrom</a>
  * @author <a href="mailto:on@ibis.odessa.ua">Oleg Nitz</a>
@@ -192,7 +192,7 @@ public final class JDBCLoadEntityCommand {
                     }
                     mainEntityLoaded = true;
                 } else {
-                    // preload entity; load the values into the read ahead cahce
+                    // preload entity; load the values into the read ahead cache
                     loadIter.reset();
                     while (loadIter.hasNext()) {
                         JDBCCMPFieldBridge field = loadIter.next();
@@ -213,7 +213,7 @@ public final class JDBCLoadEntityCommand {
             // did we load the main results
             if (!mainEntityLoaded) {
                 if (failIfNotFound)
-                    throw new NoSuchEntityException("Entity not found: primaryKey=" + ctx.getPrimaryKey());
+                    throw MESSAGES.entityNotFound(ctx.getPrimaryKey());
                 else
                     return false;
             } else
@@ -221,7 +221,7 @@ public final class JDBCLoadEntityCommand {
         } catch (EJBException e) {
             throw e;
         } catch (Exception e) {
-            throw new EJBException("Load failed", e);
+            throw MESSAGES.entityLoadFailed(e);
         } finally {
             JDBCUtil.safeClose(rs);
             JDBCUtil.safeClose(ps);
@@ -233,7 +233,7 @@ public final class JDBCLoadEntityCommand {
         StringBuffer sql = new StringBuffer(250);
         sql.append(SQLUtil.SELECT);
 
-        // if we are loading more then one entity we need to add the primry
+        // if we are loading more then one entity we need to add the primary
         // key to the load fields to match up the results with the correct entity.
         JDBCFieldBridge[] primaryKeyFields = entity.getPrimaryKeyFields();
         if (keyCount > 1) {
@@ -260,7 +260,7 @@ public final class JDBCLoadEntityCommand {
         //
         // column names clause
         StringBuffer columnNamesClause = new StringBuffer(250);
-        // if we are loading more then one entity we need to add the primry
+        // if we are loading more then one entity we need to add the primary
         // key to the load fields to match up the results with the correct
         // entity.
         if (keyCount > 1) {

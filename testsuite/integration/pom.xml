@@ -7,15 +7,15 @@
     <parent>
         <groupId>org.jboss.as</groupId>
         <artifactId>jboss-as-testsuite</artifactId>
-        <version>7.1.0.CR1-SNAPSHOT</version>
+        <version>7.2.0.Alpha1-SNAPSHOT</version>
     </parent>
 
     <groupId>org.jboss.as</groupId>
-    <artifactId>jboss-as-testsuite-integration-agg</artifactId>
+    <artifactId>jboss-as-ts-integ</artifactId>
     <packaging>pom</packaging>
-    <version>7.1.0.CR1-SNAPSHOT</version>
+    <version>7.2.0.Alpha1-SNAPSHOT</version>
 
-    <name>JBoss Application Server Test Suite: Integration Aggregator</name>
+    <name>JBoss Application Server Test Suite: Integration</name>
 
     <properties>
         <!-- Current module's directory. Will automatically pick up sub-module's basedir. -->
@@ -33,17 +33,19 @@
             -Djbossas.project.dir=${jbossas.project.dir}
             -Djboss.dist=${jboss.dist}
         </jvm.args.dirs>
-        
+
         <!-- Used to provide an absolute location for the distribution under test. -->
         <jboss.dist>${jbossas.project.dir}/build/target/jboss-as-${jboss.as.release.version}</jboss.dist>
         <jboss.home>${jboss.dist}</jboss.home>
-        
+
         <!-- Used to provide an absolute location for the XSLT scripts. -->
         <xslt.scripts.dir>${jbossas.ts.integ.dir}/src/test/xslt</xslt.scripts.dir>
+
+        <ts.skipTests>${skipTests}</ts.skipTests>
     </properties>
 
     <profiles>
-        
+
         <!-- Run all tests on -DallTests. -->
         <profile>
             <id>ts.integ.allGroups</id>
@@ -53,6 +55,9 @@
                 <module>basic</module>
                 <module>clust</module>
                 <module>iiop</module>
+                <module>xts</module>
+                <module>multinode</module>
+                <module>manualmode</module>
             </modules>
         </profile>
         <!-- Define ts.integration uber-group. -->
@@ -64,6 +69,9 @@
                 <module>basic</module>
                 <module>clust</module>
                 <module>iiop</module>
+                <module>xts</module>
+                <module>multinode</module>
+                <module>manualmode</module>
             </modules>
         </profile>
 
@@ -103,13 +111,40 @@
             </modules>
         </profile>
 
+        <!-- -Dts.xts -->
+        <profile>
+            <id>ts.integ.group.xts</id>
+            <activation><property><name>ts.xts</name></property></activation>
+            <modules>
+                <module>xts</module>
+            </modules>
+        </profile>
+
+        <!-- -Dts.multinode -->
+        <profile>
+            <id>ts.integ.group.multinode</id>
+            <activation><property><name>ts.multinode</name></property></activation>
+            <modules>
+                <module>multinode</module>
+            </modules>
+        </profile>
+
+        <!-- -Dts.manualmode -->
+        <profile>
+            <id>ts.integ.group.manualmode</id>
+            <activation><property><name>ts.manualmode</name></property></activation>
+            <modules>
+                <module>manualmode</module>
+            </modules>
+        </profile>
+
     </profiles>
-    
+
 
     <build>
         <plugins>
             <!-- General plugin configuration for all integration tests -->
-            
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-help-plugin</artifactId>
@@ -138,46 +173,31 @@
                     </execution>
                 </executions>
             </plugin>
-            
-            
-            <!-- Copy JBoss AS to target/jbossas. -->
+
+
+            <!-- Resources plugin. -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-resources-plugin</artifactId>
                 <executions combine.children="append">
-                    <!-- First, make a copy for this module. -->
+                    <!-- Copy users and roles config from shared resources. -->
                     <execution>
-                        <inherited>false</inherited>
-                        <id>ts.copy-jbossas</id>
+                        <id>ts.config-as.copy-mgmt-users</id>
                         <phase>generate-test-resources</phase>
                         <goals><goal>copy-resources</goal></goals>
-                        <configuration>
-                            <outputDirectory>${basedir}/target/jbossas</outputDirectory>
-                            <overwrite>true</overwrite>
-                            <resources>
-                                <resource>
-                                    <directory>${jboss.home}</directory>
-                                    <!-- Modules and bundles not copied as they are read-only (see Surefire props). -->
-                                    <excludes>
-                                        <exclude>modules/</exclude>
-                                        <exclude>bundles/</exclude>
-                                    </excludes>
-                                </resource>
-                            </resources>
-                        </configuration>
-                    </execution>
-                    <!-- Copy this copy into submodules. -->
-                    <execution>
                         <inherited>true</inherited>
-                        <id>ts.copy-jbossas.groups</id>
-                        <phase>generate-test-resources</phase>
-                        <goals><goal>copy-resources</goal></goals>
                         <configuration>
-                            <outputDirectory>${basedir}/target/jbossas</outputDirectory>
+                            <outputDirectory>${basedir}/target/jbossas/standalone/configuration</outputDirectory>
                             <overwrite>true</overwrite>
                             <resources>
                                 <resource>
-                                    <directory>${basedir}/../target/jbossas</directory>
+                                    <directory>../../shared/src/main/resources</directory>
+                                    <includes><include>*.properties</include></includes>
+                                </resource>
+                                <resource>
+                                    <!-- Add the XTS config to the standalone/config directory, so it will be processed as well -->
+                                    <directory>${basedir}/target/jbossas/docs/examples/configs</directory>
+                                    <includes><include>standalone-xts.xml</include></includes>
                                 </resource>
                             </resources>
                         </configuration>
@@ -191,9 +211,9 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <skipTests>false</skipTests>
+                    <skipTests>${ts.skipTests}</skipTests>
                     <!-- Prevent test and server output appearing in console. -->
-                    <redirectTestOutputToFile>true</redirectTestOutputToFile>
+                    <redirectTestOutputToFile>${testLogToFile}</redirectTestOutputToFile>
                     <enableAssertions>true</enableAssertions>
                     <!--<basedir>${jbossas.ts.integ.dir}</basedir>  <!- - "The base directory of the project being tested." Sets ${basedir}. -->
                     <workingDirectory>${basedir}/target/workdir</workingDirectory> <!-- Work in submodule's own dir. -->
@@ -201,13 +221,13 @@
                     <!-- Forked process timeout -->
                     <forkedProcessTimeoutInSeconds>${surefire.forked.process.timeout}</forkedProcessTimeoutInSeconds>
                     <!-- System properties to forked surefire JVM which runs clients. -->
-                    <argLine>${ip.client.stack}</argLine>
+                    <argLine>${jvm.args.ip.client} ${jvm.args.timeouts}</argLine>
 
                     <!-- System properties passed to test cases -->
                     <systemPropertyVariables combine.children="append">
                         <node0>${node0}</node0>
                         <node1>${node1}</node1>
-                        <udpGroup>${udpGroup}</udpGroup>
+                        <mcast>${mcast}</mcast>
 
                         <jbossas.ts.submodule.dir>${basedir}</jbossas.ts.submodule.dir>
                         <jbossas.ts.integ.dir>${jbossas.ts.integ.dir}</jbossas.ts.integ.dir>
@@ -219,12 +239,39 @@
                             Used in arquillian.xml - arguments for all JBoss AS instances.
                             System properties are duplicated here until ARQ-647 is implemented.
                         -->
-                        <server.jvm.args>${surefire.system.args} ${ip.server.stack} -Dnode0=${node0} -Dnode1=${node1} -DudpGroup=${udpGroup} ${jvm.args.dirs}</server.jvm.args>
+                        <server.jvm.args>${surefire.system.args} ${jvm.args.ip.server} ${jvm.args.jacoco} ${jvm.args.security} ${jvm.args.timeouts} -Dnode0=${node0} -Dnode1=${node1} -Dmcast=${mcast} ${jvm.args.dirs}</server.jvm.args>
                     </systemPropertyVariables>
-                    
+
                 </configuration>
             </plugin>
             
+            <plugin>
+                <groupId>com.google.code.maven-replacer-plugin</groupId>
+                <artifactId>maven-replacer-plugin</artifactId>
+                <version>1.4.1</version>
+                <executions>
+                    <!--<execution> <id>ts.config-client.replace-localhost-properties</id> <phase>verify</phase> <goals><goal>replace</goal></goals> </execution>-->
+                    <execution> <id>ts.fix-logs.ARQ-775</id> <phase>verify</phase> <goals><goal>replace</goal></goals> </execution>
+                </executions>
+                <configuration>
+                    <includes>
+                        <include>target/surefire-reports/**/*-output.txt</include>
+                        <include>target/surefire-reports/**/*.txt</include>
+                    </includes>
+                    <replacements>
+                        <!-- Fix one-letter-per-line. -->
+                        <replacement> <token>^(.)\n(?!..+\n)</token> <value>$1</value> </replacement>
+                        <!-- Fix double newlines. -->
+                        <replacement> <token>\n(?=\n)</token> <value></value> </replacement>
+                    </replacements>
+                   
+                    <regexFlags>
+                        <regexFlag>MULTILINE</regexFlag>
+                    </regexFlags>
+                    <encoding>UTF-8</encoding>
+                </configuration>
+            </plugin>
+
         </plugins>
     </build>
 
@@ -242,12 +289,6 @@
             <version>${project.version}</version>
             <scope>test</scope>
         </dependency>
-        <dependency>
-            <groupId>org.jboss.as</groupId>
-            <artifactId>jboss-as-demos-legacy</artifactId>
-            <version>${project.version}</version>
-            <scope>test</scope>
-        </dependency>
     </dependencies>
-    
+
 </project>

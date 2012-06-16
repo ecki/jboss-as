@@ -22,6 +22,7 @@
 
 package org.jboss.as.messaging;
 
+import static org.jboss.as.controller.client.helpers.MeasurementUnit.NONE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADD;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ALLOWED;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ATTRIBUTES;
@@ -53,6 +54,7 @@ import static org.jboss.as.messaging.CommonAttributes.BROADCAST_GROUP;
 import static org.jboss.as.messaging.CommonAttributes.CLIENT_ID;
 import static org.jboss.as.messaging.CommonAttributes.CLUSTER_CONNECTION;
 import static org.jboss.as.messaging.CommonAttributes.CONNECTION_FACTORY;
+import static org.jboss.as.messaging.CommonAttributes.CONNECTION_FACTORY_TYPE;
 import static org.jboss.as.messaging.CommonAttributes.CONNECTOR;
 import static org.jboss.as.messaging.CommonAttributes.CONNECTOR_SERVICE;
 import static org.jboss.as.messaging.CommonAttributes.CONSUMER_COUNT;
@@ -65,7 +67,6 @@ import static org.jboss.as.messaging.CommonAttributes.DURABLE_MESSAGE_COUNT;
 import static org.jboss.as.messaging.CommonAttributes.DURABLE_SUBSCRIPTION_COUNT;
 import static org.jboss.as.messaging.CommonAttributes.ENTRIES;
 import static org.jboss.as.messaging.CommonAttributes.EXPIRY_ADDRESS;
-import static org.jboss.as.messaging.CommonAttributes.FACTORY_TYPE;
 import static org.jboss.as.messaging.CommonAttributes.FILTER;
 import static org.jboss.as.messaging.CommonAttributes.GROUPING_HANDLER;
 import static org.jboss.as.messaging.CommonAttributes.HA;
@@ -92,7 +93,9 @@ import static org.jboss.as.messaging.CommonAttributes.STARTED;
 import static org.jboss.as.messaging.CommonAttributes.SUBSCRIPTION_COUNT;
 import static org.jboss.as.messaging.CommonAttributes.TEMPORARY;
 import static org.jboss.as.messaging.CommonAttributes.TOPIC_ADDRESS;
+import static org.jboss.as.messaging.CommonAttributes.TOPOLOGY;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.ResourceBundle;
 
@@ -101,6 +104,7 @@ import org.jboss.as.controller.SimpleAttributeDefinition;
 import org.jboss.as.controller.client.helpers.MeasurementUnit;
 import org.jboss.as.controller.descriptions.common.CommonDescriptions;
 import org.jboss.as.messaging.jms.AbstractAddJndiHandler;
+import org.jboss.as.messaging.jms.ConnectionFactoryTypeValidator;
 import org.jboss.as.messaging.jms.JMSServerControlHandler;
 import org.jboss.as.messaging.jms.JMSServices;
 import org.jboss.as.messaging.jms.JMSTopicControlHandler;
@@ -756,19 +760,16 @@ public class MessagingDescriptions {
         final ResourceBundle bundle = getResourceBundle(locale);
 
         final ModelNode node = new ModelNode();
-        node.get(DESCRIPTION).set(bundle.getString("connection-factory"));
+        node.get(DESCRIPTION).set(bundle.getString(CONNECTION_FACTORY));
         addConnectionFactoryProperties(bundle, node, true);
 
         final ModelNode attributes = node.get(ATTRIBUTES);
 
         // Runtime attributes
-        addResourceAttributeDescription(bundle, "connection-factory", attributes, HA.getName(), ModelType.BOOLEAN, false, null);
-        final ModelNode type = addResourceAttributeDescription(bundle, "connection-factory", attributes, FACTORY_TYPE, ModelType.INT, false, null);
-        final ModelNode allowed = type.get(ALLOWED);
-        for (int i = 0; i < 6; i++) {
-            allowed.get(i);
-        }
-        addResourceAttributeDescription(bundle, "connection-factory", attributes, INITIAL_MESSAGE_PACKET_SIZE, ModelType.INT, false, MeasurementUnit.BYTES);
+        addResourceAttributeDescription(bundle, CONNECTION_FACTORY, attributes, HA.getName(), ModelType.BOOLEAN, false, null);
+        CONNECTION_FACTORY_TYPE.addResourceAttributeDescription(bundle, CONNECTION_FACTORY, node);
+
+        addResourceAttributeDescription(bundle, CONNECTION_FACTORY, attributes, INITIAL_MESSAGE_PACKET_SIZE, ModelType.INT, false, MeasurementUnit.BYTES);
 
         node.get(OPERATIONS); // placeholder
 
@@ -782,8 +783,10 @@ public class MessagingDescriptions {
 
         final ModelNode node = new ModelNode();
         node.get(OPERATION_NAME).set(ADD);
-        node.get(DESCRIPTION).set(bundle.getString("connection-factory.add"));
+        node.get(DESCRIPTION).set(bundle.getString(CONNECTION_FACTORY + ".add"));
         addConnectionFactoryProperties(bundle, node, false);
+        CONNECTION_FACTORY_TYPE.addOperationParameterDescription(bundle, CONNECTION_FACTORY, node);
+
         node.get(REPLY_PROPERTIES).setEmptyObject();
 
         return node;
@@ -1033,6 +1036,7 @@ public class MessagingDescriptions {
 
         final ModelNode attrs = root.get(ATTRIBUTES);
         addResourceAttributeDescription(bundle, CLUSTER_CONNECTION, attrs, NODE_ID, ModelType.STRING, false, null);
+        addResourceAttributeDescription(bundle, CLUSTER_CONNECTION, attrs, TOPOLOGY, ModelType.STRING, false, null);
         addResourceAttributeDescription(bundle, CLUSTER_CONNECTION, attrs, STARTED, ModelType.BOOLEAN, false, null);
 
         root.get(OPERATIONS); // placeholder
@@ -1220,6 +1224,8 @@ public class MessagingDescriptions {
             attr.addResourceAttributeDescription(bundle, null, root);
         }
 
+        addResourceAttributeDescription(bundle, "acceptor", root.get(ATTRIBUTES), STARTED, ModelType.BOOLEAN, false, null);
+
         getParamChildrenDescription(bundle, root, "acceptor");
 
         return root;
@@ -1249,6 +1255,8 @@ public class MessagingDescriptions {
         for (AttributeDefinition attr : TransportConfigOperationHandlers.IN_VM) {
             attr.addResourceAttributeDescription(bundle, null, root);
         }
+
+        addResourceAttributeDescription(bundle, "acceptor", root.get(ATTRIBUTES), STARTED, ModelType.BOOLEAN, false, null);
 
         getParamChildrenDescription(bundle, root, "acceptor");
 

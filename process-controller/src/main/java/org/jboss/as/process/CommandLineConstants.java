@@ -88,19 +88,29 @@ public class CommandLineConstants {
     public static final String PROCESS_CONTROLLER_BIND_ADDR = "--pc-address";
 
     /** Port on which the process controller listens */
-    public static final String OLD_PROCESS_CONROLLER_BIND_PORT = "-bind-port";
+    public static final String OLD_PROCESS_CONTROLLER_BIND_PORT = "-bind-port";
     public static final String PROCESS_CONTROLLER_BIND_PORT = "--pc-port";
 
     public static final String SYS_PROP = "-D";
+    public static final String SECURITY_PROP = "-S";
 
     public static final String PUBLIC_BIND_ADDRESS = "-b";
 
     public static final String DEFAULT_MULTICAST_ADDRESS = "-u";
 
+    public static final String ADMIN_ONLY = "--admin-only";
+
+    public static final String MASTER_ADDRESS = "--master-address";
+    public static final String MASTER_PORT = "--master-port";
+
+    public static final String MODULE_PATH = "-mp";
+
     /** Additional class path items, used only by app client*/
     public static final String APPCLIENT_CONFIG = "--appclient-config";
     public static final String SHORT_HOST = "-H";
     public static final String HOST = "--host";
+    public static final String CONNECTION_PROPERTIES = "--ejb-client-properties";
+
 
     private CommandLineConstants() {
     }

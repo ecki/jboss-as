@@ -27,6 +27,8 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OPERATION_HEADERS;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RUNNING_SERVER;
+import static org.jboss.as.domain.controller.DomainControllerLogger.HOST_CONTROLLER_LOGGER;
+import static org.jboss.as.domain.controller.DomainControllerMessages.MESSAGES;
 
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -38,8 +40,9 @@ import org.jboss.as.controller.PathAddress;
 import org.jboss.as.controller.ProxyController;
 import org.jboss.as.controller.registry.ImmutableManagementResourceRegistration;
 import org.jboss.as.domain.controller.LocalHostControllerInfo;
+import org.jboss.as.host.controller.ignored.IgnoredDomainResourceRegistry;
+import org.jboss.as.repository.ContentRepository;
 import org.jboss.dmr.ModelNode;
-import org.jboss.logging.Logger;
 
 /**
  * Initial step handler for a {@link org.jboss.as.controller.ModelController} that is the model controller for a host controller.
@@ -50,38 +53,30 @@ public class PrepareStepHandler  implements OperationStepHandler {
 
     public static final String EXECUTE_FOR_COORDINATOR = "execute-for-coordinator";
 
-    static final Logger log = Logger.getLogger("org.jboss.as.host.controller");
-
-    private static boolean trace = false;
-
-    public static boolean isTraceEnabled() {
-        return trace;
-    }
-
     private final LocalHostControllerInfo localHostControllerInfo;
     private final OperationCoordinatorStepHandler coordinatorHandler;
     private final OperationSlaveStepHandler slaveHandler;
 
     public PrepareStepHandler(final LocalHostControllerInfo localHostControllerInfo,
+                              final ContentRepository contentRepository,
                               final Map<String, ProxyController> hostProxies,
-                              final Map<String, ProxyController> serverProxies) {
+                              final Map<String, ProxyController> serverProxies,
+                              final IgnoredDomainResourceRegistry ignoredDomainResourceRegistry) {
         this.localHostControllerInfo = localHostControllerInfo;
-        this.slaveHandler = new OperationSlaveStepHandler(localHostControllerInfo, serverProxies);
-        this.coordinatorHandler = new OperationCoordinatorStepHandler(localHostControllerInfo, hostProxies, serverProxies, slaveHandler);
+        this.slaveHandler = new OperationSlaveStepHandler(localHostControllerInfo, serverProxies, ignoredDomainResourceRegistry);
+        this.coordinatorHandler = new OperationCoordinatorStepHandler(localHostControllerInfo, contentRepository, hostProxies, serverProxies, slaveHandler);
     }
 
     @Override
     public void execute(OperationContext context, ModelNode operation) throws OperationFailedException {
 
-        trace = log.isTraceEnabled();
-
         if (context.isBooting()) {
             executeDirect(context, operation);
-        }
-        else if (operation.hasDefined(OPERATION_HEADERS)
+        } else if (operation.hasDefined(OPERATION_HEADERS)
                 && operation.get(OPERATION_HEADERS).hasDefined(EXECUTE_FOR_COORDINATOR)
                 && operation.get(OPERATION_HEADERS).get(EXECUTE_FOR_COORDINATOR).asBoolean()) {
             // Coordinator wants us to execute locally and send result including the steps needed for execution on the servers
+            // TODO verify this is actually the master requesting this
             slaveHandler.execute(context, operation);
         } else if (isServerOperation(operation)) {
             // Pass direct requests for the server through whether they come from the master or not
@@ -107,11 +102,11 @@ public class PrepareStepHandler  implements OperationStepHandler {
      * Directly handles the op in the standard way the default prepare step handler would
      * @param context the operation execution context
      * @param operation the operation
-     * @throws OperationFailedException
+     * @throws OperationFailedException if there is no handler registered for the operation
      */
     private void executeDirect(OperationContext context, ModelNode operation) throws OperationFailedException {
-        if (trace) {
-            log.trace(getClass().getSimpleName() + " executing direct");
+        if (HOST_CONTROLLER_LOGGER.isTraceEnabled()) {
+            HOST_CONTROLLER_LOGGER.tracef("%s executing direct", getClass().getSimpleName());
         }
         final String operationName =  operation.require(OP).asString();
         OperationStepHandler stepHandler = null;
@@ -122,7 +117,7 @@ public class PrepareStepHandler  implements OperationStepHandler {
         if(stepHandler != null) {
             context.addStep(stepHandler, OperationContext.Stage.MODEL);
         } else {
-            context.getFailureDescription().set(String.format("No handler for operation %s at address %s", operationName, PathAddress.pathAddress(operation.get(OP_ADDR))));
+            context.getFailureDescription().set(MESSAGES.noHandlerForOperation(operationName, PathAddress.pathAddress(operation.get(OP_ADDR))));
         }
         context.completeStep();
     }

@@ -21,6 +21,11 @@
  */
 package org.jboss.as.appclient.subsystem;
 
+import java.util.List;
+
+import javax.xml.stream.XMLStreamConstants;
+import javax.xml.stream.XMLStreamException;
+
 import org.jboss.as.controller.Extension;
 import org.jboss.as.controller.ExtensionContext;
 import org.jboss.as.controller.SubsystemRegistration;
@@ -34,10 +39,6 @@ import org.jboss.staxmapper.XMLElementWriter;
 import org.jboss.staxmapper.XMLExtendedStreamReader;
 import org.jboss.staxmapper.XMLExtendedStreamWriter;
 
-import javax.xml.stream.XMLStreamConstants;
-import javax.xml.stream.XMLStreamException;
-import java.util.List;
-
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADD;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
@@ -50,14 +51,13 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SUB
  */
 public class AppClientExtension implements Extension {
 
-
     public static final String NAMESPACE_1_0 = "urn:jboss:domain:appclient:1.0";
 
     private static final ApplicationClientSubsystemParser parser = new ApplicationClientSubsystemParser();
 
     @Override
     public void initialize(final ExtensionContext context) {
-        final SubsystemRegistration subsystem = context.registerSubsystem(Constants.SUBSYSTEM_NAME);
+        final SubsystemRegistration subsystem = context.registerSubsystem(Constants.SUBSYSTEM_NAME, 1, 0);
         final ManagementResourceRegistration subsystemRegistration = subsystem.registerSubsystemModel(AppClientSubsystemProviders.SUBSYSTEM);
 
         // register the operations
@@ -68,7 +68,7 @@ public class AppClientExtension implements Extension {
 
     @Override
     public void initializeParsers(final ExtensionParsingContext context) {
-        context.setSubsystemXmlMapping(AppClientExtension.NAMESPACE_1_0, parser);
+        context.setSubsystemXmlMapping(Constants.SUBSYSTEM_NAME, AppClientExtension.NAMESPACE_1_0, parser);
     }
 
 

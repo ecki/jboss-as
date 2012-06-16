@@ -24,6 +24,10 @@
 
 <module xmlns="urn:jboss:module:1.1" name="org.jboss.as.weld">
 
+    <properties>
+        <property name="jboss.api" value="private"/>
+    </properties>
+
     <resources>
         <!-- Insert resources here -->
     </resources>
@@ -57,8 +61,6 @@
         <module name="org.jboss.as.web"/>
         <module name="org.jboss.ejb-client"/>
         <module name="org.jboss.ejb3"/>
-        <module name="org.jboss.interceptor"/>
-        <module name="org.jboss.interceptor.spi"/>
         <module name="org.jboss.invocation"/>
         <module name="org.jboss.logging"/>
         <module name="org.jboss.metadata"/>

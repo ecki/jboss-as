@@ -25,6 +25,7 @@ package org.jboss.as.controller;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 
+import org.jboss.as.controller.client.OperationAttachments;
 import org.jboss.as.controller.client.OperationMessageHandler;
 import org.jboss.as.controller.descriptions.DescriptionProvider;
 import org.jboss.as.controller.persistence.ConfigurationPersistenceException;
@@ -94,7 +95,8 @@ public abstract class AbstractControllerService implements Service<ModelControll
         }
     }
 
-    private final OperationContext.Type controllerType;
+    private final ProcessType processType;
+    private final RunningModeControl runningModeControl;
     private final DescriptionProvider rootDescriptionProvider;
     private final ControlledProcessState processState;
     private final OperationStepHandler prepareStep;
@@ -106,49 +108,20 @@ public abstract class AbstractControllerService implements Service<ModelControll
     /**
      * Construct a new instance.
      *
-     * @param controllerType          the controller type for the new controller
-     * @param processState            the controlled process state
-     * @param rootDescriptionProvider the root description provider
-     * @param prepareStep             the prepare step to prepend to operation execution
-     */
-    protected AbstractControllerService(final OperationContext.Type controllerType,
-                                        final ControlledProcessState processState,
-                                        final DescriptionProvider rootDescriptionProvider,
-                                        final OperationStepHandler prepareStep) {
-        this(controllerType, null, processState, rootDescriptionProvider, prepareStep, null);
-    }
-
-    /**
-     * Construct a new instance.
-     *
-     * @param controllerType          the controller type for the new controller
-     * @param processState            the controlled process state
-     * @param rootDescriptionProvider the root description provider
-     * @param prepareStep             the prepare step to prepend to operation execution
-     * @param expressionResolver      the expression resolver
-     */
-    protected AbstractControllerService(final OperationContext.Type controllerType,
-                                        final ControlledProcessState processState,
-                                        final DescriptionProvider rootDescriptionProvider,
-                                        final OperationStepHandler prepareStep,
-                                        final ExpressionResolver expressionResolver) {
-        this(controllerType, null, processState, rootDescriptionProvider, prepareStep, expressionResolver);
-    }
-
-    /**
-     * Construct a new instance.
-     *
-     * @param controllerType          the controller type for the new controller
+     * @param processType             the type of process being controlled
+     * @param runningModeControl      the controller of the process' running mode
      * @param configurationPersister  the configuration persister
      * @param processState            the controlled process state
      * @param rootDescriptionProvider the root description provider
      * @param prepareStep             the prepare step to prepend to operation execution
      * @param expressionResolver      the expression resolver
      */
-    protected AbstractControllerService(final OperationContext.Type controllerType, final ConfigurationPersister configurationPersister,
+    protected AbstractControllerService(final ProcessType processType, final RunningModeControl runningModeControl,
+                                        final ConfigurationPersister configurationPersister,
                                         final ControlledProcessState processState, final DescriptionProvider rootDescriptionProvider,
                                         final OperationStepHandler prepareStep, final ExpressionResolver expressionResolver) {
-        this.controllerType = controllerType;
+        this.processType = processType;
+        this.runningModeControl = runningModeControl;
         this.configurationPersister = configurationPersister;
         this.rootDescriptionProvider = rootDescriptionProvider;
         this.processState = processState;
@@ -170,7 +143,7 @@ public abstract class AbstractControllerService implements Service<ModelControll
         final ModelControllerImpl controller = new ModelControllerImpl(container, target,
                 ManagementResourceRegistration.Factory.create(rootDescriptionProvider),
                 new ContainerStateMonitor(container, serviceController),
-                configurationPersister, controllerType, prepareStep,
+                configurationPersister, processType, runningModeControl, prepareStep,
                 processState, executorService, expressionResolver);
         initModel(controller.getRootResource(), controller.getRootRegistration());
         this.controller = controller;
@@ -185,8 +158,6 @@ public abstract class AbstractControllerService implements Service<ModelControll
                                 return target;
                             }
                         });
-                    } catch (ConfigurationPersistenceException e) {
-                        throw new RuntimeException(e);
                     } finally {
                         processState.setRunning();
                     }
@@ -212,12 +183,16 @@ public abstract class AbstractControllerService implements Service<ModelControll
      *          if the configuration failed to be loaded
      */
     protected void boot(final BootContext context) throws ConfigurationPersistenceException {
-        boot(configurationPersister.load());
+        boot(configurationPersister.load(), false);
         finishBoot();
     }
 
-    protected void boot(List<ModelNode> bootOperations) throws ConfigurationPersistenceException {
-        controller.boot(bootOperations, OperationMessageHandler.logging, ModelController.OperationTransactionControl.COMMIT);
+    protected boolean boot(List<ModelNode> bootOperations, boolean rollbackOnRuntimeFailure) throws ConfigurationPersistenceException {
+        return controller.boot(bootOperations, OperationMessageHandler.logging, ModelController.OperationTransactionControl.COMMIT, rollbackOnRuntimeFailure);
+    }
+
+    protected ModelNode internalExecute(final ModelNode operation, final OperationMessageHandler handler, final ModelController.OperationTransactionControl control, final OperationAttachments attachments, final OperationStepHandler prepareStep) {
+        return controller.internalExecute(operation, handler, control, attachments, prepareStep);
     }
 
     protected void finishBoot() throws ConfigurationPersistenceException {

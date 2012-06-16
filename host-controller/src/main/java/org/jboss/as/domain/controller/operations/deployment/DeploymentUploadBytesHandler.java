@@ -24,7 +24,7 @@ import org.jboss.as.controller.descriptions.DescriptionProvider;
 import org.jboss.as.controller.descriptions.common.DeploymentDescription;
 import org.jboss.as.controller.operations.validation.ModelTypeValidator;
 import org.jboss.as.controller.operations.validation.ParametersValidator;
-import org.jboss.as.server.deployment.repository.api.ContentRepository;
+import org.jboss.as.repository.ContentRepository;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.ModelType;
 
@@ -48,6 +48,16 @@ public class DeploymentUploadBytesHandler
 
     private final ParametersValidator bytesValidator = new ParametersValidator();
 
+    /** Constructor for a slave Host Controller */
+    public DeploymentUploadBytesHandler() {
+        this(null);
+    }
+
+    /**
+     * Constructor for a master Host Controller
+     *
+     * @param repository the master content repository. If {@code null} this handler will function as a slave handler would.
+     */
     public DeploymentUploadBytesHandler(final ContentRepository repository) {
         super(repository);
         this.bytesValidator.registerValidator(BYTES, new ModelTypeValidator(ModelType.BYTES));

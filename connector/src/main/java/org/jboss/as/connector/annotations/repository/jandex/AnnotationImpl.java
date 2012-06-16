@@ -29,7 +29,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import static org.jboss.as.connector.ConnectorMessages.MESSAGES;
+import static org.jboss.as.connector.logging.ConnectorMessages.MESSAGES;
 
 /**
  *
@@ -132,7 +132,7 @@ public class AnnotationImpl implements Annotation {
                        clazz = clazz.getSuperclass();
                     }
                 }
-            } else { // onclass
+            } else { // onClass
                 Class<?> clazz = cl.loadClass(className);
                 return clazz.getAnnotation(annotationClass);
             }

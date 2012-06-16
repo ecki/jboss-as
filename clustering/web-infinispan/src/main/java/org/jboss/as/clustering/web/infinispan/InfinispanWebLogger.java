@@ -22,17 +22,16 @@
 
 package org.jboss.as.clustering.web.infinispan;
 
+import static org.jboss.logging.Logger.Level.INFO;
+import static org.jboss.logging.Logger.Level.WARN;
+
 import org.infinispan.remoting.transport.Address;
-import org.jboss.as.clustering.ClusteringLogger;
+import org.jboss.logging.BasicLogger;
 import org.jboss.logging.Cause;
 import org.jboss.logging.LogMessage;
 import org.jboss.logging.Logger;
 import org.jboss.logging.Message;
 import org.jboss.logging.MessageLogger;
-
-import static org.jboss.logging.Logger.Level.DEBUG;
-import static org.jboss.logging.Logger.Level.INFO;
-import static org.jboss.logging.Logger.Level.WARN;
 
 /**
  * Date: 29.08.2011
@@ -40,7 +39,8 @@ import static org.jboss.logging.Logger.Level.WARN;
  * @author <a href="mailto:jperkins@redhat.com">James R. Perkins</a>
  */
 @MessageLogger(projectCode = "JBAS")
-interface InfinispanWebLogger extends ClusteringLogger {
+interface InfinispanWebLogger extends BasicLogger {
+    String ROOT_LOGGER_CATEGORY = InfinispanWebLogger.class.getPackage().getName();
 
     /**
      * A root logger with the clustering default category.
@@ -72,18 +72,8 @@ interface InfinispanWebLogger extends ClusteringLogger {
      * @param message   the error message.
      */
     @LogMessage(level = WARN)
-    @Message(id = 10322, value = "Problem accessing session [%s]: %s")
-    void errorAccessingSession(String sessionId, String message);
-
-    /**
-     * Logs a debug message indicating there was a problem accessing the session.
-     *
-     * @param cause     the cause of the error.
-     * @param sessionId the session id.
-     * @param message   the error message.
-     */
-    @LogMessage(level = DEBUG)
-    void errorAccessingSession(@Cause Throwable cause, String sessionId, String message);
+    @Message(id = 10322, value = "Failed to load session %s")
+    void sessionLoadFailed(@Cause Throwable cause, String sessionId);
 
     /**
      * Logs an informational message indicating a stale JVM route entry was removed from the web session on behalf of
@@ -115,5 +105,4 @@ interface InfinispanWebLogger extends ClusteringLogger {
     @LogMessage(level = WARN)
     @Message(id = 10325, value = "Possible concurrency problem: Replicated version id %d is less than or equal to in-memory version for session %s")
     void versionIdMismatch(int versionId, String sessionId);
-
 }

@@ -22,6 +22,10 @@
 
 package org.jboss.as.test.integration.osgi.xservice;
 
+import java.io.InputStream;
+
+import javax.inject.Inject;
+
 import org.jboss.arquillian.container.test.api.Deployer;
 import org.jboss.arquillian.container.test.api.Deployment;
 import org.jboss.arquillian.junit.Arquillian;
@@ -30,22 +34,16 @@ import org.jboss.as.test.integration.osgi.xservice.api.Echo;
 import org.jboss.as.test.integration.osgi.xservice.module.ClientModuleOneActivator;
 import org.jboss.as.test.integration.osgi.xservice.module.EchoService;
 import org.jboss.as.test.integration.osgi.xservice.module.TargetModuleActivator;
-import org.jboss.logging.Logger;
-import org.jboss.modules.Module;
 import org.jboss.msc.service.ServiceActivator;
 import org.jboss.msc.service.ServiceContainer;
 import org.jboss.msc.service.ServiceController.State;
 import org.jboss.msc.service.ServiceName;
-import org.jboss.osgi.testing.ManifestBuilder;
-import org.jboss.osgi.testing.OSGiManifestBuilder;
+import org.jboss.osgi.spi.ManifestBuilder;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
 import org.jboss.shrinkwrap.api.asset.Asset;
 import org.jboss.shrinkwrap.api.spec.JavaArchive;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-
-import javax.inject.Inject;
-import java.io.InputStream;
 
 /**
  * A test that shows how a module can access another module's service.
@@ -63,15 +61,6 @@ public class ModuleAccessesModuleServiceTestCase extends AbstractXServiceTestCas
     public static JavaArchive createdeployment() {
         final JavaArchive archive = ShrinkWrap.create(JavaArchive.class, "xservice-module-access");
         archive.addClasses(AbstractXServiceTestCase.class);
-        archive.setManifest(new Asset() {
-            public InputStream openStream() {
-                OSGiManifestBuilder builder = OSGiManifestBuilder.newInstance();
-                builder.addBundleSymbolicName(archive.getName());
-                builder.addBundleManifestVersion(2);
-                builder.addImportPackages(Logger.class, Module.class);
-                return builder.openStream();
-            }
-        });
         return archive;
     }
 
@@ -81,11 +70,6 @@ public class ModuleAccessesModuleServiceTestCase extends AbstractXServiceTestCas
     @ArquillianResource
     public Deployer deployer;
 
-    @Override
-    ServiceContainer getServiceContainer() {
-        return serviceContainer;
-    }
-
     @Test
     public void moduleInvokesModuleService() throws Exception {
         // Deploy the module which contains the target service
@@ -93,7 +77,7 @@ public class ModuleAccessesModuleServiceTestCase extends AbstractXServiceTestCas
         try {
             // Check that the target service is up
             ServiceName targetService = ServiceName.parse("jboss.osgi.example.target.service");
-            assertServiceState(targetService, State.UP, 5000);
+            assertServiceState(serviceContainer, targetService, State.UP, 5000);
 
             // Install the client module
             deployer.deploy(CLIENT_MODULE_NAME);
@@ -101,7 +85,7 @@ public class ModuleAccessesModuleServiceTestCase extends AbstractXServiceTestCas
             {
                 // Check that the client service is up
                 ServiceName clientService = ServiceName.parse("jboss.osgi.example.invoker.service");
-                assertServiceState(clientService, State.UP, 5000);
+                assertServiceState(serviceContainer, clientService, State.UP, 5000);
             }
             finally {
                 // Undeploy the client module
@@ -117,8 +101,7 @@ public class ModuleAccessesModuleServiceTestCase extends AbstractXServiceTestCas
     public static JavaArchive getClientModuleArchive() {
         final JavaArchive archive = ShrinkWrap.create(JavaArchive.class, CLIENT_MODULE_NAME);
         archive.addClasses(ClientModuleOneActivator.class);
-        String activatorPath = "META-INF/services/" + ServiceActivator.class.getName();
-        archive.addAsResource("osgi/xservice/client-module-one/" + activatorPath, activatorPath);
+        archive.addAsServiceProvider(ServiceActivator.class, ClientModuleOneActivator.class);
         archive.setManifest(new Asset() {
             public InputStream openStream() {
                 ManifestBuilder builder = ManifestBuilder.newInstance();
@@ -133,8 +116,7 @@ public class ModuleAccessesModuleServiceTestCase extends AbstractXServiceTestCas
     public static JavaArchive getTargetModuleArchive() {
         final JavaArchive archive = ShrinkWrap.create(JavaArchive.class, TARGET_MODULE_NAME);
         archive.addClasses(Echo.class, EchoService.class, TargetModuleActivator.class);
-        String activatorPath = "META-INF/services/" + ServiceActivator.class.getName();
-        archive.addAsResource("osgi/xservice/target-module/" + activatorPath, activatorPath);
+        archive.addAsServiceProvider(ServiceActivator.class, TargetModuleActivator.class);
         archive.setManifest(new Asset() {
             public InputStream openStream() {
                 ManifestBuilder builder = ManifestBuilder.newInstance();

@@ -5,8 +5,8 @@
 # chkconfig: - 80 20
 # description: JBoss AS Standalone
 # processname: standalone
-# pidfile: /var/run/jboss/jboss-as-standalone.pid
-# config: /etc/jboss/jboss-as.conf
+# pidfile: /var/run/jboss-as/jboss-as-standalone.pid
+# config: /etc/jboss-as/jboss-as.conf
 
 # Source function library.
 . /etc/init.d/functions
@@ -17,7 +17,7 @@ export JAVA_HOME
 
 # Load JBoss AS init.d configuration.
 if [ -z "$JBOSS_CONF" ]; then
-  JBOSS_CONF="/etc/jboss/jboss-as.conf"
+  JBOSS_CONF="/etc/jboss-as/jboss-as.conf"
 fi
 
 [ -r "$JBOSS_CONF" ] && . "${JBOSS_CONF}"
@@ -25,12 +25,12 @@ fi
 # Set defaults.
 
 if [ -z "$JBOSS_HOME" ]; then
-  JBOSS_HOME=/opt/jboss-as
+  JBOSS_HOME=/usr/share/jboss-as
 fi
 export JBOSS_HOME
 
 if [ -z "$JBOSS_PIDFILE" ]; then
-  JBOSS_PIDFILE=/var/run/jboss/jboss-as-standalone.pid
+  JBOSS_PIDFILE=/var/run/jboss-as/jboss-as-standalone.pid
 fi
 export JBOSS_PIDFILE
 
@@ -46,6 +46,10 @@ if [ -z "$SHUTDOWN_WAIT" ]; then
   SHUTDOWN_WAIT=30
 fi
 
+if [ -z "$JBOSS_CONFIG" ]; then
+  JBOSS_CONFIG=standalone.xml
+fi
+
 JBOSS_SCRIPT=$JBOSS_HOME/bin/standalone.sh
 
 prog='jboss-as'
@@ -53,7 +57,7 @@ prog='jboss-as'
 CMD_PREFIX=''
 
 if [ ! -z "$JBOSS_USER" ]; then
-  if [ -x /etc/rc.d/init.d/functions ]; then
+  if [ -r /etc/rc.d/init.d/functions ]; then
     CMD_PREFIX="daemon --user $JBOSS_USER"
   else
     CMD_PREFIX="su - $JBOSS_USER -c"
@@ -82,10 +86,10 @@ start() {
   #$CMD_PREFIX JBOSS_PIDFILE=$JBOSS_PIDFILE $JBOSS_SCRIPT &
 
   if [ ! -z "$JBOSS_USER" ]; then
-    if [ -x /etc/rc.d/init.d/functions ]; then
-      daemon --user $JBOSS_USER LAUNCH_JBOSS_IN_BACKGROUND=1 JBOSS_PIDFILE=$JBOSS_PIDFILE $JBOSS_SCRIPT 2>&1 > $JBOSS_CONSOLE_LOG &
+    if [ -r /etc/rc.d/init.d/functions ]; then
+      daemon --user $JBOSS_USER LAUNCH_JBOSS_IN_BACKGROUND=1 JBOSS_PIDFILE=$JBOSS_PIDFILE $JBOSS_SCRIPT -c $JBOSS_CONFIG 2>&1 > $JBOSS_CONSOLE_LOG &
     else
-      su - $JBOSS_USER -c "LAUNCH_JBOSS_IN_BACKGROUND=1 JBOSS_PIDFILE=$JBOSS_PIDFILE $JBOSS_SCRIPT" 2>&1 > $JBOSS_CONSOLE_LOG &
+      su - $JBOSS_USER -c "LAUNCH_JBOSS_IN_BACKGROUND=1 JBOSS_PIDFILE=$JBOSS_PIDFILE $JBOSS_SCRIPT -c $JBOSS_CONFIG" 2>&1 > $JBOSS_CONSOLE_LOG &
     fi
   fi
 
@@ -140,9 +144,13 @@ status() {
     if [ `ps --pid $ppid 2> /dev/null | grep -c $ppid 2> /dev/null` -eq '1' ]; then
       echo "$prog is running (pid $ppid)"
       return 0
+    else
+      echo "$prog dead but pid file exists"
+      return 1
     fi
   fi
   echo "$prog is not running"
+  return 3
 }
 
 case "$1" in

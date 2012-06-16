@@ -21,7 +21,8 @@
  */
 package org.jboss.as.web;
 
-import java.io.File;
+import static org.jboss.as.web.WebMessages.MESSAGES;
+
 import java.lang.reflect.InvocationTargetException;
 
 import javax.naming.NamingException;
@@ -34,9 +35,9 @@ import org.apache.catalina.Wrapper;
 import org.apache.catalina.core.StandardContext;
 import org.apache.catalina.startup.ContextConfig;
 import org.apache.tomcat.InstanceManager;
+import org.jboss.as.controller.services.path.PathManager;
 import org.jboss.as.server.mgmt.domain.HttpManagement;
 import org.jboss.as.web.deployment.WebCtxLoader;
-import org.jboss.logging.Logger;
 import org.jboss.msc.inject.Injector;
 import org.jboss.msc.service.Service;
 import org.jboss.msc.service.StartContext;
@@ -52,14 +53,16 @@ import org.jboss.msc.value.InjectedValue;
  */
 class WelcomeContextService implements Service<Context> {
 
-    private static final Logger log = Logger.getLogger("org.jboss.web");
     private final StandardContext context;
-    private final InjectedValue<String> pathInjector = new InjectedValue<String>();
+    private final InjectedValue<PathManager> pathManagerInjector = new InjectedValue<PathManager>();
     private final InjectedValue<VirtualHost> hostInjector = new InjectedValue<VirtualHost>();
     private final InjectedValue<HttpManagement> httpManagementInjector = new InjectedValue<HttpManagement>();
+    private final String homeDirPathName;
+    private PathManager.Callback.Handle callbackHandle;
 
-    public WelcomeContextService() {
+    public WelcomeContextService(final String homeDirPathName) {
         this.context = new StandardContext();
+        this.homeDirPathName = homeDirPathName;
     }
 
     /** {@inheritDoc} */
@@ -68,7 +71,8 @@ class WelcomeContextService implements Service<Context> {
             try {
                 context.setPath("");
                 context.addLifecycleListener(new ContextConfig());
-                context.setDocBase(pathInjector.getValue() + File.separatorChar + "welcome-content");
+                context.setDocBase(pathManagerInjector.getValue().resolveRelativePathEntry( "welcome-content", homeDirPathName));
+                callbackHandle = pathManagerInjector.getValue().registerCallback(homeDirPathName, PathManager.ReloadServerCallback.create(), PathManager.Event.UPDATED, PathManager.Event.REMOVED);
 
                 final Loader loader = new WebCtxLoader(this.getClass().getClassLoader());
                 Host host = hostInjector.getValue().getHost();
@@ -91,6 +95,10 @@ class WelcomeContextService implements Service<Context> {
                 context.addServletMapping("/", "default");
                 context.addMimeMapping("html", "text/html");
                 context.addMimeMapping("jpg", "image/jpeg");
+                context.addMimeMapping("png", "image/png");
+                context.addMimeMapping("gif", "image/gif");
+                context.addMimeMapping("css", "text/css");
+                context.addMimeMapping("js", "text/javascript");
 
                 // Add the WelcomeContextConsoleServlet
                 WelcomeContextConsoleServlet wccs = new WelcomeContextConsoleServlet(httpManagement);
@@ -105,27 +113,30 @@ class WelcomeContextService implements Service<Context> {
                 host.addChild(context);
                 context.create();
             } catch (Exception e) {
-                throw new StartException("failed to create context", e);
+                throw new StartException(MESSAGES.createWelcomeContextFailed(), e);
             }
             try {
                 context.start();
             } catch (LifecycleException e) {
-                throw new StartException("failed to start context", e);
+                throw new StartException(MESSAGES.startWelcomeContextFailed(), e);
             }
     }
 
     /** {@inheritDoc} */
     public synchronized void stop(StopContext stopContext) {
+        if (callbackHandle != null) {
+            callbackHandle.remove();
+        }
         try {
             hostInjector.getValue().getHost().removeChild(context);
             context.stop();
         } catch (LifecycleException e) {
-            log.error("exception while stopping context", e);
+            WebLogger.WEB_LOGGER.stopWelcomeContextFailed(e);
         }
         try {
             context.destroy();
         } catch (Exception e) {
-            log.error("exception while destroying context", e);
+            WebLogger.WEB_LOGGER.destroyWelcomeContextFailed(e);
         }
     }
 
@@ -133,13 +144,13 @@ class WelcomeContextService implements Service<Context> {
     public synchronized Context getValue() throws IllegalStateException {
         final Context context = this.context;
         if (context == null) {
-            throw new IllegalStateException();
+            throw MESSAGES.nullValue();
         }
         return context;
     }
 
-    public InjectedValue<String> getPathInjector() {
-        return pathInjector;
+    public InjectedValue<PathManager> getPathManagerInjector() {
+        return pathManagerInjector;
     }
 
     public InjectedValue<VirtualHost> getHostInjector() {

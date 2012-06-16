@@ -34,7 +34,6 @@ import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
 import org.jboss.as.osgi.parser.SubsystemState.OSGiCapability;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.ModelType;
-import org.jboss.modules.ModuleIdentifier;
 import org.jboss.msc.service.ServiceController;
 
 /**
@@ -45,11 +44,6 @@ public class OSGiCapabilityAdd extends AbstractAddStepHandler {
     static final OSGiCapabilityAdd INSTANCE = new OSGiCapabilityAdd();
 
     private OSGiCapabilityAdd() {
-    }
-
-    @Override
-    protected boolean requiresRuntime(OperationContext context) {
-        return context.getType() == OperationContext.Type.SERVER || context.getType() == OperationContext.Type.HOST;
     }
 
     @Override
@@ -71,7 +65,7 @@ public class OSGiCapabilityAdd extends AbstractAddStepHandler {
         final Integer startLevel = (slNode != null ? slNode.asInt() : null);
 
         String identifier = operation.get(ModelDescriptionConstants.OP_ADDR).asObject().get(ModelConstants.CAPABILITY).asString();
-        OSGiCapability module = new OSGiCapability(ModuleIdentifier.fromString(identifier), startLevel);
+        OSGiCapability module = new OSGiCapability(identifier, startLevel);
 
         SubsystemState subsystemState = SubsystemState.getSubsystemState(context);
         if (subsystemState != null) {
@@ -93,7 +87,7 @@ public class OSGiCapabilityAdd extends AbstractAddStepHandler {
         @Override
         public ModelNode getModelDescription(Locale locale) {
             ModelNode node = new ModelNode();
-            ResourceBundle resourceBundle = OSGiSubsystemProviders.getResourceBundle(locale);
+            ResourceBundle resourceBundle = OSGiDescriptionProviders.getResourceBundle(locale);
             node.get(ModelDescriptionConstants.OPERATION_NAME).set(ModelDescriptionConstants.ADD);
             node.get(ModelDescriptionConstants.DESCRIPTION).set(resourceBundle.getString("capability.add"));
             addModelProperties(resourceBundle, node, ModelDescriptionConstants.REQUEST_PROPERTIES);

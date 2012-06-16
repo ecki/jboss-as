@@ -22,15 +22,9 @@
 
 package org.jboss.as.connector.subsystems.resourceadapters;
 
-import static org.jboss.as.connector.ConnectorLogger.SUBSYSTEM_RA_LOGGER;
-
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
+import static org.jboss.as.connector.logging.ConnectorLogger.SUBSYSTEM_RA_LOGGER;
 
 import org.jboss.jca.common.api.metadata.resourceadapter.ResourceAdapter;
-import org.jboss.jca.common.api.metadata.resourceadapter.ResourceAdapters;
 import org.jboss.msc.inject.Injector;
 import org.jboss.msc.service.Service;
 import org.jboss.msc.service.StartContext;
@@ -43,9 +37,9 @@ import org.jboss.msc.value.InjectedValue;
  * @author <a href="mailto:stefano.maestri@redhat.comdhat.com">Stefano
  *         Maestri</a>
  */
-final class ResourceAdapterService implements Service<ModifiableResourceAdapter> {
+final class ResourceAdapterService implements Service<ResourceAdapter> {
 
-    private final ModifiableResourceAdapter value;
+    private final ResourceAdapter value;
 
     private final InjectedValue<ResourceAdaptersService.ModifiableResourceAdaptors> resourceAdapters = new InjectedValue<ResourceAdaptersService.ModifiableResourceAdaptors>();
 
@@ -56,7 +50,7 @@ final class ResourceAdapterService implements Service<ModifiableResourceAdapter>
     }
 
     @Override
-    public ModifiableResourceAdapter getValue() throws IllegalStateException {
+    public ResourceAdapter getValue() throws IllegalStateException {
         return value;
     }
 

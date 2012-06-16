@@ -32,14 +32,15 @@ import javax.transaction.TransactionSynchronizationRegistry;
  * @author Scott Marlow
  */
 public class TransactionSynchronizationRegistryProvider implements TransactionSynchronizationRegistryLookup {
-    private final TransactionSynchronizationRegistry transactionSynchronizationRegistry;
 
-    public TransactionSynchronizationRegistryProvider(TransactionSynchronizationRegistry transactionSynchronizationRegistry) {
-        this.transactionSynchronizationRegistry = transactionSynchronizationRegistry;
+    private final TransactionSynchronizationRegistry tsr;
+
+    public TransactionSynchronizationRegistryProvider(TransactionSynchronizationRegistry tsr) {
+        this.tsr = tsr;
     }
 
     @Override
     public TransactionSynchronizationRegistry getTransactionSynchronizationRegistry() throws Exception {
-        return transactionSynchronizationRegistry;
+        return tsr;
     }
 }

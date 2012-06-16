@@ -28,11 +28,13 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
+
+import static org.jboss.as.cmp.CmpMessages.MESSAGES;
 import org.jboss.as.cmp.jdbc.SQLUtil;
 import org.jboss.as.cmp.jdbc.metadata.JDBCApplicationMetaData;
-import org.jboss.as.cmp.jdbc.metadata.JDBCCMPFieldMetaData;
 import org.jboss.as.cmp.jdbc.metadata.JDBCCMPFieldPropertyMetaData;
 import org.jboss.as.cmp.jdbc.metadata.JDBCEntityCommandMetaData;
 import org.jboss.as.cmp.jdbc.metadata.JDBCFunctionMappingMetaData;
@@ -128,9 +130,9 @@ public class JDBCMetaDataParser extends MetaDataElementParser {
                 case ADD_COLUMN_TEMPLATE: {
                     final String value = getElementText(reader);
                     if (!isEmpty(value)) {
-                        metaData.setAddColomnTemplate(new JDBCFunctionMappingMetaData("add-column-template", value));
+                        metaData.setAddColumnTemplate(new JDBCFunctionMappingMetaData("add-column-template", value));
                     } else {
-                        metaData.setAddColomnTemplate(new JDBCFunctionMappingMetaData("add-column-template", "ALTER TABLE ?1 ADD ?2 ?3"));
+                        metaData.setAddColumnTemplate(new JDBCFunctionMappingMetaData("add-column-template", "ALTER TABLE ?1 ADD ?2 ?3"));
                     }
                     break;
                 }
@@ -154,16 +156,16 @@ public class JDBCMetaDataParser extends MetaDataElementParser {
                         final int aliasMaxLength = Integer.parseInt(value);
                         metaData.setAliasMaxLength(aliasMaxLength);
                     } catch (NumberFormatException e) {
-                        throw new IllegalArgumentException("Invalid number format in alias-max-length " + value + "': " + e);
+                        throw MESSAGES.invalidNumberFormat("alias-max-length", value);
                     }
                     break;
                 }
                 case ALTER_COLUMN_TEMPLATE: {
                     final String value = getElementText(reader);
                     if (!isEmpty(value)) {
-                        metaData.setAlterColomnTemplate(new JDBCFunctionMappingMetaData("add-column-template", value));
+                        metaData.setAlterColumnTemplate(new JDBCFunctionMappingMetaData("add-column-template", value));
                     } else {
-                        metaData.setAlterColomnTemplate(new JDBCFunctionMappingMetaData("add-column-template", "ALTER TABLE ?1 ADD ?2 ?3"));
+                        metaData.setAlterColumnTemplate(new JDBCFunctionMappingMetaData("add-column-template", "ALTER TABLE ?1 ADD ?2 ?3"));
                     }
                     break;
                 }
@@ -177,9 +179,9 @@ public class JDBCMetaDataParser extends MetaDataElementParser {
                 case DROP_COLUMN_TEMPLATE: {
                     final String value = getElementText(reader);
                     if (!isEmpty(value)) {
-                        metaData.setDropColomnTemplate(new JDBCFunctionMappingMetaData("drop-column-template", value));
+                        metaData.setDropColumnTemplate(new JDBCFunctionMappingMetaData("drop-column-template", value));
                     } else {
-                        metaData.setDropColomnTemplate(new JDBCFunctionMappingMetaData("drop-column-template", "ALTER TABLE ?1 DROP ?2"));
+                        metaData.setDropColumnTemplate(new JDBCFunctionMappingMetaData("drop-column-template", "ALTER TABLE ?1 DROP ?2"));
                     }
                     break;
                 }
@@ -198,7 +200,7 @@ public class JDBCMetaDataParser extends MetaDataElementParser {
                     break;
                 }
                 case FUNCTION_MAPPING: {
-                    metaData.addFunctionMapping(parseFuctionMapping(reader));
+                    metaData.addFunctionMapping(parseFunctionMapping(reader));
                     break;
                 }
                 case MAPPING: {
@@ -211,7 +213,7 @@ public class JDBCMetaDataParser extends MetaDataElementParser {
                         final int maxKeys = Integer.parseInt(value);
                         metaData.setMaxKeysInDelete(maxKeys);
                     } catch (NumberFormatException e) {
-                        throw new IllegalArgumentException("Invalid number format in max-keys-in-delete " + value + "': " + e);
+                        throw MESSAGES.invalidNumberFormat("max-keys-in-delete", value);
                     }
                     break;
                 }
@@ -249,7 +251,7 @@ public class JDBCMetaDataParser extends MetaDataElementParser {
         return metaData;
     }
 
-    private static JDBCFunctionMappingMetaData parseFuctionMapping(final XMLStreamReader reader) throws XMLStreamException {
+    private static JDBCFunctionMappingMetaData parseFunctionMapping(final XMLStreamReader reader) throws XMLStreamException {
 
         final JDBCFunctionMappingMetaData metaData = new JDBCFunctionMappingMetaData();
         for (Element element : children(reader)) {
@@ -376,10 +378,11 @@ public class JDBCMetaDataParser extends MetaDataElementParser {
         for (Element element : children(reader)) {
             switch (element) {
                 case UNKNOWN_KEY_CLASS: {
+                    String type = getElementText(reader);
                     try {
-                        parsedCmpField.unknownPk = classLoader.loadClass(getElementText(reader));
+                        parsedCmpField.unknownPk = classLoader.loadClass(type);
                     } catch (ClassNotFoundException e) {
-                        throw new RuntimeException("Failed to load field type", e);
+                        throw MESSAGES.failedToLoadFieldType(type, e);
                     }
                     break;
                 }
@@ -436,12 +439,12 @@ public class JDBCMetaDataParser extends MetaDataElementParser {
                     break;
                 }
                 case CLASS: {
+                    final String command = reader.getAttributeValue(i);
                     try {
-                        metaData.setClass(classLoader.loadClass(reader.getAttributeValue(i)));
+                        metaData.setClass(classLoader.loadClass(command));
                     } catch (ClassNotFoundException e) {
-                        throw new RuntimeException("Failed to load entity command class", e);
+                        throw MESSAGES.failedToLoadEntityCommand(command, e);
                     }
-
                     break;
                 }
                 default: {
@@ -824,7 +827,7 @@ public class JDBCMetaDataParser extends MetaDataElementParser {
                     metaData.audit = parseAudit(reader);
                     break;
                 }
-                case PREFERED_RELATION: {
+                case PREFERRED_RELATION: {
                     getElementText(reader); // TODO: jeb How to handle this
                     break;
                 }
@@ -833,7 +836,7 @@ public class JDBCMetaDataParser extends MetaDataElementParser {
                     try {
                         metaData.qlCompiler = classLoader.loadClass(qlCompiler);
                     } catch (ClassNotFoundException e) {
-                        throw new RuntimeException("Failed to load compiler implementation: " + qlCompiler, e);
+                        throw MESSAGES.failedToLoadCompiler(qlCompiler, e);
                     }
                     break;
                 }
@@ -978,7 +981,7 @@ public class JDBCMetaDataParser extends MetaDataElementParser {
                     try {
                         metaData.qlCompiler = classLoader.loadClass(qlCompiler);
                     } catch (ClassNotFoundException e) {
-                        throw new RuntimeException("Failed to load compiler implementation: " + qlCompiler, e);
+                        throw MESSAGES.failedToLoadCompiler(qlCompiler, e);
                     }
                     break;
                 }
@@ -1074,10 +1077,11 @@ public class JDBCMetaDataParser extends MetaDataElementParser {
                 }
                 case FIELD_TYPE: {
                     if (lockingField == null) lockingField = new ParsedCmpField();
+                    final String type = getElementText(reader);
                     try {
-                        lockingField.fieldType = classLoader.loadClass(getElementText(reader));
+                        lockingField.fieldType = classLoader.loadClass(type);
                     } catch (ClassNotFoundException e) {
-                        throw new RuntimeException("Failed to load field type", e);
+                        throw MESSAGES.failedToLoadFieldType(type, e);
                     }
                     break;
                 }
@@ -1138,6 +1142,10 @@ public class JDBCMetaDataParser extends MetaDataElementParser {
                 }
                 case FIELD_NAME: {
                     fields.add(getElementText(reader));
+                    break;
+                }
+                case DESCRIPTION: {
+                    getElementText(reader);
                     break;
                 }
                 default: {
@@ -1235,10 +1243,11 @@ public class JDBCMetaDataParser extends MetaDataElementParser {
         for (Element element : children(reader)) {
             switch (element) {
                 case CLASS: {
+                    final String type = getElementText(reader);
                     try {
-                        valueClass.setClass(classLoader.loadClass(getElementText(reader)));
+                        valueClass.setClass(classLoader.loadClass(type));
                     } catch (ClassNotFoundException e) {
-                        throw new RuntimeException("Failed to load value class", e);
+                        throw MESSAGES.failedToLoadValueClass(type, e);
                     }
                     break;
                 }
@@ -1381,7 +1390,7 @@ public class JDBCMetaDataParser extends MetaDataElementParser {
      */
     public static int getJdbcTypeFromName(String name) {
         if (name == null) {
-            throw new IllegalArgumentException("jdbc-type cannot be null");
+            throw MESSAGES.jdbcTypeCanNotBeNull();
         }
 
         try {
@@ -1400,7 +1409,7 @@ public class JDBCMetaDataParser extends MetaDataElementParser {
                         try {
                             return reader.hasNext() && reader.nextTag() != END_ELEMENT;
                         } catch (XMLStreamException e) {
-                            throw new IllegalStateException("Unable to get next element: ", e);
+                            throw MESSAGES.unableToGetNextElement(e);
                         }
                     }
 
@@ -1409,7 +1418,7 @@ public class JDBCMetaDataParser extends MetaDataElementParser {
                     }
 
                     public void remove() {
-                        throw new UnsupportedOperationException("Remove not supported");
+                        throw MESSAGES.removeNotSupported();
                     }
                 };
             }

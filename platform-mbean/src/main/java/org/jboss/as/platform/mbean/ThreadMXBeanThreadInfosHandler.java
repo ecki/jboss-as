@@ -66,7 +66,7 @@ public class ThreadMXBeanThreadInfosHandler implements OperationStepHandler, Des
         try {
             final long[] ids = getIds(operation);
             ThreadMXBean mbean = ManagementFactory.getThreadMXBean();
-            ThreadInfo[] infos = null;
+            ThreadInfo[] infos;
             if (operation.hasDefined(PlatformMBeanConstants.LOCKED_MONITORS)) {
                 lockedValidator.validate(operation);
                 infos = mbean.getThreadInfo(ids,
@@ -100,7 +100,7 @@ public class ThreadMXBeanThreadInfosHandler implements OperationStepHandler, Des
 
     @Override
     public ModelNode getModelDescription(Locale locale) {
-        return PlatformMBeanDescriptions.getGetThreadInfosDescripton(locale);
+        return PlatformMBeanDescriptions.getGetThreadInfosDescription(locale);
     }
 
     private long[] getIds(final ModelNode operation) throws OperationFailedException {

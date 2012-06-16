@@ -21,9 +21,7 @@
  */
 package org.jboss.as.ejb3.cache;
 
-import javax.transaction.TransactionManager;
-
-import org.jboss.ejb.client.SessionID;
+import java.io.Serializable;
 
 /**
  * Cache a stateful object and make sure any life cycle callbacks are
@@ -32,59 +30,43 @@ import org.jboss.ejb.client.SessionID;
  * @author <a href="mailto:carlo.dewolf@jboss.com">Carlo de Wolf</a>
  * @version $Revision: $
  */
-public interface Cache<T extends Identifiable> {
+public interface Cache<K extends Serializable, V extends Identifiable<K>> extends Removable<K>, AffinitySupport<K>, IdentifierFactory<K> {
     /**
      * Creates and caches a new instance of <code>T</code>.
      *
      * @return a new <code>T</code>
      */
-    T create();
+    V create();
 
     /**
      * Discard the specified object from cache.
      *
      * @param key the identifier of the object
      */
-    void discard(SessionID key);
+    void discard(K key);
 
     /**
      * Get the specified object from cache. This will mark
-     * the object as being in use.
+     * the object as being in use, and increase its usage count.
      *
      * @param key the identifier of the object
      * @return the object, or null if it does not exist
      */
-    T get(SessionID key);
+    V get(K key);
 
     /**
-     * Peek at an object which might be in use.
      *
-     * @param key    the identifier of the object
-     * @return the object
-     * @throws javax.ejb.NoSuchEJBException    if the object does not exist
+     * @param key The EJB identifier to check
+     * @return <code>true</code> if the EJB is present in the cache
      */
-    //T peek(Serializable key) throws NoSuchEJBException;
+    boolean contains(K key);
 
     /**
-     * Release the object from use.
+     * Decreases the objects usage count. If the usage count hits 0 then the object will be released.
      *
      * @param obj the object
      */
-    void release(T obj);
-
-    /**
-     * Remove the specified object from cache.
-     *
-     * @param key the identifier of the object
-     */
-    void remove(final TransactionManager transactionManager, SessionID key);
-
-    /**
-     * Associate the cache with a stateful object factory.
-     *
-     * @param factory the factory this cache should use.
-     */
-    void setStatefulObjectFactory(StatefulObjectFactory<T> factory);
+    void release(V obj);
 
     /**
      * Start the cache.

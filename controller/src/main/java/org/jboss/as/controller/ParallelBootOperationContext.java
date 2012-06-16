@@ -22,6 +22,8 @@
 
 package org.jboss.as.controller;
 
+import static org.jboss.as.controller.ControllerMessages.MESSAGES;
+
 import java.io.InputStream;
 import java.util.List;
 
@@ -37,8 +39,6 @@ import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.service.ServiceRegistry;
 import org.jboss.msc.service.ServiceTarget;
 
-import static org.jboss.as.controller.ControllerMessages.MESSAGES;
-
 /**
  * {@link OperationContext} implementation for parallel handling of subsystem operations during boot.
  *
@@ -52,7 +52,7 @@ class ParallelBootOperationContext extends AbstractOperationContext {
     ParallelBootOperationContext(final ModelController.OperationTransactionControl transactionControl,
                                  final ControlledProcessState processState, final OperationContext primaryContext,
                                  final List<ParsedBootOp> runtimeOps, final Thread controllingThread) {
-        super(Type.SERVER, transactionControl, processState);
+        super(primaryContext.getProcessType(), primaryContext.getRunningMode(), transactionControl, processState, true);
         this.primaryContext = primaryContext;
         this.runtimeOps = runtimeOps;
         AbstractOperationContext.controllingThread.set(controllingThread);
@@ -109,12 +109,6 @@ class ParallelBootOperationContext extends AbstractOperationContext {
     }
 
     @Override
-    public boolean isBooting() {
-        // We are only used during boot
-        return true;
-    }
-
-    @Override
     public boolean isRollbackOnRuntimeFailure() {
         return primaryContext.isRollbackOnRuntimeFailure();
     }
@@ -134,6 +128,11 @@ class ParallelBootOperationContext extends AbstractOperationContext {
     public ManagementResourceRegistration getResourceRegistrationForUpdate() {
         ManagementResourceRegistration parent = primaryContext.getResourceRegistrationForUpdate();
         return  parent.getSubModel(activeStep.address);
+    }
+
+    @Override
+    public ImmutableManagementResourceRegistration getRootResourceRegistration() {
+        return primaryContext.getRootResourceRegistration();
     }
 
     @Override
@@ -187,8 +186,23 @@ class ParallelBootOperationContext extends AbstractOperationContext {
 
     @Override
     public Resource readResource(PathAddress address) {
+        return readResource(address, true);
+    }
+
+    @Override
+    public Resource readResource(PathAddress address, boolean recursive) {
         PathAddress fullAddress = activeStep.address.append(address);
-        return primaryContext.readResource(fullAddress);
+        return primaryContext.readResource(fullAddress, recursive);
+    }
+
+    @Override
+    public Resource readResourceFromRoot(PathAddress address) {
+        return readResourceFromRoot(address, true);
+    }
+
+    @Override
+    public Resource readResourceFromRoot(PathAddress address, boolean recursive) {
+        return primaryContext.readResourceFromRoot(address, recursive);
     }
 
     @Override
@@ -267,6 +281,26 @@ class ParallelBootOperationContext extends AbstractOperationContext {
     @Override
     public ModelNode resolveExpressions(ModelNode node) throws OperationFailedException {
         return primaryContext.resolveExpressions(node);
+    }
+
+    @Override
+    public <T> T getAttachment(final AttachmentKey<T> key) {
+        return primaryContext.getAttachment(key);
+    }
+
+    @Override
+    public <T> T attach(final AttachmentKey<T> key, final T value) {
+        return primaryContext.attach(key, value);
+    }
+
+    @Override
+    public <T> T attachIfAbsent(final AttachmentKey<T> key, final T value) {
+        return primaryContext.attachIfAbsent(key, value);
+    }
+
+    @Override
+    public <T> T detach(final AttachmentKey<T> key) {
+        return primaryContext.detach(key);
     }
 
 }

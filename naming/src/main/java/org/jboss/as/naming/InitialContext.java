@@ -22,7 +22,10 @@
 
 package org.jboss.as.naming;
 
-import org.jboss.as.naming.context.NamespaceContextSelector;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Hashtable;
+import java.util.Map;
 
 import javax.naming.Binding;
 import javax.naming.Context;
@@ -31,11 +34,10 @@ import javax.naming.NameClassPair;
 import javax.naming.NameNotFoundException;
 import javax.naming.NamingEnumeration;
 import javax.naming.NamingException;
+import javax.naming.spi.NamingManager;
 import javax.naming.spi.ObjectFactory;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Hashtable;
-import java.util.Map;
+
+import org.jboss.as.naming.context.NamespaceContextSelector;
 
 /**
  * @author John Bailey
@@ -48,10 +50,36 @@ public class InitialContext extends NamingContext {
      */
     private static volatile Map<String, ObjectFactory> urlContextFactories = Collections.emptyMap();
 
+    /**
+     * Add an ObjectFactory to handle requests for a specific URL scheme.
+     * @param scheme The URL scheme to handle.
+     * @param factory The ObjectFactory that can handle the requests.
+     */
     public static synchronized void addUrlContextFactory(final String scheme, ObjectFactory factory) {
         Map<String, ObjectFactory> factories = new HashMap<String, ObjectFactory>(urlContextFactories);
         factories.put(scheme, factory);
         urlContextFactories = Collections.unmodifiableMap(factories);
+    }
+
+    /**
+     * Remove an ObjectFactory from the map of registered ones. To make sure that not anybody can remove an
+     * ObjectFactory both the scheme as well as the actual object factory itself need to be supplied. So you
+     * can only remove the factory if you have the factory object.
+     * @param scheme The URL scheme for which the handler is registered.
+     * @param factory The factory object associated with the scheme
+     * @throws IllegalArgumentException if the requested scheme/factory combination is not registered.
+     */
+    public static synchronized void removeUrlContextFactory(final String scheme, ObjectFactory factory) {
+        Map<String, ObjectFactory> factories = new HashMap<String, ObjectFactory>(urlContextFactories);
+
+        ObjectFactory f = factories.get(scheme);
+        if (f == factory) {
+            factories.remove(scheme);
+            urlContextFactories = Collections.unmodifiableMap(factories);
+            return;
+        } else {
+            throw new IllegalArgumentException();
+        }
     }
 
     public InitialContext(Hashtable<String, Object> environment) {
@@ -71,8 +99,17 @@ public class InitialContext extends NamingContext {
                     if (factory != null) {
                         try {
                             return ((Context) factory.getObjectInstance(null, name, this, getEnvironment())).lookup(name);
+                        }catch(NamingException e) {
+                            throw e;
                         } catch (Exception e) {
-                            throw new RuntimeException(e);
+                            NamingException n = new NamingException(e.getMessage());
+                            n.initCause(e);
+                            throw n;
+                        }
+                    }else{
+                        Context ctx = NamingManager.getURLContext(scheme, getEnvironment());
+                        if(ctx!=null){
+                            return ctx.lookup(name);
                         }
                     }
                 }

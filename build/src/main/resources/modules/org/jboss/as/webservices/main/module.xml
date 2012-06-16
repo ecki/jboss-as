@@ -23,6 +23,9 @@
   -->
 
 <module xmlns="urn:jboss:module:1.1" name="org.jboss.as.webservices">
+    <properties>
+        <property name="jboss.api" value="private"/>
+    </properties>
 
     <resources>
         <!-- Insert resources here -->
@@ -48,7 +51,6 @@
         <module name="org.jboss.as.security"/>
         <module name="org.jboss.as.web"/>
         <module name="org.jboss.threads"/>
-        <module name="org.jboss.metadata"/>
         <module name="org.jboss.modules"/>
         <module name="org.jboss.msc"/>
         <module name="org.jboss.vfs"/>

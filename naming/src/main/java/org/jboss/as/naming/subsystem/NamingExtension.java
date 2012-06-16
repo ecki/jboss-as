@@ -22,11 +22,7 @@
 
 package org.jboss.as.naming.subsystem;
 
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADD;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.DESCRIBE;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SUBSYSTEM;
+import java.util.EnumSet;
 
 import org.jboss.as.controller.Extension;
 import org.jboss.as.controller.ExtensionContext;
@@ -37,8 +33,15 @@ import org.jboss.as.controller.operations.common.GenericSubsystemDescribeHandler
 import org.jboss.as.controller.parsing.ExtensionParsingContext;
 import org.jboss.as.controller.registry.ManagementResourceRegistration;
 import org.jboss.as.controller.registry.OperationEntry;
+import org.jboss.as.controller.registry.OperationEntry.Flag;
 import org.jboss.as.naming.management.JndiViewOperation;
 import org.jboss.dmr.ModelNode;
+
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADD;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.DESCRIBE;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SUBSYSTEM;
 
 /**
  * Domain extension used to initialize the naming subsystem element handlers.
@@ -51,6 +54,10 @@ public class NamingExtension implements Extension {
     public static final String SUBSYSTEM_NAME = "naming";
     public static final String NAMESPACE_1_0 = "urn:jboss:domain:naming:1.0";
     public static final String NAMESPACE_1_1 = "urn:jboss:domain:naming:1.1";
+    public static final String NAMESPACE_1_2 = "urn:jboss:domain:naming:1.2";
+
+    private static final int MANAGEMENT_API_MAJOR_VERSION = 1;
+    private static final int MANAGEMENT_API_MINOR_VERSION = 1;
 
     public static final String RESOURCE_NAME = NamingExtension.class.getPackage().getName() + ".LocalDescriptions";
 
@@ -63,17 +70,20 @@ public class NamingExtension implements Extension {
      */
     @Override
     public void initialize(ExtensionContext context) {
-        final SubsystemRegistration subsystem = context.registerSubsystem(SUBSYSTEM_NAME);
+        final SubsystemRegistration subsystem = context.registerSubsystem(SUBSYSTEM_NAME, MANAGEMENT_API_MAJOR_VERSION, MANAGEMENT_API_MINOR_VERSION);
 
         final ManagementResourceRegistration registration = subsystem.registerSubsystemModel(NamingSubsystemRootResourceDefinition.INSTANCE);
 
         registration.registerOperationHandler(DESCRIBE, GenericSubsystemDescribeHandler.INSTANCE, GenericSubsystemDescribeHandler.INSTANCE, false, OperationEntry.EntryType.PRIVATE);
 
         registration.registerSubModel(NamingBindingResourceDefinition.INSTANCE);
+        registration.registerSubModel(RemoteNamingResourceDefinition.INSTANCE);
 
-        registration.registerOperationHandler(JndiViewOperation.OPERATION_NAME, JndiViewOperation.INSTANCE, NamingSubsystemRootResourceDefinition.JNDI_VIEW, false);
+        if (context.isRuntimeOnlyRegistrationValid()) {
+            registration.registerOperationHandler(JndiViewOperation.OPERATION_NAME, JndiViewOperation.INSTANCE, NamingSubsystemRootResourceDefinition.JNDI_VIEW, false, EnumSet.of(Flag.RUNTIME_ONLY));
+        }
 
-        subsystem.registerXMLElementWriter(NamingSubsystem11Parser.INSTANCE);
+        subsystem.registerXMLElementWriter(NamingSubsystem12Parser.INSTANCE);
     }
 
     /**
@@ -81,8 +91,9 @@ public class NamingExtension implements Extension {
      */
     @Override
     public void initializeParsers(ExtensionParsingContext context) {
-        context.setSubsystemXmlMapping(NAMESPACE_1_0, NamingSubsystem10Parser.INSTANCE);
-        context.setSubsystemXmlMapping(NAMESPACE_1_1, NamingSubsystem11Parser.INSTANCE);
+        context.setSubsystemXmlMapping(SUBSYSTEM_NAME, NAMESPACE_1_0, NamingSubsystem10Parser.INSTANCE);
+        context.setSubsystemXmlMapping(SUBSYSTEM_NAME, NAMESPACE_1_1, NamingSubsystem11Parser.INSTANCE);
+        context.setSubsystemXmlMapping(SUBSYSTEM_NAME, NAMESPACE_1_2, NamingSubsystem12Parser.INSTANCE);
     }
 
     static ModelNode createAddOperation() {

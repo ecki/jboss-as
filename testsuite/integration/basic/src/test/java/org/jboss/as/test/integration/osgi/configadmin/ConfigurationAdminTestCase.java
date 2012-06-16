@@ -22,24 +22,11 @@
 
 package org.jboss.as.test.integration.osgi.configadmin;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-
-import java.io.InputStream;
-import java.util.Dictionary;
-import java.util.Hashtable;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-
-import javax.inject.Inject;
-
 import org.jboss.arquillian.container.test.api.Deployment;
 import org.jboss.arquillian.junit.Arquillian;
-import org.jboss.arquillian.osgi.StartLevelAware;
-import org.jboss.as.test.integration.osgi.OSGiTestSupport;
 import org.jboss.as.test.integration.osgi.xservice.bundle.ConfiguredService;
-import org.jboss.osgi.testing.OSGiManifestBuilder;
+import org.jboss.as.test.osgi.OSGiFrameworkUtils;
+import org.jboss.osgi.spi.OSGiManifestBuilder;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
 import org.jboss.shrinkwrap.api.asset.Asset;
 import org.jboss.shrinkwrap.api.spec.JavaArchive;
@@ -55,6 +42,17 @@ import org.osgi.service.cm.ConfigurationEvent;
 import org.osgi.service.cm.ConfigurationListener;
 import org.osgi.service.cm.ManagedService;
 import org.osgi.service.startlevel.StartLevel;
+
+import javax.inject.Inject;
+import java.io.InputStream;
+import java.util.Dictionary;
+import java.util.Hashtable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 
 /**
  * A test that shows how an OSGi {@link ManagedService} can be configured through the {@link ConfigurationAdmin}.
@@ -72,10 +70,9 @@ public class ConfigurationAdminTestCase {
     public Bundle bundle;
 
     @Deployment
-    @StartLevelAware(startLevel = 3)
     public static JavaArchive createdeployment() {
         final JavaArchive archive = ShrinkWrap.create(JavaArchive.class, "example-configadmin");
-        archive.addClasses(OSGiTestSupport.class, ConfiguredService.class);
+        archive.addClasses(OSGiFrameworkUtils.class, ConfiguredService.class);
         archive.setManifest(new Asset() {
             public InputStream openStream() {
                 OSGiManifestBuilder builder = OSGiManifestBuilder.newInstance();
@@ -90,8 +87,6 @@ public class ConfigurationAdminTestCase {
 
     @Test
     public void testManagedService() throws Exception {
-
-        OSGiTestSupport.changeStartLevel(context, 3, 10, TimeUnit.SECONDS);
 
         // Start the test bundle
         bundle.start();

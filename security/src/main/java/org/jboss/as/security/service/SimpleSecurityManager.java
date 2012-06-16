@@ -26,23 +26,35 @@ import static java.security.AccessController.doPrivileged;
 import java.security.Principal;
 import java.security.PrivilegedAction;
 import java.security.acl.Group;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 import javax.security.auth.Subject;
 
+import org.jboss.as.controller.security.ServerSecurityManager;
+import org.jboss.as.controller.security.SubjectUserInfo;
+import org.jboss.as.controller.security.UniqueIdUserInfo;
+import org.jboss.as.domain.management.security.PasswordCredential;
+import org.jboss.as.security.SecurityMessages;
+import org.jboss.as.security.remoting.RemotingContext;
 import org.jboss.metadata.javaee.spec.SecurityRolesMetaData;
+import org.jboss.remoting3.security.UserInfo;
 import org.jboss.security.AuthenticationManager;
 import org.jboss.security.AuthorizationManager;
+import org.jboss.security.ISecurityManagement;
 import org.jboss.security.RunAs;
 import org.jboss.security.RunAsIdentity;
 import org.jboss.security.SecurityContext;
 import org.jboss.security.SecurityContextAssociation;
 import org.jboss.security.SecurityContextFactory;
 import org.jboss.security.SecurityContextUtil;
+import org.jboss.security.SimplePrincipal;
 import org.jboss.security.SubjectInfo;
 import org.jboss.security.callbacks.SecurityContextCallbackHandler;
 import org.jboss.security.identity.Identity;
@@ -54,10 +66,12 @@ import org.jboss.security.identity.plugins.SimpleIdentity;
  * @author <a href="mailto:cdewolf@redhat.com">Carlo de Wolf</a>
  * @author <a href="mailto:darran.lofthouse@jboss.com">Darran Lofthouse</a>
  */
-public class SimpleSecurityManager {
+public class SimpleSecurityManager implements ServerSecurityManager {
     private ThreadLocalStack<SecurityContext> contexts = new ThreadLocalStack<SecurityContext>();
 
-    private static PrivilegedAction<SecurityContext> securityContext() {
+    private ISecurityManagement securityManagement = null;
+
+    private PrivilegedAction<SecurityContext> securityContext() {
         return new PrivilegedAction<SecurityContext>() {
             public SecurityContext run() {
                 return SecurityContextAssociation.getSecurityContext();
@@ -65,15 +79,22 @@ public class SimpleSecurityManager {
         };
     }
 
-    private static SecurityContext establishSecurityContext(final String securityDomain) {
+    private SecurityContext establishSecurityContext(final String securityDomain) {
         // Do not use SecurityFactory.establishSecurityContext, its static init is broken.
         try {
             final SecurityContext securityContext = SecurityContextFactory.createSecurityContext(securityDomain);
+            if(securityManagement == null)
+                throw SecurityMessages.MESSAGES.securityManagementNotInjected();
+            securityContext.setSecurityManagement(securityManagement);
             SecurityContextAssociation.setSecurityContext(securityContext);
             return securityContext;
         } catch (Exception e) {
-            throw new SecurityException(e);
+            throw SecurityMessages.MESSAGES.securityException(e);
         }
+    }
+
+    public void setSecurityManagement(ISecurityManagement iSecurityManagement){
+        securityManagement = iSecurityManagement;
     }
 
     public Principal getCallerPrincipal() {
@@ -90,6 +111,14 @@ public class SimpleSecurityManager {
         if (principal == null)
             return getUnauthenticatedIdentity().asPrincipal();
         return principal;
+    }
+
+    public Subject getSubject() {
+        final SecurityContext securityContext = doPrivileged(securityContext());
+        if (securityContext != null) {
+            return securityContext.getSubjectInfo().getAuthenticatedSubject();
+        }
+        return null;
     }
 
     /**
@@ -125,11 +154,15 @@ public class SimpleSecurityManager {
 
     /**
      *
-     * @param mappedRoles
-     * @param roleNames
-     * @return true if the user is in any one of the roles listed
+     * @param mappedRoles The principal vs roles mapping (if any). Can be null.
+     * @param roleLinks The role link map where the key is a alias role name and the value is the collection of
+     *                  role names, that alias represents. Can be null.
+     * @param roleNames The role names for which the caller is being checked for
+     * @return true if the user is in <b>any</b> one of the <code>roleNames</code>. Else returns false
      */
-    public boolean isCallerInRole(final SecurityRolesMetaData mappedRoles, final String... roleNames) {
+    public boolean isCallerInRole(final Object incommingMappedRoles, final Map<String, Collection<String>> roleLinks,
+                                  final String... roleNames) {
+        final SecurityRolesMetaData mappedRoles = (SecurityRolesMetaData) incommingMappedRoles;
         final SecurityContext securityContext = doPrivileged(securityContext());
         if (securityContext == null) {
             return false;
@@ -142,7 +175,6 @@ public class SimpleSecurityManager {
             RunAsIdentity runAsIdentity = (RunAsIdentity) runAs;
             roleGroup = runAsIdentity.getRunAsRolesAsRoleGroup();
         } else {
-
             AuthorizationManager am = securityContext.getAuthorizationManager();
             SecurityContextCallbackHandler scb = new SecurityContextCallbackHandler(securityContext);
 
@@ -168,10 +200,26 @@ public class SimpleSecurityManager {
                 actualRoles.addAll(mapped);
             }
         }
-
-        boolean userNotInRole = Collections.disjoint(requiredRoles, actualRoles);
-
-        return userNotInRole == false;
+        // if the actual roles matches any of the required roles, then return true
+        if (!Collections.disjoint(requiredRoles, actualRoles)) {
+            return true;
+        }
+        // we did not have a match between the required roles and the actual roles.
+        // let's now get the alias role names (if any) for each of the actual role
+        // and see if any of those aliases of the actual roles matches the required roles
+        if (roleLinks != null) {
+            for (final String actualRole : actualRoles) {
+                // get aliases (if any) for actual role
+                final Set<String> aliases = this.getRoleAliases(actualRole, roleLinks);
+                // if there's a match between the required role and an alias of an actual role, then
+                // return true indicating that the caller is in one of the required roles
+                if (!Collections.disjoint(requiredRoles, aliases)) {
+                    return true;
+                }
+            }
+        }
+        // caller is not in any of the required roles
+        return false;
     }
 
     /**
@@ -195,13 +243,57 @@ public class SimpleSecurityManager {
         RunAs currentRunAs = current.getIncomingRunAs();
         boolean trusted = currentRunAs != null && currentRunAs instanceof RunAsIdentity;
 
-        // TODO - Set unauthenticated identity if no auth to occur
         if (trusted == false) {
+            /*
+             * We should only be switching to a context based on an identity from the Remoting connection
+             * if we don't already have a trusted identity - this allows for beans to reauthenticate as a
+             * different identity.
+             */
+            boolean authenticated = false;
+            if (RemotingContext.isSet()) {
+                // In this case the principal and credential will not have been set to set some random values.
+                SecurityContextUtil util = current.getUtil();
+
+                UserInfo userInfo = RemotingContext.getConnection().getUserInfo();
+                Principal p = null;
+                String credential = null;
+                Subject subject = null;
+                if (userInfo instanceof SubjectUserInfo) {
+                    SubjectUserInfo sinfo = (SubjectUserInfo) userInfo;
+                    subject = sinfo.getSubject();
+
+                    Set<PasswordCredential> pcSet = subject.getPrivateCredentials(PasswordCredential.class);
+                    if (pcSet.size() > 0) {
+                        PasswordCredential pc = pcSet.iterator().next();
+                        p = new SimplePrincipal(pc.getUserName());
+                        credential = new String(pc.getCredential());
+                        RemotingContext.clear(); // Now that it has been used clear it.
+                    }
+                    if ((p == null || credential == null) && userInfo instanceof UniqueIdUserInfo) {
+                        UniqueIdUserInfo uinfo = (UniqueIdUserInfo) userInfo;
+                        p = new SimplePrincipal(sinfo.getUserName());
+                        credential = uinfo.getId();
+                        // In this case we do not clear the RemotingContext as it is still to be used
+                        // here extracting the ID just ensures we are not continually calling the modules
+                        // for each invocation.
+                    }
+                }
+
+                if (p == null || credential == null) {
+                    p = new SimplePrincipal(UUID.randomUUID().toString());
+                    credential = UUID.randomUUID().toString();
+                }
+
+                util.createSubjectInfo(p, credential, subject);
+            }
+
             // If we have a trusted identity no need for a re-auth.
-            boolean authenticated = authenticate(current);
+            if (authenticated == false) {
+                authenticated = authenticate(current, null);
+            }
             if (authenticated == false) {
                 // TODO - Better type needed.
-                throw new SecurityException("Invalid User");
+                throw SecurityMessages.MESSAGES.invalidUserException();
             }
         }
 
@@ -214,10 +306,38 @@ public class SimpleSecurityManager {
         }
     }
 
-    private boolean authenticate(SecurityContext context) {
+    public void push(final String securityDomain, String userName, char[] password, final Subject subject) {
+        final SecurityContext previous = SecurityContextAssociation.getSecurityContext();
+        contexts.push(previous);
+        SecurityContext current = establishSecurityContext(securityDomain);
+        if (previous != null) {
+            current.setSubjectInfo(previous.getSubjectInfo());
+            current.setIncomingRunAs(previous.getOutgoingRunAs());
+        }
+
+        RunAs currentRunAs = current.getIncomingRunAs();
+        boolean trusted = currentRunAs != null && currentRunAs instanceof RunAsIdentity;
+
+        if (trusted == false) {
+            SecurityContextUtil util = current.getUtil();
+            util.createSubjectInfo(new SimplePrincipal(userName), new String(password), subject);
+            if (authenticate(current, subject) == false) {
+                throw SecurityMessages.MESSAGES.invalidUserException();
+            }
+        }
+
+        if (previous != null && previous.getOutgoingRunAs() != null) {
+            // Ensure the propagation continues.
+            current.setOutgoingRunAs(previous.getOutgoingRunAs());
+        }
+    }
+
+    private boolean authenticate(SecurityContext context, Subject subject) {
         SecurityContextUtil util = context.getUtil();
         SubjectInfo subjectInfo = context.getSubjectInfo();
-        Subject subject = new Subject();
+        if (subject == null) {
+            subject = new Subject();
+        }
         Principal principal = util.getUserPrincipal();
         Object credential = util.getCredential();
 
@@ -253,5 +373,29 @@ public class SimpleSecurityManager {
     public void pop() {
         final SecurityContext sc = contexts.pop();
         SecurityContextAssociation.setSecurityContext(sc);
+    }
+
+    /**
+     * Returns the alias role names for the passed <code>roleName</code>. Returns an empty set if the passed
+     * role name doesn't have any aliases
+     *
+     * @param roleName The role name
+     * @param roleLinks The role link map where the key is a alias role name and the value is the collection of
+     *                  role names, that alias represents
+     * @return
+     */
+    private Set<String> getRoleAliases(final String roleName, final Map<String, Collection<String>> roleLinks) {
+        if (roleLinks == null || roleLinks.isEmpty()) {
+            return Collections.emptySet();
+        }
+        final Set<String> aliases = new HashSet<String>();
+        for (final Map.Entry<String, Collection<String>> roleLinkEntry : roleLinks.entrySet()) {
+            final String aliasRoleName = roleLinkEntry.getKey();
+            final Collection<String> realRoleNames = roleLinkEntry.getValue();
+            if (realRoleNames != null && realRoleNames.contains(roleName)) {
+                aliases.add(aliasRoleName);
+            }
+        }
+        return aliases;
     }
 }

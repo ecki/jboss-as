@@ -29,6 +29,8 @@ import org.jboss.as.controller.OperationContext.ResultAction;
 import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.PathAddress;
+import org.jboss.as.controller.ProcessType;
+import org.jboss.as.controller.RunningMode;
 import org.jboss.as.controller.registry.Resource;
 import org.jboss.dmr.ModelNode;
 import org.jboss.msc.service.ServiceController;
@@ -39,12 +41,13 @@ import org.mockito.stubbing.Answer;
 
 /**
  * @author David Bosschaert
+ * @author Thomas.Diesler@jboss.com
  */
-public class ResourceAddRemoveTestBase {
+class ResourceAddRemoveTestBase {
 
     private final AtomicReference<ModelNode> operationHolder = new AtomicReference<ModelNode>();
 
-    @SuppressWarnings({ "rawtypes", "unchecked" })
+    @SuppressWarnings({ "unchecked", "rawtypes" })
     protected OperationContext mockOperationContext(SubsystemState stateService, final List<OperationStepHandler> addedSteps,
                                                     final ResultAction stepResult) {
         ServiceRegistry serviceRegistry = Mockito.mock(ServiceRegistry.class);
@@ -59,7 +62,9 @@ public class ResourceAddRemoveTestBase {
         Mockito.when(context.completeStep()).thenReturn(stepResult);
         Mockito.when(context.createResource(PathAddress.EMPTY_ADDRESS)).thenReturn(resource);
         Mockito.when(context.readResource(PathAddress.EMPTY_ADDRESS)).thenReturn(resource);
-        Mockito.when(context.getType()).thenReturn(OperationContext.Type.SERVER);
+        Mockito.when(context.getProcessType()).thenReturn(ProcessType.STANDALONE_SERVER);
+        Mockito.when(context.getRunningMode()).thenReturn(RunningMode.NORMAL);
+        Mockito.when(context.isNormalServer()).thenReturn(true);
         Mockito.doAnswer(new Answer<Void>() {
             @Override
             public Void answer(InvocationOnMock invocation) throws Throwable {

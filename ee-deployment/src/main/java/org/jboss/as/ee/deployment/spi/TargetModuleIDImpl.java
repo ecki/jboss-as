@@ -21,12 +21,15 @@
  */
 package org.jboss.as.ee.deployment.spi;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
 import javax.enterprise.deploy.shared.ModuleType;
 import javax.enterprise.deploy.spi.Target;
 import javax.enterprise.deploy.spi.TargetModuleID;
+
+import static org.jboss.as.ee.deployment.spi.DeploymentMessages.MESSAGES;
 
 /**
  * A TargetModuleID interface represents a unique identifier for a deployed application module. A deployable application module
@@ -39,47 +42,29 @@ import javax.enterprise.deploy.spi.TargetModuleID;
  * @author Thomas.Diesler@jboss.com
  *
  */
-final class TargetModuleIDImpl implements JBossTargetModuleID {
+final class TargetModuleIDImpl implements TargetModuleExt {
 
     private final JBossTarget target;
     private final String moduleID;
     private final TargetModuleID parentModuleID;
     private final ModuleType moduleType;
+    private File contentFile;
     private List<TargetModuleID> childModuleIDs = new ArrayList<TargetModuleID>();
     private boolean isRunning;
 
-    TargetModuleIDImpl(JBossTarget target, String moduleID, TargetModuleID parentModuleID, ModuleType moduleType) {
+    TargetModuleIDImpl(JBossTarget target, String moduleID, TargetModuleID parentModuleID, ModuleType moduleType, File contentFile) {
         if (target == null)
-            throw new IllegalArgumentException("Null target");
+            throw new IllegalArgumentException(MESSAGES.nullArgument("target"));
         if (moduleID == null)
-            throw new IllegalArgumentException("Null moduleID");
+            throw new IllegalArgumentException(MESSAGES.nullArgument("moduleID"));
         if (moduleType == null)
-            throw new IllegalArgumentException("Null moduleType");
+            throw new IllegalArgumentException(MESSAGES.nullArgument("moduleType"));
         this.target = target;
         this.moduleID = moduleID;
         this.parentModuleID = parentModuleID;
         this.moduleType = moduleType;
+        this.contentFile = contentFile;
     }
-
-    @Override
-    public boolean isRunning() {
-        return isRunning;
-    }
-
-    void setRunning(boolean isRunning) {
-        this.isRunning = isRunning;
-    }
-
-    @Override
-    public ModuleType getModuleType() {
-        return moduleType;
-    }
-
-    void addChildTargetModuleID(TargetModuleID childModuleID) {
-        childModuleIDs.add(childModuleID);
-    }
-
-    // TargetModuleID interface ************************************************
 
     @Override
     public Target getTarget() {
@@ -106,6 +91,29 @@ final class TargetModuleIDImpl implements JBossTargetModuleID {
         TargetModuleID[] idarr = new TargetModuleID[childModuleIDs.size()];
         childModuleIDs.toArray(idarr);
         return idarr;
+    }
+
+    void addChildTargetModuleID(TargetModuleID childModuleID) {
+        childModuleIDs.add(childModuleID);
+    }
+
+    @Override
+    public boolean isRunning() {
+        return isRunning;
+    }
+
+    void setRunning(boolean isRunning) {
+        this.isRunning = isRunning;
+    }
+
+    @Override
+    public ModuleType getModuleType() {
+        return moduleType;
+    }
+
+    @Override
+    public File getContentFile() {
+        return contentFile;
     }
 
     public int hashCode() {

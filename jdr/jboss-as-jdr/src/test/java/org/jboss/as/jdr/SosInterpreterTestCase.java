@@ -34,8 +34,6 @@ import static org.junit.Assert.assertEquals;
  */
 public class SosInterpreterTestCase {
 
-    private final static String JBOSS_HOME_ENV_VAR = "JBOSS_HOME";
-
     @Test
     public void testGetPathUnixPath() {
         String path = "file:/path/to/thing";
@@ -61,7 +59,7 @@ public class SosInterpreterTestCase {
     }
 
     @Test
-    public void testWindowsEncodedPath() {
+    public void testWindowsEncodedPath() throws Exception {
         String path = "file:C:%5Cjboss%5Cas%5Cfoo";
         assertEquals("file:C:\\\\jboss\\\\as\\\\foo", SosInterpreter.cleanPath(path));
     }

@@ -23,10 +23,7 @@ package org.jboss.as.connector.subsystems.jca;
 
 import java.io.IOException;
 
-import org.jboss.as.controller.OperationContext;
 import org.jboss.as.subsystem.test.AbstractSubsystemBaseTest;
-import org.jboss.as.subsystem.test.AdditionalInitialization;
-import org.jboss.as.subsystem.test.ModelDescriptionValidator.ValidationConfiguration;
 
 /**
  *
@@ -47,21 +44,24 @@ public class JcaSubsystemTestCase extends AbstractSubsystemBaseTest {
             "    <archive-validation enabled=\"false\" />" +
             "    <bean-validation enabled=\"false\" />" +
             "    <default-workmanager>" +
-            "        <short-running-threads blocking=\"true\">" +
-            "                <core-threads count=\"10\" per-cpu=\"20\"/>" +
-            "                <queue-length count=\"10\" per-cpu=\"20\"/>" +
-            "                <max-threads count=\"10\" per-cpu=\"20\"/>" +
+            "        <short-running-threads>" +
+            "                <core-threads count=\"10\"/>" +
+            "                <queue-length count=\"30\"/>" +
+            "                <max-threads count=\"30\"/>" +
             "                <keepalive-time time=\"10\" unit=\"seconds\"/>" +
             "        </short-running-threads>" +
-            "        <long-running-threads blocking=\"true\">" +
-            "                <core-threads count=\"10\" per-cpu=\"20\"/>" +
-            "                <queue-length count=\"10\" per-cpu=\"20\"/>" +
-            "                <max-threads count=\"10\" per-cpu=\"20\"/>" +
+            "        <long-running-threads>" +
+            "                <core-threads count=\"15\"/>" +
+            "                <queue-length count=\"10\"/>" +
+            "                <max-threads count=\"25\"/>" +
             "                <keepalive-time time=\"10\" unit=\"seconds\"/>" +
             "        </long-running-threads>" +
             "    </default-workmanager>" +
             "</subsystem>";
     }
 
-
+    @Override
+    protected void compareXml(String configId, String original, String marshalled) throws Exception {
+        super.compareXml(configId, original, marshalled, true);
+    }
 }

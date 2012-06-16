@@ -21,9 +21,12 @@
  */
 package org.jboss.as.test.integration.management.cli;
 
+import org.jboss.as.test.integration.management.base.AbstractCliTestBase;
 import static org.junit.Assert.assertTrue;
 
 import org.jboss.arquillian.junit.Arquillian;
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
@@ -38,10 +41,20 @@ public class HelpTestCase extends AbstractCliTestBase {
         "cn", "connect", "deploy", "help", "history", "ls", "pwn", "quit", "undeploy", "version"
     };
 
+    @BeforeClass
+    public static void before() throws Exception {
+        AbstractCliTestBase.initCLI();
+    }
+
+    @AfterClass
+    public static void after() throws Exception {
+        AbstractCliTestBase.closeCLI();
+    }
+
     @Test
     public void testHelpCommand() throws Exception {
         cli.sendLine("help");
-        String help = cli.readAllUnformated(WAIT_TIMEOUT, WAIT_LINETIMEOUT);
+        String help = cli.readOutput();
         for (String cmd : COMMANDS) assertTrue("Command '" + cmd + "' missing in help.", help.contains(cmd));
     }
 
@@ -76,36 +89,6 @@ public class HelpTestCase extends AbstractCliTestBase {
     }
 
     @Test
-    public void testDeprecatedAddJmsQueueHelp() throws Exception {
-        testCmdHelp("add-jms-queue");
-    }
-
-    @Test
-    public void testDeprecatedRemoveJmsQueueHelp() throws Exception {
-        testCmdHelp("remove-jms-queue");
-    }
-
-    @Test
-    public void testDeprecatedAddJmsTopicHelp() throws Exception {
-        testCmdHelp("add-jms-topic");
-    }
-
-    @Test
-    public void testDeprecatedRemoveJmsTopicHelp() throws Exception {
-        testCmdHelp("remove-jms-topic");
-    }
-
-    @Test
-    public void testDeprecatedAddJmsCfHelp() throws Exception {
-        testCmdHelp("add-jms-cf");
-    }
-
-    @Test
-    public void testDeprecatedRemoveJmsCfHelp() throws Exception {
-        testCmdHelp("remove-jms-cf");
-    }
-
-    @Test
     public void testDataSourceHelp() throws Exception {
         testCmdHelp("data-source");
     }
@@ -122,7 +105,7 @@ public class HelpTestCase extends AbstractCliTestBase {
 
     private void testCmdHelp(String cmd) throws Exception {
         cli.sendLine(cmd + " --help");
-        String help = cli.readAllUnformated(WAIT_TIMEOUT, WAIT_LINETIMEOUT);
+        String help = cli.readOutput();
         assertTrue("Command " + cmd + " help does not have synopsis section.", help.contains("SYNOPSIS"));
         assertTrue("Command " + cmd + " help does not have description section.", help.contains("DESCRIPTION"));
         assertTrue("Command " + cmd + " help does not have arguments section.", help.contains("ARGUMENTS"));

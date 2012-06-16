@@ -22,12 +22,10 @@
 
 package org.jboss.as.cmp.subsystem;
 
-import static org.jboss.as.ejb3.subsystem.EJB3SubsystemModel.APPCLIENT;
-
 import java.util.List;
-import java.util.Locale;
 
 import org.jboss.as.cmp.component.CmpEntityBeanComponentDescription;
+import org.jboss.as.cmp.keygenerator.KeyGeneratorFactoryRegistry;
 import org.jboss.as.cmp.processors.CmpDependencyProcessor;
 import org.jboss.as.cmp.processors.CmpEntityBeanComponentDescriptionFactory;
 import org.jboss.as.cmp.processors.CmpEntityMetaDataProcessor;
@@ -36,8 +34,8 @@ import org.jboss.as.cmp.processors.CmpStoreManagerProcessor;
 import org.jboss.as.controller.AbstractBoottimeAddStepHandler;
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
+import org.jboss.as.controller.ProcessType;
 import org.jboss.as.controller.ServiceVerificationHandler;
-import org.jboss.as.controller.descriptions.DescriptionProvider;
 import org.jboss.as.server.AbstractDeploymentChainStep;
 import org.jboss.as.server.DeploymentProcessorTarget;
 import org.jboss.as.server.deployment.Phase;
@@ -48,24 +46,29 @@ import org.jboss.msc.service.ServiceController;
 /**
  * @author John Bailey
  */
-public class CmpSubsystemAdd extends AbstractBoottimeAddStepHandler implements DescriptionProvider {
+public class CmpSubsystemAdd extends AbstractBoottimeAddStepHandler {
 
     private static final Logger logger = Logger.getLogger(CmpSubsystemAdd.class);
     static CmpSubsystemAdd INSTANCE = new CmpSubsystemAdd();
 
     protected void performBoottime(final OperationContext context, final ModelNode operation, final ModelNode model, final ServiceVerificationHandler verificationHandler, final List<ServiceController<?>> newControllers) throws OperationFailedException {
-        logger.info("Activating EJB CMP Subsystem");
-        final boolean appclient = operation.hasDefined(APPCLIENT) && model.get(APPCLIENT).asBoolean();
+        logger.debug("Activating EJB CMP Subsystem");
+        final boolean appclient = context.getProcessType() == ProcessType.APPLICATION_CLIENT;
+
+        final KeyGeneratorFactoryRegistry keyGeneratorFactoryRegistry = new KeyGeneratorFactoryRegistry();
+        newControllers.add(context.getServiceTarget().addService(KeyGeneratorFactoryRegistry.SERVICE_NAME, keyGeneratorFactoryRegistry)
+            .addListener(verificationHandler)
+            .install());
 
         context.addStep(new AbstractDeploymentChainStep() {
             protected void execute(DeploymentProcessorTarget processorTarget) {
 
-                processorTarget.addDeploymentProcessor(Phase.PARSE, Phase.PARSE_CMP_ENTITY_BEAN_CREATE_COMPONENT_DESCRIPTIONS, new CmpEntityBeanComponentDescriptionFactory(appclient));
+                processorTarget.addDeploymentProcessor(CmpExtension.SUBSYSTEM_NAME, Phase.PARSE, Phase.PARSE_CMP_ENTITY_BEAN_CREATE_COMPONENT_DESCRIPTIONS, new CmpEntityBeanComponentDescriptionFactory(appclient));
                 if (!appclient) {
-                    processorTarget.addDeploymentProcessor(Phase.DEPENDENCIES, Phase.DEPENDENCIES_CMP, new CmpDependencyProcessor());
-                    processorTarget.addDeploymentProcessor(Phase.POST_MODULE, Phase.POST_MODULE_CMP_PARSE, new CmpParsingProcessor());
-                    processorTarget.addDeploymentProcessor(Phase.POST_MODULE, Phase.POST_MODULE_CMP_ENTITY_METADATA, new CmpEntityMetaDataProcessor(CmpEntityBeanComponentDescription.class));
-                    processorTarget.addDeploymentProcessor(Phase.POST_MODULE, Phase.POST_MODULE_CMP_STORE_MANAGER, new CmpStoreManagerProcessor());
+                    processorTarget.addDeploymentProcessor(CmpExtension.SUBSYSTEM_NAME, Phase.DEPENDENCIES, Phase.DEPENDENCIES_CMP, new CmpDependencyProcessor());
+                    processorTarget.addDeploymentProcessor(CmpExtension.SUBSYSTEM_NAME, Phase.POST_MODULE, Phase.POST_MODULE_CMP_PARSE, new CmpParsingProcessor());
+                    processorTarget.addDeploymentProcessor(CmpExtension.SUBSYSTEM_NAME, Phase.POST_MODULE, Phase.POST_MODULE_CMP_ENTITY_METADATA, new CmpEntityMetaDataProcessor(CmpEntityBeanComponentDescription.class));
+                    processorTarget.addDeploymentProcessor(CmpExtension.SUBSYSTEM_NAME, Phase.POST_MODULE, Phase.POST_MODULE_CMP_STORE_MANAGER, new CmpStoreManagerProcessor());
                 }
             }
         }, OperationContext.Stage.RUNTIME);
@@ -74,12 +77,6 @@ public class CmpSubsystemAdd extends AbstractBoottimeAddStepHandler implements D
     }
 
     protected void populateModel(final ModelNode operation, final ModelNode model) throws OperationFailedException {
-        if (operation.hasDefined(APPCLIENT)) {
-            model.get(APPCLIENT).set(operation.get(APPCLIENT));
-        }
-    }
-
-    public ModelNode getModelDescription(final Locale locale) {
-        return CmpSubsystemDescriptions.getSubystemAddDescription(locale);
+        model.setEmptyObject();
     }
 }

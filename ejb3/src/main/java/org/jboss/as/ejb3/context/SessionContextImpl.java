@@ -21,10 +21,6 @@
  */
 package org.jboss.as.ejb3.context;
 
-import java.security.Principal;
-
-import static org.jboss.as.ejb3.EjbMessages.MESSAGES;
-
 import javax.ejb.EJBLocalObject;
 import javax.ejb.EJBObject;
 import javax.ejb.SessionContext;
@@ -33,12 +29,16 @@ import javax.transaction.UserTransaction;
 import javax.xml.rpc.handler.MessageContext;
 
 import org.jboss.as.ee.component.ComponentView;
-import org.jboss.as.ee.component.interceptors.DependencyInjectionCompleteMarker;
+import org.jboss.as.ejb3.EjbMessages;
+import org.jboss.as.ejb3.component.allowedmethods.AllowedMethodsInformation;
+import org.jboss.as.ejb3.component.allowedmethods.MethodType;
 import org.jboss.as.ejb3.component.interceptors.CancellationFlag;
 import org.jboss.as.ejb3.component.session.SessionBeanComponent;
 import org.jboss.as.ejb3.component.session.SessionBeanComponentInstance;
 import org.jboss.as.ejb3.component.stateful.StatefulSessionComponent;
 import org.jboss.invocation.InterceptorContext;
+
+import static org.jboss.as.ejb3.EjbMessages.MESSAGES;
 
 /**
  * Implementation of the SessionContext interface.
@@ -63,12 +63,14 @@ public class SessionContextImpl extends EJBContextImpl implements SessionContext
     }
 
     public EJBLocalObject getEJBLocalObject() throws IllegalStateException {
+        AllowedMethodsInformation.checkAllowed(MethodType.GET_EJB_LOCAL_OBJECT);
         // to allow override per invocation
         final InterceptorContext invocation = CurrentInvocationContext.get();
         return getComponent().getEJBLocalObject(invocation);
     }
 
     public EJBObject getEJBObject() throws IllegalStateException {
+        AllowedMethodsInformation.checkAllowed(MethodType.GET_EJB_OBJECT);
         // to allow override per invocation
         final InterceptorContext invocation = CurrentInvocationContext.get();
         return getComponent().getEJBObject(invocation);
@@ -100,16 +102,15 @@ public class SessionContextImpl extends EJBContextImpl implements SessionContext
     public boolean wasCancelCalled() throws IllegalStateException {
         final InterceptorContext invocation = CurrentInvocationContext.get();
         final CancellationFlag flag = invocation.getPrivateData(CancellationFlag.class);
+        if (flag == null) {
+            throw EjbMessages.MESSAGES.noAsynchronousInvocationInProgress();
+        }
         return flag.get();
     }
 
     @Override
     public TimerService getTimerService() throws IllegalStateException {
-        final InterceptorContext invocation = CurrentInvocationContext.get();
-        boolean lifecycleCallback = invocation.getMethod() == null;
-        if (lifecycleCallback && !DependencyInjectionCompleteMarker.isDependencyInjectionComplete(invocation)) {
-            throw MESSAGES.callMethodNotAllowWhenDependencyInjectionInProgress("getTimerService()");
-        }
+        AllowedMethodsInformation.checkAllowed(MethodType.GET_TIMER_SERVICE);
         if (stateful) {
             throw MESSAGES.notAllowedFromStatefulBeans("getTimerService()");
         }
@@ -118,31 +119,19 @@ public class SessionContextImpl extends EJBContextImpl implements SessionContext
 
     @Override
     public UserTransaction getUserTransaction() throws IllegalStateException {
-        final InterceptorContext invocation = CurrentInvocationContext.get();
-        boolean lifecycleCallback = invocation.getMethod() == null;
-        if (lifecycleCallback && !DependencyInjectionCompleteMarker.isDependencyInjectionComplete(invocation)) {
-            throw MESSAGES.callMethodNotAllowWhenDependencyInjectionInProgress("getTimerService()");
-        }
+        AllowedMethodsInformation.checkAllowed(MethodType.GET_USER_TRANSACTION);
         return getComponent().getUserTransaction();
     }
 
     @Override
-    public boolean isCallerInRole(final String roleName) {
-        final InterceptorContext invocation = CurrentInvocationContext.get();
-        final boolean lifecycleCallback = invocation.getMethod() == null;
-        if (lifecycleCallback && (!stateful || !DependencyInjectionCompleteMarker.isDependencyInjectionComplete(invocation))) {
-            throw MESSAGES.lifecycleMethodNotAllowedFromStatelessSessionBean("isCallerInRole");
-        }
-        return super.isCallerInRole(roleName);
+    public void setRollbackOnly() throws IllegalStateException {
+        AllowedMethodsInformation.checkAllowed(MethodType.SET_ROLLBACK_ONLY);
+        super.setRollbackOnly();
     }
 
     @Override
-    public Principal getCallerPrincipal() {
-        final InterceptorContext invocation = CurrentInvocationContext.get();
-        final boolean lifecycleCallback = invocation.getMethod() == null;
-        if (lifecycleCallback && (!stateful || !DependencyInjectionCompleteMarker.isDependencyInjectionComplete(invocation))) {
-            throw MESSAGES.lifecycleMethodNotAllowedFromStatelessSessionBean("getCallerPrincipal");
-        }
-        return super.getCallerPrincipal();
+    public boolean getRollbackOnly() throws IllegalStateException {
+        AllowedMethodsInformation.checkAllowed(MethodType.GET_ROLLBACK_ONLY);
+        return super.getRollbackOnly();
     }
 }

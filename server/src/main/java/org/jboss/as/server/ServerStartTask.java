@@ -29,16 +29,21 @@ import java.io.ObjectInputStream;
 import java.io.ObjectInputValidation;
 import java.io.Serializable;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 
 import org.jboss.as.controller.PathAddress;
-import org.jboss.as.server.parsing.StandaloneXml;
+import org.jboss.as.controller.RunningMode;
+import org.jboss.as.controller.extension.ExtensionRegistry;
 import org.jboss.as.controller.persistence.AbstractConfigurationPersister;
 import org.jboss.as.controller.persistence.ConfigurationPersistenceException;
 import org.jboss.as.controller.persistence.ExtensibleConfigurationPersister;
+import org.jboss.as.server.parsing.StandaloneXml;
+import org.jboss.as.version.ProductConfig;
 import org.jboss.dmr.ModelNode;
+import org.jboss.modules.Module;
 import org.jboss.msc.service.ServiceActivator;
 import org.jboss.msc.service.ServiceContainer;
 import org.jboss.threads.AsyncFuture;
@@ -48,41 +53,72 @@ import org.jboss.threads.AsyncFuture;
  * in order to bootstrap it from a remote source process.
  *
  * @author <a href="mailto:david.lloyd@redhat.com">David M. Lloyd</a>
+ * @author Mike M. Clark
+ * @author Emanuel Muckenhuber
+ * @author <a href="mailto:jperkins@redhat.com">James R. Perkins</a>
  */
 public final class ServerStartTask implements ServerTask, Serializable, ObjectInputValidation {
 
-    private static final long serialVersionUID = -8505496119636153918L;
+    private static final long serialVersionUID = -1037124182656400874L;
 
     private final String serverName;
     private final int portOffset;
+    private final String hostControllerName;
+    private final String home;
     private final List<ServiceActivator> startServices;
     private final List<ModelNode> updates;
-    private final ServerEnvironment providedEnvironment;
+    private final Properties properties = new Properties();
 
-    public ServerStartTask(final String serverName, final int portOffset, final List<ServiceActivator> startServices, final List<ModelNode> updates) {
-        if (serverName == null || serverName.length() == 0) {
-            throw new IllegalArgumentException("Server name " + serverName + " is invalid; cannot be null or blank");
-        }
+    public ServerStartTask(final String hostControllerName, final String serverName, final int portOffset,
+                           final List<ServiceActivator> startServices, final List<ModelNode> updates, final Map<String, String> launchProperties) {
+        assert serverName != null && serverName.length() > 0  : "Server name \"" + serverName + "\" is invalid; cannot be null or blank";
+        assert hostControllerName != null && hostControllerName.length() > 0 : "Host Controller name \"" + hostControllerName + "\" is invalid; cannot be null or blank";
+
         this.serverName = serverName;
         this.portOffset = portOffset;
         this.startServices = startServices;
         this.updates = updates;
-        final Properties properties = new Properties(System.getProperties());
-        properties.setProperty("jboss.server.name", serverName);
-        properties.setProperty("jboss.server.deploy.dir", properties.getProperty("jboss.domain.deployment.dir"));
-        properties.setProperty("jboss.server.base.dir", properties.getProperty("jboss.domain.servers.dir") + File.separatorChar + serverName);
-        providedEnvironment = new ServerEnvironment(properties, System.getenv(), null, ServerEnvironment.LaunchType.DOMAIN);
+
+        this.hostControllerName = hostControllerName;
+
+        this.home = SecurityActions.getSystemProperty("jboss.home.dir");
+        String serverBaseDir = SecurityActions.getSystemProperty("jboss.domain.servers.dir") + File.separatorChar + serverName;
+        properties.setProperty(ServerEnvironment.SERVER_NAME, serverName);
+        properties.setProperty(ServerEnvironment.HOME_DIR, home);
+        properties.setProperty(ServerEnvironment.SERVER_BASE_DIR, serverBaseDir);
+        properties.setProperty(ServerEnvironment.CONTROLLER_TEMP_DIR, SecurityActions.getSystemProperty("jboss.domain.temp.dir"));
+        properties.setProperty(ServerEnvironment.DOMAIN_BASE_DIR, SecurityActions.getSystemProperty(ServerEnvironment.DOMAIN_BASE_DIR));
+        properties.setProperty(ServerEnvironment.DOMAIN_CONFIG_DIR, SecurityActions.getSystemProperty(ServerEnvironment.DOMAIN_CONFIG_DIR));
+
+        // Provide any other properties that standalone Main.determineEnvironment() would read
+        // from system properties and pass in to ServerEnvironment
+        setPropertyIfFound(launchProperties, ServerEnvironment.JAVA_EXT_DIRS, properties);
+        setPropertyIfFound(launchProperties, ServerEnvironment.QUALIFIED_HOST_NAME, properties);
+        setPropertyIfFound(launchProperties, ServerEnvironment.HOST_NAME, properties);
+        setPropertyIfFound(launchProperties, ServerEnvironment.NODE_NAME, properties);
+        @SuppressWarnings("deprecation")
+        String deprecated = ServerEnvironment.MODULES_DIR;
+        setPropertyIfFound(launchProperties, deprecated, properties);
+        setPropertyIfFound(launchProperties, ServerEnvironment.BUNDLES_DIR, properties);
+        setPropertyIfFound(launchProperties, ServerEnvironment.SERVER_DATA_DIR, properties);
+        setPropertyIfFound(launchProperties, ServerEnvironment.SERVER_CONTENT_DIR, properties);
+        setPropertyIfFound(launchProperties, ServerEnvironment.SERVER_LOG_DIR, properties);
+        setPropertyIfFound(launchProperties, ServerEnvironment.SERVER_TEMP_DIR, properties);
     }
 
     @Override
     public AsyncFuture<ServiceContainer> run(final List<ServiceActivator> runServices) {
         final Bootstrap bootstrap = Bootstrap.Factory.newInstance();
-        final Bootstrap.Configuration configuration = new Bootstrap.Configuration();
-        configuration.setServerEnvironment(providedEnvironment);
+        final ProductConfig productConfig = new ProductConfig(Module.getBootModuleLoader(), home);
+        // Create server environment on the server, so that the system properties are getting initialized on the right side
+        final ServerEnvironment providedEnvironment = new ServerEnvironment(hostControllerName, properties,
+                SecurityActions.getSystemEnvironment(), null, ServerEnvironment.LaunchType.DOMAIN, RunningMode.NORMAL, productConfig);
+        final Bootstrap.Configuration configuration = new Bootstrap.Configuration(providedEnvironment);
+        final ExtensionRegistry extensionRegistry = configuration.getExtensionRegistry();
         final Bootstrap.ConfigurationPersisterFactory configurationPersisterFactory = new Bootstrap.ConfigurationPersisterFactory() {
             @Override
             public ExtensibleConfigurationPersister createConfigurationPersister(ServerEnvironment serverEnvironment, ExecutorService executorService) {
-                return new AbstractConfigurationPersister(new StandaloneXml(configuration.getModuleLoader(), executorService)) {
+                ExtensibleConfigurationPersister persister = new AbstractConfigurationPersister(new StandaloneXml(configuration.getModuleLoader(), executorService, extensionRegistry)) {
 
                     private final PersistenceResource pr = new PersistenceResource() {
 
@@ -105,6 +141,8 @@ public final class ServerStartTask implements ServerTask, Serializable, ObjectIn
                         return updates;
                     }
                 };
+                extensionRegistry.setWriterRegistry(persister);
+                return persister;
             }
         };
         configuration.setConfigurationPersisterFactory(configurationPersisterFactory);
@@ -114,21 +152,30 @@ public final class ServerStartTask implements ServerTask, Serializable, ObjectIn
     @Override
     public void validateObject() throws InvalidObjectException {
         if (serverName == null) {
-            throw new InvalidObjectException("serverName is null");
+            throw ServerMessages.MESSAGES.invalidObject("serverName");
+        }
+        if(hostControllerName == null) {
+            throw ServerMessages.MESSAGES.invalidObject("hostControllerName");
         }
         if (portOffset < 0) {
-            throw new InvalidObjectException("portOffset is out of range");
+            throw ServerMessages.MESSAGES.invalidPortOffset();
         }
         if (updates == null) {
-            throw new InvalidObjectException("updates is null");
+            throw ServerMessages.MESSAGES.invalidObject("updates");
         }
         if (startServices == null) {
-            throw new InvalidObjectException("startServices is null");
+            throw ServerMessages.MESSAGES.invalidObject("startServices");
         }
     }
 
     private void readObject(ObjectInputStream ois) throws ClassNotFoundException, IOException {
         ois.defaultReadObject();
         ois.registerValidation(this, 100);
+    }
+
+    static void setPropertyIfFound(final Map<String, String> launchProperties, final String key, final Properties properties) {
+        if (launchProperties.containsKey(key)) {
+            properties.setProperty(key, launchProperties.get(key));
+        }
     }
 }

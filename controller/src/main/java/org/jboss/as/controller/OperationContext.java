@@ -54,6 +54,18 @@ public interface OperationContext {
     void addStep(OperationStepHandler step, Stage stage) throws IllegalArgumentException;
 
     /**
+     * Add an execution step to this operation process.  Runtime operation steps are automatically added after
+     * configuration operation steps.  Since only one operation may perform runtime work at a time, this method
+     * may block until other runtime operations have completed.
+     *
+     * @param step the step to add
+     * @param stage the stage at which the operation applies
+     * @param addFirst add the handler before the others
+     * @throws IllegalArgumentException if the step handler is not valid for this controller type
+     */
+    void addStep(OperationStepHandler step, Stage stage, boolean addFirst) throws IllegalArgumentException;
+
+    /**
      * Add an execution step to this operation process, writing any output to the response object
      * associated with the current step.
      * Runtime operation steps are automatically added after configuration operation steps.  Since only one operation
@@ -78,6 +90,20 @@ public interface OperationContext {
      * @throws IllegalArgumentException if the step handler is not valid for this controller type
      */
     void addStep(ModelNode response, ModelNode operation, OperationStepHandler step, Stage stage) throws IllegalArgumentException;
+
+    /**
+     * Add an execution step to this operation process.  Runtime operation steps are automatically added after
+     * configuration operation steps.  Since only one operation may perform runtime work at a time, this method
+     * may block until other runtime operations have completed.
+     *
+     * @param response the response which the nested step should populate
+     * @param operation the operation body to pass into the added step
+     * @param step the step to add
+     * @param stage the stage at which the operation applies
+     * @param addFirst add the handler before the others
+     * @throws IllegalArgumentException if the step handler is not valid for this controller type
+     */
+    void addStep(ModelNode response, ModelNode operation, OperationStepHandler step, Stage stage, boolean addFirst) throws IllegalArgumentException;
 
     /**
      * Get a stream which is attached to the request.
@@ -109,6 +135,41 @@ public interface OperationContext {
     boolean hasResult();
 
     /**
+     * Get the failure description response node, creating it if necessary.
+     *
+     * @return the failure description
+     */
+    ModelNode getFailureDescription();
+
+    /**
+     * Returns whether {@link #getFailureDescription()} has been invoked.
+     *
+     * @return {@code true} if {@link #getFailureDescription()} has been invoked
+     */
+    boolean hasFailureDescription();
+
+    /**
+     * Get the node into which the details of server results in a multi-server managed domain operation should be written.
+     *
+     * @return the server results node
+     *
+     * @throws IllegalStateException if this process is not a {@link ProcessType#HOST_CONTROLLER}
+     */
+    ModelNode getServerResults();
+
+    /**
+     * Get the response-headers response node, creating it if necessary. Ordinary operation step handlers should not
+     * use this API for manipulating the {@code operation-requires-restart} or {@code process-state} headers. Use
+     * {@link #reloadRequired()} and {@link #restartRequired()} for that. (Some core operation step handlers used
+     * for coordinating execution of operations across different processes in a managed domain may use this
+     * method to manipulate the {@code operation-requires-restart} or {@code process-state} headers, but that is
+     * an exception.)
+     *
+     * @return the response-headers node
+     */
+    ModelNode getResponseHeaders();
+
+    /**
      * Complete a step, returning the overall operation result.  The step handler calling this operation should append
      * its result status to the operation result before calling this method.  The return value should be checked
      * to determine whether the operation step should be rolled back.
@@ -132,27 +193,30 @@ public interface OperationContext {
      * @param rollbackHandler the handler for any rollback notification. Cannot be {@code null}.
      */
     void completeStep(RollbackHandler rollbackHandler);
+    /**
+     * Get the type of process in which this operation is executing.
+     *
+     * @return the process type. Will not be {@code null}
+     */
+    ProcessType getProcessType();
 
     /**
-     * Get the failure description result node, creating it if necessary.
+     * Gets the running mode of the process.
      *
-     * @return the failure description
+     * @return   the running mode. Will not be {@code null}
      */
-    ModelNode getFailureDescription();
-
-    /**
-     * Returns whether {@link #getFailureDescription()} has been invoked.
-     *
-     * @return {@code true} if {@link #getFailureDescription()} has been invoked
-     */
-    boolean hasFailureDescription();
+    RunningMode getRunningMode();
 
     /**
      * Get the operation context type.  This can be used to determine whether an operation is executing on a
      * server or on a host controller, etc.
      *
      * @return the operation context type
+     *
+     * @deprecated Use {@link OperationContext#getProcessType()} and {@link OperationContext#getRunningMode()} or for the most common usage, {@link OperationContext#isNormalServer()}
      */
+    @Deprecated
+    @SuppressWarnings("deprecation")
     Type getType();
 
     /**
@@ -161,6 +225,17 @@ public interface OperationContext {
      * @return whether the controller is currently booting
      */
     boolean isBooting();
+
+    /**
+     * Convenience method to check if the {@link #getProcessType() process type} is {@link ProcessType#isServer() a server type}
+     * and the {@link #getRunningMode() running mode} is {@link RunningMode#NORMAL}. The typical usage would
+     * be for handlers that are only meant to execute on a normally running server, not on a host controller
+     * or on a {@link RunningMode#ADMIN_ONLY} server.
+     *
+     * @return {@code true} if the {@link #getProcessType() process type} is {@link ProcessType#isServer() a server type}
+     *         and the {@link #getRunningMode() running mode} is {@link RunningMode#NORMAL}.
+     */
+    boolean isNormalServer();
 
     /**
      * Determine whether the current operation is bound to be rolled back.
@@ -242,8 +317,17 @@ public interface OperationContext {
     ManagementResourceRegistration getResourceRegistrationForUpdate();
 
     /**
+     * Get a read only view of the root managed resource registration.
+     *
+     * @return the root resource registration
+     */
+    ImmutableManagementResourceRegistration getRootResourceRegistration();
+
+    /**
      * Get the service registry.  If the step is not a runtime operation handler step, an exception will be thrown.  The
-     * returned registry must not be used to remove services.
+     * returned registry must not be used to remove services, if an attempt is made to call {@code ServiceController.setMode(REMOVE)}
+     * on a {@code ServiceController} returned from this registry an {@code IllegalStateException} will be thrown. To
+     * remove a service call {@link #removeService(org.jboss.msc.service.ServiceName)}.
      *
      * @param modify {@code true} if the operation may be modifying a service, {@code false} otherwise
      * @return the service registry
@@ -347,37 +431,80 @@ public interface OperationContext {
     void addResource(PathAddress address, Resource toAdd);
 
     /**
-     * Get the addressable resource for read only operations.
+     * Get the resource for read only operations, relative to the executed operation address. Reads never block.
+     * If a write action was previously performed, the value read will be from an uncommitted copy of the the management model.<br/>
      *
-     * @param address the address
+     * Note: By default the returned resource is read-only copy of the entire sub-model. In case this is not required use
+     * {@link OperationContext#readResource(PathAddress, boolean)} instead.
+     *
+     * @param relativeAddress the (possibly empty) address where the resource should be added. The address is relative to the
+     *                address of the operation being executed
      * @return the resource
      */
-    Resource readResource(PathAddress address);
+    Resource readResource(PathAddress relativeAddress);
 
     /**
-     * Get an addressable resource for update operations.
+     * Get the resource for read only operations, relative to the executed operation address. Reads never block.
+     * If a write action was previously performed, the value read will be from an uncommitted copy of the the management model.
      *
-     * @param address the address
+     * @param relativeAddress the (possibly empty) address where the resource should be added. The address is relative to the
+     *                address of the operation being executed
+     * @param recursive whether the model should be read recursively or not
      * @return the resource
      */
-    Resource readResourceForUpdate(PathAddress address);
+    Resource readResource(PathAddress relativeAddress, boolean recursive);
+
+    /**
+     * Read a addressable resource from the root of the model. Reads never block. If a write action was previously performed,
+     * the value read will be from an uncommitted copy of the the management model.<br/>
+     *
+     * Note: By default the returned resource is read-only copy of the entire sub-model. In case this is not required use
+     * {@link OperationContext#readResourceFromRoot(PathAddress, boolean)} instead.
+     *
+     * @param address the (possibly empty) address
+     * @return a read-only reference from the model
+     */
+    Resource readResourceFromRoot(PathAddress address);
+
+    /**
+     * Read a addressable resource from the root of the model. Reads never block. If a write action was previously performed,
+     * the value read will be from an uncommitted copy of the the management model.
+     *
+     * @param address the (possibly empty) address
+     * @param recursive whether the model should be read recursively or not
+     * @return a read-only reference from the model
+     */
+    Resource readResourceFromRoot(PathAddress address, boolean recursive);
+
+    /**
+     * Get an addressable resource for update operations. Since only one operation may write at a time, this operation
+     * may block until other writing operations have completed.
+     *
+     * @param relativeAddress the (possibly empty) address where the resource should be added. The address is relative to the
+     *                address of the operation being executed
+     * @return the resource
+     */
+    Resource readResourceForUpdate(PathAddress relativeAddress);
 
     /**
      * Remove a resource relative to the executed operation address. Since only one operation
      * may write at a time, this operation may block until other writing operations have completed.
      *
-     * @param address the (possibly empty) address to remove
+     * @param relativeAddress the (possibly empty) address where the resource should be removed. The address is relative to the
+     *                address of the operation being executed
      * @return the old value of the node
      * @throws UnsupportedOperationException if the calling operation is not a model operation
      */
-    Resource removeResource(PathAddress address) throws UnsupportedOperationException;
+    Resource removeResource(PathAddress relativeAddress) throws UnsupportedOperationException;
 
     /**
      * Get a read-only reference of the entire management model.  The structure of the returned model may depend
      * on the context type (domain vs. server).
      *
      * @return the read-only resource
+     * @deprecated Use {@link OperationContext#readResourceFromRoot(PathAddress, boolean)}
      */
+    @Deprecated
     Resource getRootResource();
 
      /**
@@ -428,7 +555,7 @@ public interface OperationContext {
     /**
      * Marks a resource to indicate that it's backing service(s) will be restarted.
      * This is to ensure that a restart only occurs once, even if there are multiple updates.
-     * When true is returned the caller has "aquired" the mark and should proceed with the
+     * When true is returned the caller has "acquired" the mark and should proceed with the
      * restart, when false, the caller should take no additional action.
      *
      * The passed owner is compared by instance when a call to {@link #revertReloadRequired()}.
@@ -474,6 +601,49 @@ public interface OperationContext {
     ModelNode resolveExpressions(ModelNode node) throws OperationFailedException;
 
     /**
+     * Retrieves an object that has been attached to this context.
+     *
+     * @param key the key to the attachment.
+     * @param <T> the value type of the attachment.
+     *
+     * @return the attachment if found otherwise {@code null}.
+     */
+    <T> T getAttachment(AttachmentKey<T> key);
+
+    /**
+     * Attaches an arbitrary object to this context.
+     *
+     * @param key   they attachment key used to ensure uniqueness and used for retrieval of the value.
+     * @param value the value to store.
+     * @param <T>   the value type of the attachment.
+     *
+     * @return the previous value associated with the key or {@code null} if there was no previous value.
+     */
+    <T> T attach(AttachmentKey<T> key, T value);
+
+    /**
+     * Attaches an arbitrary object to this context only if the object was not already attached. If a value has already
+     * been attached with the key provided, the current value associated with the key is returned.
+     *
+     * @param key   they attachment key used to ensure uniqueness and used for retrieval of the value.
+     * @param value the value to store.
+     * @param <T>   the value type of the attachment.
+     *
+     * @return the previous value associated with the key or {@code null} if there was no previous value.
+     */
+    <T> T attachIfAbsent(AttachmentKey<T> key, T value);
+
+    /**
+     * Detaches or removes the value from this context.
+     *
+     * @param key the key to the attachment.
+     * @param <T> the value type of the attachment.
+     *
+     * @return the attachment if found otherwise {@code null}.
+     */
+    <T> T detach(AttachmentKey<T> key);
+
+    /**
      * The stage at which a step should apply.
      */
     enum Stage {
@@ -496,7 +666,7 @@ public interface OperationContext {
         VERIFY,
         /**
          * The step performs any actions needed to cause the operation to take effect on the relevant servers
-         * in the domain. Adding a step in this stage is only allowed when the type is {@link Type#HOST}.
+         * in the domain. Adding a step in this stage is only allowed when the process type is {@link ProcessType#HOST_CONTROLLER}.
          */
         DOMAIN,
         /**
@@ -525,7 +695,10 @@ public interface OperationContext {
 
     /**
      * The type of controller this operation is being applied to.
+     *
+     * @deprecated Use {@link OperationContext#getProcessType()} and {@link OperationContext#getRunningMode()}
      */
+    @Deprecated
     enum Type {
         /**
          * A host controller with an active runtime.
@@ -536,9 +709,30 @@ public interface OperationContext {
          */
         SERVER,
         /**
-         * A server instance which is in management-only mode (no runtime container is available).
+         * A server instance which is in {@link RunningMode#ADMIN_ONLY admin-only} mode.
          */
-        MANAGEMENT,
+        MANAGEMENT;
+
+        /**
+         * Provides the {@code Type} that matches the given {@code processType} and {@code runningMode}.
+         *
+         * @param processType the process type. Cannot be {@code null}
+         * @param runningMode the running mode. Cannot be {@code null}
+         * @return the type
+         */
+        @Deprecated
+        @SuppressWarnings("deprecation")
+        static Type getType(final ProcessType processType, final RunningMode runningMode) {
+            if (processType.isServer()) {
+                if (runningMode == RunningMode.NORMAL) {
+                    return SERVER;
+                } else {
+                    return MANAGEMENT;
+                }
+            } else {
+                return HOST;
+            }
+        }
     }
 
     /**
@@ -590,5 +784,48 @@ public interface OperationContext {
          *                 that registered this rollback handler.
          */
         void handleRollback(OperationContext context, ModelNode operation);
+    }
+
+    /**
+     * An attachment key instance.
+     *
+     * @param <T> the attachment value type
+     */
+    @SuppressWarnings("UnusedDeclaration")
+    public static final class AttachmentKey<T> {
+        private final Class<T> valueClass;
+
+        /**
+         * Construct a new instance.
+         *
+         * @param valueClass the value type.
+         */
+        private AttachmentKey(final Class<T> valueClass) {
+            this.valueClass = valueClass;
+        }
+
+        /**
+         * Cast the value to the type of this attachment key.
+         *
+         * @param value the value
+         *
+         * @return the cast value
+         */
+        public T cast(final Object value) {
+            return valueClass.cast(value);
+        }
+
+        /**
+         * Construct a new simple attachment key.
+         *
+         * @param valueClass the value class
+         * @param <T>        the attachment type
+         *
+         * @return the new instance
+         */
+        @SuppressWarnings("unchecked")
+        public static <T> AttachmentKey<T> create(final Class<? super T> valueClass) {
+            return new AttachmentKey(valueClass);
+        }
     }
 }

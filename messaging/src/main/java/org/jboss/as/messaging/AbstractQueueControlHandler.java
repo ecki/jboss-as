@@ -23,6 +23,7 @@
 package org.jboss.as.messaging;
 
 import static org.jboss.as.messaging.CommonAttributes.FILTER;
+import static org.jboss.as.messaging.ManagementUtil.rollbackOperationWithNoHandler;
 import static org.jboss.as.messaging.MessagingLogger.ROOT_LOGGER;
 import static org.jboss.as.messaging.MessagingMessages.MESSAGES;
 
@@ -119,7 +120,8 @@ public abstract class AbstractQueueControlHandler<T> extends AbstractRuntimeOnly
 
         final boolean forJMS = isJMS();
 
-        final EnumSet<OperationEntry.Flag> readOnly = EnumSet.of(OperationEntry.Flag.READ_ONLY);
+        final EnumSet<OperationEntry.Flag> readOnly = EnumSet.of(OperationEntry.Flag.READ_ONLY, OperationEntry.Flag.RUNTIME_ONLY);
+        final EnumSet<OperationEntry.Flag> runtimeOnly = EnumSet.of(OperationEntry.Flag.RUNTIME_ONLY);
 
         registry.registerOperationHandler(LIST_MESSAGES, this, new DescriptionProvider() {
             @Override
@@ -147,70 +149,70 @@ public abstract class AbstractQueueControlHandler<T> extends AbstractRuntimeOnly
             public ModelNode getModelDescription(Locale locale) {
                 return MessagingDescriptions.getRemoveMessage(locale, forJMS);
             }
-        });
+        }, runtimeOnly);
 
         registry.registerOperationHandler(REMOVE_MESSAGES, this, new DescriptionProvider() {
             @Override
             public ModelNode getModelDescription(Locale locale) {
                 return MessagingDescriptions.getRemoveMessages(locale);
             }
-        });
+        }, runtimeOnly);
 
         registry.registerOperationHandler(EXPIRE_MESSAGES, this, new DescriptionProvider() {
             @Override
             public ModelNode getModelDescription(Locale locale) {
                 return MessagingDescriptions.getExpireMessages(locale);
             }
-        });
+        }, runtimeOnly);
 
         registry.registerOperationHandler(EXPIRE_MESSAGE, this, new DescriptionProvider() {
             @Override
             public ModelNode getModelDescription(Locale locale) {
                 return MessagingDescriptions.getExpireMessage(locale, forJMS);
             }
-        });
+        }, runtimeOnly);
 
         registry.registerOperationHandler(SEND_MESSAGE_TO_DEAD_LETTER_ADDRESS, this, new DescriptionProvider() {
             @Override
             public ModelNode getModelDescription(Locale locale) {
                 return MessagingDescriptions.getSendMessageToDeadLetterAddress(locale, forJMS);
             }
-        });
+        }, runtimeOnly);
 
         registry.registerOperationHandler(SEND_MESSAGES_TO_DEAD_LETTER_ADDRESS, this, new DescriptionProvider() {
             @Override
             public ModelNode getModelDescription(Locale locale) {
                 return MessagingDescriptions.getSendMessagesToDeadLetterAddress(locale);
             }
-        });
+        }, runtimeOnly);
 
         registry.registerOperationHandler(CHANGE_MESSAGE_PRIORITY, this, new DescriptionProvider() {
             @Override
             public ModelNode getModelDescription(Locale locale) {
                 return MessagingDescriptions.getChangeMessagePriority(locale, forJMS);
             }
-        });
+        }, runtimeOnly);
 
         registry.registerOperationHandler(CHANGE_MESSAGES_PRIORITY, this, new DescriptionProvider() {
             @Override
             public ModelNode getModelDescription(Locale locale) {
                 return MessagingDescriptions.getChangeMessagesPriority(locale);
             }
-        });
+        }, runtimeOnly);
 
         registry.registerOperationHandler(MOVE_MESSAGE, this, new DescriptionProvider() {
             @Override
             public ModelNode getModelDescription(Locale locale) {
                 return MessagingDescriptions.getMoveMessage(locale, forJMS);
             }
-        });
+        }, runtimeOnly);
 
         registry.registerOperationHandler(MOVE_MESSAGES, this, new DescriptionProvider() {
             @Override
             public ModelNode getModelDescription(Locale locale) {
                 return MessagingDescriptions.getMoveMessages(locale);
             }
-        });
+        }, runtimeOnly);
 
         // TODO dmr-based LIST_MESSAGE_COUNTER
 
@@ -233,7 +235,7 @@ public abstract class AbstractQueueControlHandler<T> extends AbstractRuntimeOnly
             public ModelNode getModelDescription(Locale locale) {
                 return MessagingDescriptions.getDescriptionOnlyOperation(locale, RESET_MESSAGE_COUNTER, "queue");
             }
-        });
+        }, runtimeOnly);
 
         // TODO dmr-based LIST_MESSAGE_COUNTER_HISTORY
 
@@ -256,14 +258,14 @@ public abstract class AbstractQueueControlHandler<T> extends AbstractRuntimeOnly
             public ModelNode getModelDescription(Locale locale) {
                 return MessagingDescriptions.getDescriptionOnlyOperation(locale, PAUSE, "queue");
             }
-        });
+        }, runtimeOnly);
 
         registry.registerOperationHandler(RESUME, this, new DescriptionProvider() {
             @Override
             public ModelNode getModelDescription(Locale locale) {
                 return MessagingDescriptions.getDescriptionOnlyOperation(locale, RESUME, "queue");
             }
-        });
+        }, runtimeOnly);
 
         // TODO LIST_CONSUMERS
 
@@ -285,34 +287,29 @@ public abstract class AbstractQueueControlHandler<T> extends AbstractRuntimeOnly
         HornetQServer hqServer = HornetQServer.class.cast(hqService.getValue());
         DelegatingQueueControl<T> control = getQueueControl(hqServer, queueName);
 
+        if (control == null) {
+            rollbackOperationWithNoHandler(context, operation);
+            return;
+        }
+
         boolean reversible = false;
         Object handback = null;
         try {
             if (LIST_MESSAGES.equals(operationName)) {
-                singleOptionalFilterValidator.validate(operation);
-                String filter = operation.hasDefined(FILTER.getName()) ? operation.get(FILTER.getName()).asString() : null;
-                String json = control.listMessagesAsJSON(filter);
+                String json = control.listMessagesAsJSON(getFilter(operation));
                 context.getResult().set(ModelNode.fromJSONString(json));
             } else if (LIST_MESSAGES_AS_JSON.equals(operationName)) {
-                singleOptionalFilterValidator.validate(operation);
-                String filter = operation.hasDefined(FILTER.getName()) ? operation.get(FILTER.getName()).asString() : null;
-                context.getResult().set(control.listMessagesAsJSON(filter));
+                context.getResult().set(control.listMessagesAsJSON(getFilter(operation)));
             } else if (COUNT_MESSAGES.equals(operationName)) {
-                singleOptionalFilterValidator.validate(operation);
-                String filter = operation.hasDefined(FILTER.getName()) ? operation.get(FILTER.getName()).asString() : null;
-                context.getResult().set(control.countMessages(filter));
+                context.getResult().set(control.countMessages(getFilter(operation)));
             } else if (REMOVE_MESSAGE.equals(operationName)) {
                 singleMessageIdValidator.validate(operation);
                 ModelNode id = operation.require(MESSAGE_ID);
                 context.getResult().set(control.removeMessage(id));
             } else if (REMOVE_MESSAGES.equals(operationName)) {
-                singleOptionalFilterValidator.validate(operation);
-                String filter = operation.hasDefined(FILTER.getName()) ? operation.get(FILTER.getName()).asString() : null;
-                context.getResult().set(control.removeMessages(filter));
+                context.getResult().set(control.removeMessages(getFilter(operation)));
             } else if (EXPIRE_MESSAGES.equals(operationName)) {
-                singleOptionalFilterValidator.validate(operation);
-                String filter = operation.hasDefined(FILTER.getName()) ? operation.get(FILTER.getName()).asString() : null;
-                context.getResult().set(control.expireMessages(filter));
+                context.getResult().set(control.expireMessages(getFilter(operation)));
             } else if (EXPIRE_MESSAGE.equals(operationName)) {
                 singleMessageIdValidator.validate(operation);
                 ModelNode id = operation.require(MESSAGE_ID);
@@ -322,9 +319,7 @@ public abstract class AbstractQueueControlHandler<T> extends AbstractRuntimeOnly
                 ModelNode id = operation.require(MESSAGE_ID);
                 context.getResult().set(control.sendMessageToDeadLetterAddress(id));
             } else if (SEND_MESSAGES_TO_DEAD_LETTER_ADDRESS.equals(operationName)) {
-                singleOptionalFilterValidator.validate(operation);
-                String filter = operation.hasDefined(FILTER.getName()) ? operation.get(FILTER.getName()).asString() : null;
-                context.getResult().set(control.sendMessagesToDeadLetterAddress(filter));
+                context.getResult().set(control.sendMessagesToDeadLetterAddress(getFilter(operation)));
             } else if (CHANGE_MESSAGE_PRIORITY.equals(operationName)) {
                 changeMessagePriorityValidator.validate(operation);
                 ModelNode id = operation.require(MESSAGE_ID);
@@ -332,9 +327,8 @@ public abstract class AbstractQueueControlHandler<T> extends AbstractRuntimeOnly
                 context.getResult().set(control.changeMessagePriority(id, priority));
             } else if (CHANGE_MESSAGES_PRIORITY.equals(operationName)) {
                 changeMessagesPriorityValidator.validate(operation);
-                String filter = operation.hasDefined(FILTER.getName()) ? operation.get(FILTER.getName()).asString() : null;
                 int priority = operation.require(NEW_PRIORITY).asInt();
-                context.getResult().set(control.changeMessagesPriority(filter, priority));
+                context.getResult().set(control.changeMessagesPriority(getFilter(operation), priority));
             } else if (MOVE_MESSAGE.equals(operationName)) {
                 moveMessageValidator.validate(operation);
                 ModelNode id = operation.require(MESSAGE_ID);
@@ -347,13 +341,12 @@ public abstract class AbstractQueueControlHandler<T> extends AbstractRuntimeOnly
                 }
             } else if (MOVE_MESSAGES.equals(operationName)) {
                 moveMessagesValidator.validate(operation);
-                String filter = operation.hasDefined(FILTER.getName()) ? operation.get(FILTER.getName()).asString() : null;
                 String otherQueue = operation.require(OTHER_QUEUE_NAME).asString();
                 if (operation.hasDefined(REJECT_DUPLICATES)) {
                     boolean reject = operation.get(REJECT_DUPLICATES).asBoolean();
-                    context.getResult().set(control.moveMessages(filter, otherQueue, reject));
+                    context.getResult().set(control.moveMessages(getFilter(operation), otherQueue, reject));
                 } else {
-                    context.getResult().set(control.moveMessages(filter, otherQueue));
+                    context.getResult().set(control.moveMessages(getFilter(operation), otherQueue));
                 }
             } else if (LIST_MESSAGE_COUNTER_AS_JSON.equals(operationName)) {
                 context.getResult().set(control.listMessageCounter());
@@ -377,8 +370,8 @@ public abstract class AbstractQueueControlHandler<T> extends AbstractRuntimeOnly
             } else if (LIST_CONSUMERS_AS_JSON.equals(operationName)) {
                 context.getResult().set(control.listConsumersAsJSON());
             } else {
-                // TODO LIST_MESSAGE_COUNTER, LIST_MESSAGE_COUNTER_HISTORY, LIST_CONSUMERS
-                handback = handleAdditonalOperation(operationName, operation, context, control.getDelegate());
+                // TODO dmr-based LIST_MESSAGE_COUNTER, LIST_MESSAGE_COUNTER_HISTORY, LIST_CONSUMERS
+                handback = handleAdditionalOperation(operationName, operation, context, control.getDelegate());
                 reversible = handback == null;
             }
         } catch (RuntimeException e) {
@@ -394,7 +387,7 @@ public abstract class AbstractQueueControlHandler<T> extends AbstractRuntimeOnly
                 } else if (RESUME.equals(operationName)) {
                     control.pause();
                 } else {
-                    revertAdditonalOperation(operationName, operation, context, control.getDelegate(), handback);
+                    revertAdditionalOperation(operationName, operation, context, control.getDelegate(), handback);
                 }
             } catch (Exception e) {
                 ROOT_LOGGER.revertOperationFailed(e, getClass().getSimpleName(),
@@ -406,17 +399,23 @@ public abstract class AbstractQueueControlHandler<T> extends AbstractRuntimeOnly
 
     protected abstract DelegatingQueueControl<T> getQueueControl(HornetQServer hqServer, String queueName);
 
-    protected abstract Object handleAdditonalOperation(final String operationName, final ModelNode operation,
-                                                     final OperationContext context, T queueControl) throws OperationFailedException;
+    protected abstract Object handleAdditionalOperation(final String operationName, final ModelNode operation,
+                                                        final OperationContext context, T queueControl) throws OperationFailedException;
 
-    protected abstract void revertAdditonalOperation(final String operationName, final ModelNode operation,
-                                                     final OperationContext context, T queueControl, Object handback);
+    protected abstract void revertAdditionalOperation(final String operationName, final ModelNode operation,
+                                                      final OperationContext context, T queueControl, Object handback);
 
     protected abstract boolean isJMS();
 
     protected final void throwUnimplementedOperationException(final String operationName) {
         // Bug
         throw MESSAGES.unsupportedOperation(operationName);
+    }
+
+    private String getFilter(ModelNode operation) throws OperationFailedException {
+        singleOptionalFilterValidator.validate(operation);
+        String filter = operation.hasDefined(FILTER.getName()) ? operation.get(FILTER.getName()).asString() : null;
+        return filter;
     }
 
     /**

@@ -27,7 +27,7 @@ import java.util.Map;
 
 /**
  * <p>
- * Enumeration of {@code ORB} initializer groups. Each member contains one or more initiliazer classes that belong to a
+ * Enumeration of {@code ORB} initializer groups. Each member contains one or more initializer classes that belong to a
  * specific group.
  * </p>
  *
@@ -37,17 +37,19 @@ public enum ORBInitializer {
 
     UNKNOWN("", ""),
 
-    // codebase group contains the initializer that inserts the codebase location into generated IORs.
-    CODEBASE("codebase", "org.jboss.as.jacorb.codebase.CodebaseInterceptorInitializer"),
-
     // the security group encompasses both CSIv2 and SAS initializers.
     SECURITY("security", "org.jboss.as.jacorb.csiv2.CSIv2Initializer", "org.jboss.as.jacorb.csiv2.SASInitializer"),
 
     // the transaction group encompasses the Interposition and InboundCurrent initializers.
-    TRANSACTIONS("transaction",
+    TRANSACTIONS("transactions",
             "com.arjuna.ats.jts.orbspecific.jacorb.interceptors.interposition.InterpositionORBInitializerImpl",
             "com.arjuna.ats.jbossatx.jts.InboundTransactionCurrentInitializer",
-            "org.jboss.as.jacorb.tm.TxIORInterceptorInitializer");
+            "org.jboss.as.jacorb.tm.TxIORInterceptorInitializer",
+            "org.jboss.as.jacorb.tm.TxServerInterceptorInitializer"),
+
+    // the transaction group that is used for spec compliant mode without JTS
+    SPEC_TRANSACTIONS("specTransactions",
+            "org.jboss.as.jacorb.tm.TxServerInterceptorInitializer");
 
     private final String initializerName;
     private final String[] initializerClasses;
@@ -110,7 +112,7 @@ public enum ORBInitializer {
      * @return the {@code ORBInitializer} identified by the name. If no implementation can be found, the
      *         {@code ORBInitializer.UNKNOWN} type is returned.
      */
-    static ORBInitializer forName(final String initializerName) {
+    static ORBInitializer fromName(final String initializerName) {
         final ORBInitializer element = MAP.get(initializerName);
         return element == null ? UNKNOWN : element;
     }

@@ -22,8 +22,7 @@
 
 package org.jboss.as.jmx;
 
-import static org.jboss.logging.Logger.Level.ERROR;
-import static org.jboss.logging.Logger.Level.WARN;
+import javax.management.ObjectName;
 
 import org.jboss.logging.BasicLogger;
 import org.jboss.logging.Cause;
@@ -32,7 +31,8 @@ import org.jboss.logging.Logger;
 import org.jboss.logging.Message;
 import org.jboss.logging.MessageLogger;
 
-import javax.management.ObjectName;
+import static org.jboss.logging.Logger.Level.ERROR;
+import static org.jboss.logging.Logger.Level.WARN;
 
 /**
  * Date: 05.11.2011
@@ -57,7 +57,7 @@ public interface JmxLogger extends BasicLogger {
     void cannotShutdownRmiRegistry(@Cause Throwable cause);
 
     /**
-     * Creates an exception indicating the JMX connector could not undbind from the registry.
+     * Creates an exception indicating the JMX connector could not unbind from the registry.
      *
      * @param cause the cause of the error.
      */
@@ -66,7 +66,7 @@ public interface JmxLogger extends BasicLogger {
     void cannotStopConnectorServer(@Cause Throwable cause);
 
     /**
-     * Creates an exception indicating the JMX connector could not undbind from the registry.
+     * Creates an exception indicating the JMX connector could not unbind from the registry.
      *
      * @param cause the cause of the error.
      */
@@ -90,4 +90,13 @@ public interface JmxLogger extends BasicLogger {
     @LogMessage(level = ERROR)
     @Message(id = 11304, value = "Failed to unregister [%s]")
     void unregistrationFailure(@Cause Throwable cause, ObjectName name);
+
+
+    /**
+     * The jmx-connector element is no longer supported.
+     *
+     */
+    @LogMessage(level = WARN)
+    @Message(id = 11305, value = "<jmx-connector/> is no longer supporting. <remoting-connector/> should be used instead to allow remote connections via JBoss Remoting.")
+    void jmxConnectorNotSupported();
 }

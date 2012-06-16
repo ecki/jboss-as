@@ -22,8 +22,6 @@
 
 package org.jboss.as.ee;
 
-import static org.jboss.logging.Logger.Level.WARN;
-
 import org.jboss.as.ee.component.ComponentInstance;
 import org.jboss.logging.BasicLogger;
 import org.jboss.logging.Cause;
@@ -33,7 +31,16 @@ import org.jboss.logging.Message;
 import org.jboss.logging.MessageLogger;
 import org.jboss.vfs.VirtualFile;
 
+import static org.jboss.logging.Logger.Level.WARN;
+
 /**
+ * This module is using message IDs in the range 11000-11099 and 16700-16799.
+ * <p/>
+ * This file is using the subset 11000-11024 for logger messages.
+ * <p/>
+ * See <a href="http://community.jboss.org/docs/DOC-16810">http://community.jboss.org/docs/DOC-16810</a> for the full
+ * list of currently reserved JBAS message id blocks.
+ * <p/>
  * Date: 05.11.2011
  *
  * @author <a href="mailto:jperkins@redhat.com">James R. Perkins</a>
@@ -90,7 +97,7 @@ public interface EeLogger extends BasicLogger {
      */
     @LogMessage(level = WARN)
     @Message(id = 11003, value = "Class Path entry in %s may not point to a sub deployment.")
-    void classPathEntryNotASubDeployment(VirtualFile file);
+    void classPathEntryASubDeployment(VirtualFile file);
 
     /**
      * Logs a warning message indicating the class path entry, represented by the {@code entry} parameter, was not found

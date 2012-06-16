@@ -32,14 +32,18 @@ import org.jboss.as.cli.CliEventListener;
 import org.jboss.as.cli.CommandArgument;
 import org.jboss.as.cli.CommandContext;
 import org.jboss.as.cli.CommandFormatException;
+import org.jboss.as.cli.CommandLineException;
 import org.jboss.as.cli.OperationCommand;
 import org.jboss.as.cli.Util;
+import org.jboss.as.cli.impl.ArgumentWithValue;
+import org.jboss.as.cli.impl.HeadersArgumentValueConverter;
 import org.jboss.as.cli.impl.RequestParameterArgument;
 import org.jboss.as.cli.operation.OperationRequestAddress;
 import org.jboss.as.cli.operation.CommandLineParser;
 import org.jboss.as.cli.operation.OperationRequestAddress.Node;
 import org.jboss.as.cli.operation.impl.DefaultCallbackHandler;
 import org.jboss.as.cli.operation.impl.DefaultOperationRequestAddress;
+import org.jboss.as.cli.operation.impl.HeadersCompleter;
 import org.jboss.as.cli.parsing.ParserUtil;
 import org.jboss.as.controller.client.ModelControllerClient;
 import org.jboss.dmr.ModelNode;
@@ -57,9 +61,12 @@ public abstract class BaseOperationCommand extends CommandHandlerWithHelp implem
     private Boolean addressAvailable;
     private String requiredType;
 
+    protected ArgumentWithValue headers;
+
     public BaseOperationCommand(CommandContext ctx, String command, boolean connectionRequired) {
         super(command, connectionRequired);
         ctx.addEventListener(this);
+        headers = new ArgumentWithValue(this, HeadersCompleter.INSTANCE, new HeadersArgumentValueConverter(ctx), "--headers");
     }
 
     /**
@@ -97,7 +104,7 @@ public abstract class BaseOperationCommand extends CommandHandlerWithHelp implem
         final Iterator<Node> iterator = requiredAddress.iterator();
         if(iterator.hasNext()) {
             final String firstType = iterator.next().getType();
-            dependsOnProfile = "subsystem".equals(firstType) || Util.PROFILE.equals(firstType);
+            dependsOnProfile = Util.SUBSYSTEM.equals(firstType) || Util.PROFILE.equals(firstType);
         }
         if(requiredAddress.endsOnType()) {
             requiredType = requiredAddress.toParentNode().getType();
@@ -133,26 +140,39 @@ public abstract class BaseOperationCommand extends CommandHandlerWithHelp implem
             return addressAvailable.booleanValue();
         }
 
-        ModelControllerClient client = ctx.getModelControllerClient();
+        final ModelControllerClient client = ctx.getModelControllerClient();
         if(client == null) {
             return false;
         }
-        ModelNode request = new ModelNode();
-        ModelNode address = request.get(Util.ADDRESS);
-        for(OperationRequestAddress.Node node : requiredAddress) {
-            address.add(node.getType(), node.getName());
-        }
+        final ModelNode request = new ModelNode();
+        final ModelNode address = request.get(Util.ADDRESS);
 
         if(requiredType == null) {
+            address.setEmptyList();
             request.get(Util.OPERATION).set(Util.VALIDATE_ADDRESS);
-            ModelNode result;
+            final ModelNode addressValue = request.get(Util.VALUE);
+            for(OperationRequestAddress.Node node : requiredAddress) {
+                addressValue.add(node.getType(), node.getName());
+            }
+            final ModelNode response;
             try {
-                result = ctx.getModelControllerClient().execute(request);
+                response = ctx.getModelControllerClient().execute(request);
             } catch (IOException e) {
                 return false;
             }
-            addressAvailable = Util.isSuccess(result);
+            final ModelNode result = response.get(Util.RESULT);
+            if(!result.isDefined()) {
+                return false;
+            }
+            final ModelNode valid = result.get(Util.VALID);
+            if(!valid.isDefined()) {
+                return false;
+            }
+            addressAvailable = valid.asBoolean();
         } else {
+            for(OperationRequestAddress.Node node : requiredAddress) {
+                address.add(node.getType(), node.getName());
+            }
             request.get(Util.OPERATION).set(Util.READ_CHILDREN_TYPES);
             ModelNode result;
             try {
@@ -176,37 +196,49 @@ public abstract class BaseOperationCommand extends CommandHandlerWithHelp implem
      * @see org.jboss.as.cli.handlers.CommandHandlerWithHelp#doHandle(org.jboss.as.cli.CommandContext)
      */
     @Override
-    protected void doHandle(CommandContext ctx) throws CommandFormatException {
+    protected void doHandle(CommandContext ctx) throws CommandLineException {
 
-        ModelNode request;
+        final ModelNode request = buildRequest(ctx);
+        addHeaders(ctx, request);
+
+        final ModelControllerClient client = ctx.getModelControllerClient();
+        final ModelNode response;
         try {
-            request = buildRequest(ctx);
-        } catch (CommandFormatException e1) {
-            ctx.printLine(e1.getLocalizedMessage());
-            return;
-        }
-
-        if(request == null) {
-            ctx.printLine("Operation request wasn't built.");
-            return;
-        }
-
-        ModelControllerClient client = ctx.getModelControllerClient();
-        final ModelNode result;
-        try {
-            result = client.execute(request);
+            response = client.execute(request);
         } catch (Exception e) {
-            ctx.printLine("Failed to perform operation: " + e.getLocalizedMessage());
-            return;
+            throw new CommandFormatException("Failed to perform operation: " + e.getLocalizedMessage());
         }
-        handleResponse(ctx, result, Util.COMPOSITE.equals(request.get(Util.OPERATION).asString()));
+        if (!Util.isSuccess(response)) {
+            throw new CommandFormatException(Util.getFailureDescription(response));
+        }
+        handleResponse(ctx, response, Util.COMPOSITE.equals(request.get(Util.OPERATION).asString()));
     }
 
-    protected void handleResponse(CommandContext ctx, ModelNode result, boolean composite) {
-        if (!Util.isSuccess(result)) {
-            ctx.printLine(Util.getFailureDescription(result));
+    @Override
+    public ModelNode buildRequest(CommandContext ctx) throws CommandFormatException {
+        recognizeArguments(ctx);
+        return buildRequestWOValidation(ctx);
+    }
+
+    protected ModelNode buildRequestWOValidation(CommandContext ctx) throws CommandFormatException {
+        final ModelNode request = buildRequestWithoutHeaders(ctx);
+        addHeaders(ctx, request);
+        return request;
+    }
+
+    protected abstract ModelNode buildRequestWithoutHeaders(CommandContext ctx) throws CommandFormatException;
+
+    protected void addHeaders(CommandContext ctx, ModelNode request) throws CommandFormatException {
+        if(!headers.isPresent(ctx.getParsedCommandLine())) {
             return;
         }
+        final String headersValue = headers.getValue(ctx.getParsedCommandLine());
+        final ModelNode headersNode = headers.getValueConverter().fromString(headersValue);
+        final ModelNode opHeaders = request.get(Util.OPERATION_HEADERS);
+        opHeaders.set(headersNode);
+    }
+
+    protected void handleResponse(CommandContext ctx, ModelNode response, boolean composite) throws CommandLineException {
     }
 
     @Override

@@ -22,10 +22,18 @@
 
 package org.jboss.as.ejb3.component.stateless;
 
+import static org.jboss.as.ejb3.EjbMessages.MESSAGES;
+
 import org.jboss.as.ee.component.BasicComponentCreateService;
 import org.jboss.as.ee.component.ComponentConfiguration;
+import org.jboss.as.ee.component.DependencyConfigurator;
+import org.jboss.as.ejb3.cache.CacheFactoryService;
+import org.jboss.as.ejb3.cache.impl.backing.clustering.ClusteredBackingCacheEntryStoreSourceService;
 import org.jboss.as.ejb3.component.EJBComponentCreateServiceFactory;
-import static org.jboss.as.ejb3.EjbMessages.MESSAGES;
+import org.jboss.as.server.deployment.DeploymentUnitProcessingException;
+import org.jboss.msc.service.ServiceBuilder;
+import org.jboss.msc.service.ServiceBuilder.DependencyType;
+
 /**
  * User: jpai
  */
@@ -36,6 +44,16 @@ public class StatelessComponentCreateServiceFactory extends EJBComponentCreateSe
         if (this.ejbJarConfiguration == null) {
             throw MESSAGES.ejbJarConfigNotBeenSet(this,configuration.getComponentName());
         }
+        configuration.getCreateDependencies().add(new DependencyConfigurator<StatelessSessionComponentCreateService>() {
+            @Override
+            public void configureDependency(ServiceBuilder<?> builder, StatelessSessionComponentCreateService service) throws DeploymentUnitProcessingException {
+                if (service.getClustering() != null) {
+                    builder.addDependency(DependencyType.OPTIONAL, ClusteredBackingCacheEntryStoreSourceService.getCacheFactoryClusterNameServiceName(null), String.class, service.getClusterNameInjector());
+                    // This ensures that the client mappings cache is started
+                    builder.addDependency(CacheFactoryService.DEFAULT_CLUSTERED_SFSB_CACHE_SERVICE_NAME);
+                }
+            }
+        });
         return new StatelessSessionComponentCreateService(configuration, this.ejbJarConfiguration);
     }
 }

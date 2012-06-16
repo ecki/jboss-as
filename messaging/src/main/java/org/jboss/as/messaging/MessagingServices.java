@@ -36,6 +36,7 @@ public class MessagingServices {
 
     /** The core queue name base. */
     private static final String CORE_QUEUE_BASE = "queue";
+    private static final String STARTUP_POOL = "startup-pool";
 
     public static enum TransportConfigType {
         Remote, InVM, Generic

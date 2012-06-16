@@ -22,12 +22,12 @@
 
 package org.jboss.as.clustering.jgroups;
 
-import org.jboss.as.clustering.ClusteringMessages;
+import java.net.URL;
+
+import org.jboss.as.controller.OperationFailedException;
 import org.jboss.logging.Message;
 import org.jboss.logging.MessageBundle;
 import org.jboss.logging.Messages;
-
-import java.net.URL;
 
 /**
  * Date: 29.08.2011
@@ -35,7 +35,7 @@ import java.net.URL;
  * @author <a href="mailto:jperkins@redhat.com">James R. Perkins</a>
  */
 @MessageBundle(projectCode = "JBAS")
-public interface JGroupsMessages extends ClusteringMessages {
+public interface JGroupsMessages {
     /**
      * The messages.
      */
@@ -48,6 +48,26 @@ public interface JGroupsMessages extends ClusteringMessages {
      *
      * @return the message.
      */
-    @Message(id = 10370, value = "Failed to parse %s")
+    @Message(id = 10270, value = "Failed to parse %s")
     String parserFailure(URL url);
+
+    /**
+     * A message indicating a resource could not be located.
+     *
+     * @param resource the resource that could not be located.
+     *
+     * @return the message.
+     */
+    @Message(id = 10271, value = "Failed to locate %s")
+    String notFound(String resource);
+
+    @Message(id = 10272, value = "A node named %s already exists in this cluster.  Perhaps there is already a server running on this host?  If so, restart this server with a unique node name, via -Djboss.node.name=<node-name>")
+    IllegalStateException duplicateNodeName(String name);
+
+    @Message(id = 10273, value = "Transport for stack %s is not defined. Please specify both a transport and protocol list, either as optional parameters to add() or via batching.")
+    OperationFailedException transportNotDefined(String stackName);
+
+    @Message(id = 10274, value = "Protocol list for stack %s is not defined. Please specify both a transport and protocol list, either as optional parameters to add() or via batching.")
+    OperationFailedException protocolListNotDefined(String stackName);
+
 }

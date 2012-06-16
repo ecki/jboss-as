@@ -2,26 +2,16 @@ package org.jboss.as.mail.extension;
 
 import org.jboss.as.controller.Extension;
 import org.jboss.as.controller.ExtensionContext;
-import org.jboss.as.controller.OperationContext;
-import org.jboss.as.controller.OperationFailedException;
-import org.jboss.as.controller.OperationStepHandler;
-import org.jboss.as.controller.PathAddress;
 import org.jboss.as.controller.PathElement;
 import org.jboss.as.controller.SubsystemRegistration;
-import org.jboss.as.controller.descriptions.DescriptionProvider;
-import org.jboss.as.controller.descriptions.common.CommonDescriptions;
+import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
+import org.jboss.as.controller.descriptions.StandardResourceDescriptionResolver;
+import org.jboss.as.controller.operations.common.GenericSubsystemDescribeHandler;
 import org.jboss.as.controller.parsing.ExtensionParsingContext;
 import org.jboss.as.controller.registry.ManagementResourceRegistration;
 import org.jboss.as.controller.registry.OperationEntry;
-import org.jboss.dmr.ModelNode;
-import org.jboss.dmr.Property;
 
-import java.util.Locale;
-
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADD;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.DESCRIBE;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
 
 
 /**
@@ -29,82 +19,44 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_
  */
 public class MailExtension implements Extension {
 
-    /**
-     * The name of our subsystem within the model.
-     */
     public static final String SUBSYSTEM_NAME = "mail";
-
-    /**
-     * The parser used for parsing our subsystem
-     */
     private final MailSubsystemParser parser = new MailSubsystemParser();
+    private static final String RESOURCE_NAME = MailExtension.class.getPackage().getName() + ".LocalDescriptions";
+    static PathElement SUBSYSTEM_PATH = PathElement.pathElement(ModelDescriptionConstants.SUBSYSTEM, SUBSYSTEM_NAME);
+    static PathElement MAIL_SESSION_PATH = PathElement.pathElement(MailSubsystemModel.MAIL_SESSION);
 
+    static StandardResourceDescriptionResolver getResourceDescriptionResolver(final String... keyPrefix) {
+        StringBuilder prefix = new StringBuilder(SUBSYSTEM_NAME);
+        for (String kp : keyPrefix) {
+            prefix.append('.').append(kp);
+        }
+        return new StandardResourceDescriptionResolver(prefix.toString(), RESOURCE_NAME, MailExtension.class.getClassLoader(), true, false);
+    }
 
     @Override
     public void initializeParsers(ExtensionParsingContext context) {
-        context.setSubsystemXmlMapping(Namespace.CURRENT.getUriString(), parser);
+        context.setSubsystemXmlMapping(SUBSYSTEM_NAME, Namespace.CURRENT.getUriString(), parser);
     }
+
+    private static final int MANAGEMENT_API_MAJOR_VERSION = 1;
+    private static final int MANAGEMENT_API_MINOR_VERSION = 1;
 
 
     @Override
     public void initialize(ExtensionContext context) {
-        final SubsystemRegistration registration = context.registerSubsystem(SUBSYSTEM_NAME);
-        registration.registerXMLElementWriter(parser);
-        final ManagementResourceRegistration subsystem = registration.registerSubsystemModel(MailSubsystemProviders.SUBSYSTEM);
-        subsystem.registerOperationHandler(ADD, MailSubsystemAdd.INSTANCE, MailSubsystemProviders.SUBSYSTEM_ADD, false);
-        subsystem.registerOperationHandler(DESCRIBE, SubsystemDescribeHandler.INSTANCE, SubsystemDescribeHandler.INSTANCE, false, OperationEntry.EntryType.PRIVATE);
+        final SubsystemRegistration subsystem = context.registerSubsystem(SUBSYSTEM_NAME, MANAGEMENT_API_MAJOR_VERSION, MANAGEMENT_API_MINOR_VERSION);
 
-        final ManagementResourceRegistration mailSessions = subsystem.registerSubModel(PathElement.pathElement(ModelKeys.MAIL_SESSION), MailSubsystemProviders.MAIL_SESSION_DESC);
-        mailSessions.registerOperationHandler(ADD, MailSessionAdd.INSTANCE, MailSubsystemProviders.ADD_MAIL_SESSION_DESC, false);
-
-    }
-
-
-    /**
-     * Recreate the steps to put the subsystem in the same state it was in.
-     * This is used in domain mode to query the profile being used, in order to
-     * get the steps needed to create the servers
-     */
-    private static class SubsystemDescribeHandler implements OperationStepHandler, DescriptionProvider {
-        static final SubsystemDescribeHandler INSTANCE = new SubsystemDescribeHandler();
-
-        public void execute(OperationContext context, ModelNode operation) throws OperationFailedException {
-            //context.getResult().add(createAddSubsystemOperation());
-            final ModelNode result = context.getResult();
-            final PathAddress rootAddress = PathAddress.pathAddress(PathAddress.pathAddress(operation.require(OP_ADDR)).getLastElement());
-            final ModelNode subModel = context.readModel(PathAddress.EMPTY_ADDRESS);
-
-            final ModelNode subsystemAdd = new ModelNode();
-            subsystemAdd.get(OP).set(ADD);
-            subsystemAdd.get(OP_ADDR).set(rootAddress.toModelNode());
-
-            result.add(subsystemAdd);
-
-
-            if (subModel.hasDefined(ModelKeys.MAIL_SESSION)) {
-                for (final Property session : subModel.get(ModelKeys.MAIL_SESSION).asPropertyList()) {
-                    final ModelNode address = rootAddress.toModelNode();
-                    address.add(ModelKeys.MAIL_SESSION, session.getName());
-                    final ModelNode addOperation = org.jboss.as.controller.operations.common.Util.getEmptyOperation(ADD, address);
-
-                    addOperation.get(ModelKeys.JNDI_NAME).set(session.getValue().get(ModelKeys.JNDI_NAME).asString());
-                    addOperation.get(ModelKeys.DEBUG).set(session.getValue().get(ModelKeys.DEBUG).asString());
-                    addOperation.get(ModelKeys.SMTP_SERVER).set(session.getValue().get(ModelKeys.SMTP_SERVER));
-                    addOperation.get(ModelKeys.IMAP_SERVER).set(session.getValue().get(ModelKeys.IMAP_SERVER));
-                    addOperation.get(ModelKeys.POP3_SERVER).set(session.getValue().get(ModelKeys.POP3_SERVER));
-
-                    result.add(addOperation);
-                }
-            }
-
-
-            context.completeStep();
-        }
-
-        @Override
-        public ModelNode getModelDescription(Locale locale) {
-            return CommonDescriptions.getSubsystemDescribeOperation(locale);
-        }
+        final ManagementResourceRegistration subsystemRegistration = subsystem.registerSubsystemModel(MailSubsystemResource.INSTANCE);
+        subsystemRegistration.registerOperationHandler(DESCRIBE, GenericSubsystemDescribeHandler.INSTANCE, GenericSubsystemDescribeHandler.INSTANCE, false, OperationEntry.EntryType.PRIVATE);
+        // /subsystem=mail/mail-session
+        ManagementResourceRegistration session = subsystemRegistration.registerSubModel(MailSessionDefinition.INSTANCE);
+        // /subsystem=mail/mail-session=java:/Mail/server=imap
+        session.registerSubModel(MailServerDefinition.INSTANCE_IMAP);
+        // /subsystem=mail/mail-session=java:/Mail/server=pop3
+        session.registerSubModel(MailServerDefinition.INSTANCE_POP3);
+        // /subsystem=mail/mail-session=java:/Mail/server=smtp
+        session.registerSubModel(MailServerDefinition.INSTANCE_SMTP);
+        subsystem.registerXMLElementWriter(parser);
     }
 
 }

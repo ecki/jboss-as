@@ -42,7 +42,6 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.STE
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.TO_REPLACE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.UPLOAD_DEPLOYMENT_STREAM;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.UPLOAD_DEPLOYMENT_URL;
-import org.jboss.as.test.integration.domain.DomainTestSupport;
 import static org.jboss.as.test.integration.domain.DomainTestSupport.cleanFile;
 import static org.jboss.as.test.integration.domain.DomainTestSupport.safeClose;
 import static org.jboss.as.test.integration.domain.DomainTestSupport.validateResponse;
@@ -62,6 +61,8 @@ import java.util.List;
 
 import org.jboss.as.controller.client.Operation;
 import org.jboss.as.controller.client.OperationBuilder;
+import org.jboss.as.test.integration.domain.DomainTestSupport;
+import org.jboss.as.test.shared.TestSuiteEnvironment;
 import org.jboss.dmr.ModelNode;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
 import org.jboss.shrinkwrap.api.exporter.ExplodedExporter;
@@ -71,7 +72,6 @@ import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
-import org.junit.Ignore;
 import org.junit.Test;
 
 /**
@@ -131,16 +131,23 @@ public class DeploymentManagementTestCase {
 
     private static DomainTestSupport testSupport;
     private static WebArchive webArchive;
+    private static WebArchive webArchive2;
     private static File tmpDir;
 
     @BeforeClass
     public static void setupDomain() throws Exception {
 
-        // Create our deployment
+        // Create our deployments
         webArchive = ShrinkWrap.create(WebArchive.class, TEST);
         ClassLoader tccl = Thread.currentThread().getContextClassLoader();
         URL index = tccl.getResource("helloWorld/index.html");
         webArchive.addAsWebResource(index, "index.html");
+
+        webArchive2 = ShrinkWrap.create(WebArchive.class, TEST);
+        index = tccl.getResource("helloWorld/index.html");
+        webArchive2.addAsWebResource(index, "index.html");
+        index = tccl.getResource("helloWorld/index2.html");
+        webArchive2.addAsWebResource(index, "index2.html");
 
         // Make versions on the filesystem for URL-based deploy and for unmanaged content testing
         tmpDir = new File("target/deployments/" + DeploymentManagementTestCase.class.getSimpleName());
@@ -231,7 +238,7 @@ public class DeploymentManagementTestCase {
         ModelNode content = new ModelNode();
         content.get(INPUT_STREAM_INDEX).set(0);
         ModelNode composite = createDeploymentOperation(content, MAIN_SERVER_GROUP_DEPLOYMENT_ADDRESS, OTHER_SERVER_GROUP_DEPLOYMENT_ADDRESS);
-        OperationBuilder builder = new OperationBuilder(composite);
+        OperationBuilder builder = new OperationBuilder(composite, true);
         builder.addInputStream(webArchive.as(ZipExporter.class).exportAsInputStream());
 
         executeOnMaster(builder.build());
@@ -258,7 +265,7 @@ public class DeploymentManagementTestCase {
     public void testUploadStream() throws Exception {
         ModelNode op = getEmptyOperation(UPLOAD_DEPLOYMENT_STREAM, ROOT_ADDRESS);
         op.get(INPUT_STREAM_INDEX).set(0);
-        OperationBuilder builder = new OperationBuilder(op);
+        OperationBuilder builder = new OperationBuilder(op, true);
         builder.addInputStream(webArchive.as(ZipExporter.class).exportAsInputStream());
 
         byte[] hash = executeOnMaster(builder.build()).asBytes();
@@ -280,7 +287,7 @@ public class DeploymentManagementTestCase {
     public void testDomainAddOnly() throws Exception {
         ModelNode op = getEmptyOperation(UPLOAD_DEPLOYMENT_STREAM, ROOT_ADDRESS);
         op.get(INPUT_STREAM_INDEX).set(0);
-        OperationBuilder builder = new OperationBuilder(op);
+        OperationBuilder builder = new OperationBuilder(op, true);
         builder.addInputStream(webArchive.as(ZipExporter.class).exportAsInputStream());
 
         byte[] hash = executeOnMaster(builder.build()).asBytes();
@@ -394,7 +401,7 @@ public class DeploymentManagementTestCase {
         ModelNode content = new ModelNode();
         content.get(INPUT_STREAM_INDEX).set(0);
         ModelNode op = createDeploymentReplaceOperation(content, MAIN_SERVER_GROUP_ADDRESS, OTHER_SERVER_GROUP_ADDRESS);
-        OperationBuilder builder = new OperationBuilder(op);
+        OperationBuilder builder = new OperationBuilder(op, true);
         builder.addInputStream(webArchive.as(ZipExporter.class).exportAsInputStream());
 
         executeOnMaster(builder.build());
@@ -485,7 +492,7 @@ public class DeploymentManagementTestCase {
         ModelNode content = new ModelNode();
         content.get(INPUT_STREAM_INDEX).set(0);
         ModelNode op = createDeploymentReplaceOperation(content, MAIN_SERVER_GROUP_ADDRESS, OTHER_SERVER_GROUP_ADDRESS);
-        OperationBuilder builder = new OperationBuilder(op);
+        OperationBuilder builder = new OperationBuilder(op, true);
         builder.addInputStream(webArchive.as(ZipExporter.class).exportAsInputStream());
 
         executeOnMaster(builder.build());
@@ -503,7 +510,7 @@ public class DeploymentManagementTestCase {
         ModelNode content = new ModelNode();
         content.get(INPUT_STREAM_INDEX).set(0);
         ModelNode op = createDeploymentFullReplaceOperation(content);
-        OperationBuilder builder = new OperationBuilder(op);
+        OperationBuilder builder = new OperationBuilder(op, true);
         builder.addInputStream(webArchive.as(ZipExporter.class).exportAsInputStream());
 
         executeOnMaster(builder.build());
@@ -555,6 +562,26 @@ public class DeploymentManagementTestCase {
         performHttpCall(DomainTestSupport.masterAddress, 8080);
         performHttpCall(DomainTestSupport.slaveAddress, 8630);
     }
+
+    @Test
+    public void testFullReplaceDifferentFile() throws Exception {
+        // Establish the deployment
+        testDeploymentViaStream();
+
+        ModelNode content = new ModelNode();
+        content.get(INPUT_STREAM_INDEX).set(0);
+        ModelNode op = createDeploymentFullReplaceOperation(content);
+        OperationBuilder builder = new OperationBuilder(op, true);
+        builder.addInputStream(webArchive2.as(ZipExporter.class).exportAsInputStream());
+
+        executeOnMaster(builder.build());
+
+        //Thread.sleep(1000);
+
+        performHttpCall(DomainTestSupport.masterAddress, 8080);
+        performHttpCall(DomainTestSupport.slaveAddress, 8630);
+    }
+
 
     @Test
     public void testUnmanagedArchiveFullReplace() throws Exception {
@@ -629,7 +656,6 @@ public class DeploymentManagementTestCase {
     }
 
     @Test
-    @Ignore("AS7-895")
     public void testManagedFullReplaceUnmanaged() throws Exception {
         // Establish the deployment
         testUnmanagedExplodedDeployment();
@@ -637,7 +663,7 @@ public class DeploymentManagementTestCase {
         ModelNode content = new ModelNode();
         content.get(INPUT_STREAM_INDEX).set(0);
         ModelNode op = createDeploymentFullReplaceOperation(content);
-        OperationBuilder builder = new OperationBuilder(op);
+        OperationBuilder builder = new OperationBuilder(op, true);
         builder.addInputStream(webArchive.as(ZipExporter.class).exportAsInputStream());
 
         executeOnMaster(builder.build());
@@ -658,7 +684,7 @@ public class DeploymentManagementTestCase {
 
         System.out.println(composite);
 
-        OperationBuilder builder = new OperationBuilder(composite);
+        OperationBuilder builder = new OperationBuilder(composite, true);
         builder.addInputStream(webArchive.as(ZipExporter.class).exportAsInputStream());
 
         executeOnMaster(builder.build());
@@ -670,7 +696,7 @@ public class DeploymentManagementTestCase {
         ModelNode content = new ModelNode();
         content.get(INPUT_STREAM_INDEX).set(0);
         ModelNode composite = createDeploymentOperation(content, OTHER_SERVER_GROUP_DEPLOYMENT_ADDRESS);
-        OperationBuilder builder = new OperationBuilder(composite);
+        OperationBuilder builder = new OperationBuilder(composite, true);
         builder.addInputStream(webArchive.as(ZipExporter.class).exportAsInputStream());
 
         executeOnMaster(builder.build());
@@ -801,7 +827,7 @@ public class DeploymentManagementTestCase {
         InputStream in = null;
         StringWriter writer = new StringWriter();
         try {
-            URL url = new URL("http://" + host + ":" + port + "/" + context + "/index.html");
+            URL url = new URL("http://" + TestSuiteEnvironment.formatPossibleIpv6Address(host) + ":" + port + "/" + context + "/index.html");
             System.out.println("Reading response from " + url + ":");
             conn = url.openConnection();
             conn.setDoInput(true);

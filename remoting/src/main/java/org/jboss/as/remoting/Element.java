@@ -34,7 +34,6 @@ public enum Element {
 
     // Remoting 1.0 elements in alpha order
     AUTHENTICATION_PROVIDER("authentication-provider"),
-    CONNECTION_CREATION_OPTIONS("connection-creation-options"),
     CONNECTOR("connector"),
     FORWARD_SECRECY("forward-secrecy"),
     INCLUDE_MECHANISMS("include-mechanisms"),
@@ -57,6 +56,7 @@ public enum Element {
     SERVER_AUTH("server-auth"),
     STRENGTH("strength"),
     SUBSYSTEM("subsystem"),
+    WORKER_THREAD_POOL("worker-thread-pool")
     ;
 
     private final String name;

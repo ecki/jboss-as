@@ -28,6 +28,9 @@ import org.apache.catalina.authenticator.SingleSignOn;
 import org.apache.catalina.core.StandardHost;
 import org.apache.catalina.valves.AccessLogValve;
 import org.apache.catalina.valves.ExtendedAccessLogValve;
+import org.jboss.as.clustering.web.sso.SSOClusterManager;
+import org.jboss.as.controller.services.path.PathManager;
+import org.jboss.as.web.sso.ClusteredSingleSignOn;
 import org.jboss.dmr.ModelNode;
 import org.jboss.msc.service.Service;
 import org.jboss.msc.service.StartContext;
@@ -45,34 +48,41 @@ public class WebVirtualHostService implements Service<VirtualHost> {
 
     private final String name;
     private final String[] aliases;
+    private final String tempPathName;
     private String defaultWebModule;
     private boolean hasWelcomeRoot;
     private ModelNode accessLog;
     private ModelNode rewrite;
     private ModelNode sso;
 
-    private final InjectedValue<String> tempPathInjector = new InjectedValue<String>();
-    private final InjectedValue<String> accessLogPathInjector = new InjectedValue<String>();
+    private final InjectedValue<PathManager> pathManagerInjector = new InjectedValue<PathManager>();
     private final InjectedValue<WebServer> webServer = new InjectedValue<WebServer>();
+    private final InjectedValue<SSOClusterManager> ssoManager = new InjectedValue<SSOClusterManager>();
 
     private VirtualHost host;
 
-    public WebVirtualHostService(String name, String[] aliases, boolean hasWelcomeRoot) {
+    private volatile String accessLogPath;
+    private volatile String accessLogRelativeTo;
+    private PathManager.Callback.Handle callbackHandle;
+
+    public WebVirtualHostService(String name, String[] aliases, boolean hasWelcomeRoot, String tempPathName) {
         this.name = name;
         this.aliases = aliases;
         this.hasWelcomeRoot = hasWelcomeRoot;
+        this.tempPathName = tempPathName;
     }
 
     /** {@inheritDoc} */
     public synchronized void start(StartContext context) throws StartException {
         final StandardHost host = new StandardHost();
-        host.setAppBase(tempPathInjector.getValue());
+        host.setAppBase(pathManagerInjector.getValue().getPathEntry(tempPathName).resolvePath());
         host.setName(name);
         for(final String alias : aliases) {
             host.addAlias(alias);
         }
         if(accessLog != null) {
-            host.addValve(createAccessLogValve(host, accessLogPathInjector.getValue(), accessLog));
+            host.addValve(createAccessLogValve(pathManagerInjector.getValue().resolveRelativePathEntry(accessLogPath, accessLogRelativeTo), accessLog));
+            callbackHandle = pathManagerInjector.getValue().registerCallback(accessLogRelativeTo, PathManager.ReloadServerCallback.create(), PathManager.Event.UPDATED, PathManager.Event.REMOVED);
         }
         if(rewrite != null) {
             host.addValve(createRewriteValve(host, rewrite));
@@ -95,6 +105,9 @@ public class WebVirtualHostService implements Service<VirtualHost> {
 
     /** {@inheritDoc} */
     public synchronized void stop(StopContext context) {
+        if (callbackHandle != null) {
+            callbackHandle.remove();
+        }
         final VirtualHost host = this.host;
         this.host = null;
         final WebServer server = webServer.getValue();
@@ -114,6 +127,11 @@ public class WebVirtualHostService implements Service<VirtualHost> {
         this.accessLog = accessLog;
     }
 
+    void setAccessLogPaths(String accessLogPath, String accessLogRelativeTo) {
+        this.accessLogPath = accessLogPath;
+        this.accessLogRelativeTo = accessLogRelativeTo;
+    }
+
     void setRewrite(ModelNode rewrite) {
         this.rewrite = rewrite;
     }
@@ -130,23 +148,29 @@ public class WebVirtualHostService implements Service<VirtualHost> {
         this.defaultWebModule = defaultWebModule;
     }
 
-    public InjectedValue<String> getAccessLogPathInjector() {
-        return accessLogPathInjector;
-    }
-
-    public InjectedValue<String> getTempPathInjector() {
-        return tempPathInjector;
+    public InjectedValue<PathManager> getPathManagerInjector() {
+        return pathManagerInjector;
     }
 
     public InjectedValue<WebServer> getWebServer() {
         return webServer;
     }
 
-    static Valve createAccessLogValve(final Container container, final String logDirectory, final ModelNode element) {
+    public InjectedValue<SSOClusterManager> getSSOClusterManager() {
+        return ssoManager;
+    }
+
+    static Valve createAccessLogValve(final String logDirectory, final ModelNode element) {
+        //todo this should all use AD.resolveModelAttribute()
         boolean extended = false;
         if (element.hasDefined(Constants.EXTENDED)) {
             extended = element.get(Constants.EXTENDED).asBoolean();
         }
+        String pattern = null;
+        if (element.hasDefined(Constants.PATTERN)) {
+            pattern = element.get(Constants.PATTERN).asString();
+        }
+
         final AccessLogValve log;
         if (extended) {
             log = new ExtendedAccessLogValve();
@@ -156,11 +180,16 @@ public class WebVirtualHostService implements Service<VirtualHost> {
         log.setDirectory(logDirectory);
         if (element.hasDefined(Constants.RESOLVE_HOSTS)) log.setResolveHosts(element.get(Constants.RESOLVE_HOSTS).asBoolean());
         if (element.hasDefined(Constants.ROTATE)) log.setRotatable(element.get(Constants.ROTATE).asBoolean());
-        if (element.hasDefined(Constants.PATTERN)) {
-            log.setPattern(element.get(Constants.PATTERN).asString());
+        if (pattern != null) {
+            log.setPattern(pattern);
         } else {
-            log.setPattern("common");
+            if (extended) {
+                log.setPattern("time cs-method cs-uri sc-status sc(Referer)");
+            } else {
+                log.setPattern("common");
+            }
         }
+
         if (element.hasDefined(Constants.PREFIX)) log.setPrefix(element.get(Constants.PREFIX).asString());
         return log;
     }
@@ -169,9 +198,11 @@ public class WebVirtualHostService implements Service<VirtualHost> {
         final RewriteValve rewriteValve = new RewriteValve();
         rewriteValve.setContainer(container);
         StringBuffer configuration = new StringBuffer();
-        for (final ModelNode rewrite : element.asList()) {
+        for (final ModelNode rewriteElement : element.asList()) {
+            final ModelNode rewrite = rewriteElement.asProperty().getValue();
             if (rewrite.has(Constants.CONDITION)) {
-                for (final ModelNode condition : rewrite.get(Constants.CONDITION).asList()) {
+                for (final ModelNode conditionElement : rewrite.get(Constants.CONDITION).asList()) {
+                    final ModelNode condition = conditionElement.asProperty().getValue();
                     configuration.append("RewriteCond ")
                     .append(condition.get(Constants.TEST).asString())
                     .append(" ").append(condition.get(Constants.PATTERN).asString());
@@ -199,9 +230,8 @@ public class WebVirtualHostService implements Service<VirtualHost> {
         return rewriteValve;
     }
 
-    static Valve createSsoValve(final Container container, final ModelNode element) throws StartException {
-        // FIXME: Add clustered SSO support
-        final SingleSignOn ssoValve = new SingleSignOn();
+    Valve createSsoValve(final Container container, final ModelNode element) throws StartException {
+        final SingleSignOn ssoValve = element.hasDefined(Constants.CACHE_CONTAINER) ? new ClusteredSingleSignOn(this.ssoManager.getValue()) : new SingleSignOn();
         if (element.hasDefined(Constants.DOMAIN)) ssoValve.setCookieDomain(element.get(Constants.DOMAIN).asString());
         if (element.hasDefined(Constants.REAUTHENTICATE)) ssoValve.setRequireReauthentication(element.get(Constants.REAUTHENTICATE).asBoolean());
         return ssoValve;

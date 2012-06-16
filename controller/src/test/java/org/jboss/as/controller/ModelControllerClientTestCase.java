@@ -34,8 +34,6 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import junit.framework.Assert;
-
 import org.jboss.as.controller.client.MessageSeverity;
 import org.jboss.as.controller.client.ModelControllerClient;
 import org.jboss.as.controller.client.OperationAttachments;
@@ -44,10 +42,12 @@ import org.jboss.as.controller.client.OperationMessageHandler;
 import org.jboss.as.controller.remote.ExistingChannelModelControllerClient;
 import org.jboss.as.controller.remote.ModelControllerClientOperationHandler;
 import org.jboss.as.controller.support.RemoteChannelPairSetup;
-import org.jboss.as.protocol.mgmt.ManagementChannel;
-import org.jboss.as.protocol.mgmt.ManagementOperationHandler;
+import org.jboss.as.protocol.mgmt.ManagementChannelHandler;
+import org.jboss.as.protocol.mgmt.support.ManagementChannelInitialization;
 import org.jboss.dmr.ModelNode;
 import org.jboss.logging.Logger;
+import org.jboss.remoting3.Channel;
+import org.jboss.remoting3.HandleableCloseable;
 import org.jboss.threads.AsyncFuture;
 import org.junit.After;
 import org.junit.Before;
@@ -63,12 +63,11 @@ public class ModelControllerClientTestCase {
 
     Logger log = Logger.getLogger(ModelControllerClientTestCase.class);
 
-    RemoteChannelPairSetup channels;
+    private RemoteChannelPairSetup channels;
+
     @Before
     public void start() throws Exception {
         channels = new RemoteChannelPairSetup();
-        channels.setupRemoting();
-        channels.startChannels();
     }
 
     @After
@@ -77,11 +76,27 @@ public class ModelControllerClientTestCase {
         channels.shutdownRemoting();
     }
 
+    private ModelControllerClient setupTestClient(final ModelController controller) throws IOException {
+        try {
+            channels.setupRemoting(new ManagementChannelInitialization() {
+                @Override
+                public HandleableCloseable.Key startReceiving(Channel channel) {
+                    final ManagementChannelHandler support = new ManagementChannelHandler(channel, channels.getExecutorService());
+                    support.addHandlerFactory(new ModelControllerClientOperationHandler(controller, support));
+                    channel.receiveMessage(support.getReceiver());
+                    return null;
+                }
+            });
+            channels.startClientConnetion();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        final Channel clientChannel = channels.getClientChannel();
+        return ExistingChannelModelControllerClient.createReceiving(clientChannel, channels.getExecutorService());
+    }
+
     @Test @Ignore("OperationMessageHandlerProxy turned off temporarily")
     public void testSynchronousOperationMessageHandler() throws Exception {
-        ManagementChannel serverChannel = channels.getServerChannel();
-        ManagementChannel clientChannel = channels.getClientChannel();
-        clientChannel.startReceiving();
 
         final CountDownLatch executeLatch = new CountDownLatch(1);
         MockModelController controller = new MockModelController() {
@@ -96,14 +111,8 @@ public class ModelControllerClientTestCase {
                 return result;
             }
         };
-
-        ModelControllerClientOperationHandler operationHandler = new ModelControllerClientOperationHandler(channels.getExecutorService(), controller);
-        serverChannel.setOperationHandler(operationHandler);
-
-        ModelControllerClient client = new ExistingChannelModelControllerClient(channels.getClientChannel());
+        final ModelControllerClient client = setupTestClient(controller);
         try {
-            clientChannel.setOperationHandler((ManagementOperationHandler)client);
-
             ModelNode operation = new ModelNode();
             operation.get("test").set("123");
 
@@ -133,10 +142,7 @@ public class ModelControllerClientTestCase {
 
         final byte[] firstBytes = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
         final byte[] secondBytes = new byte[] {10, 9, 8 , 7 , 6, 5, 4, 3, 2, 1};
-
-        ManagementChannel serverChannel = channels.getServerChannel();
-        ManagementChannel clientChannel = channels.getClientChannel();
-        clientChannel.startReceiving();
+        final byte[] thirdBytes = new byte[] {1};
 
         final CountDownLatch executeLatch = new CountDownLatch(1);
         final AtomicInteger size = new AtomicInteger();
@@ -179,14 +185,9 @@ public class ModelControllerClientTestCase {
                 return new ModelNode();
             }
         };
-
-        ModelControllerClientOperationHandler operationHandler = new ModelControllerClientOperationHandler(channels.getExecutorService(), controller);
-        serverChannel.setOperationHandler(operationHandler);
-
-        ModelControllerClient client = new ExistingChannelModelControllerClient(channels.getClientChannel());
+        // Set the handler
+        final ModelControllerClient client = setupTestClient(controller);
         try {
-            clientChannel.setOperationHandler((ManagementOperationHandler)client);
-
             ModelNode operation = new ModelNode();
             operation.get("test").set("123");
 
@@ -195,13 +196,13 @@ public class ModelControllerClientTestCase {
             OperationBuilder builder = new OperationBuilder(op);
             builder.addInputStream(new ByteArrayInputStream(firstBytes));
             builder.addInputStream(new ByteArrayInputStream(secondBytes));
-            builder.addInputStream(null);
+            builder.addInputStream(new ByteArrayInputStream(thirdBytes));
             client.execute(builder.build());
             executeLatch.await();
             assertEquals(3, size.get());
             assertArrays(firstBytes, firstResult.get());
             assertArrays(secondBytes, secondResult.get());
-            assertArrays(new byte[0], thirdResult.get());
+            assertArrays(new byte[] { 1 }, thirdResult.get());
         } finally {
             IoUtils.safeClose(client);
         }
@@ -209,10 +210,6 @@ public class ModelControllerClientTestCase {
 
     @Test @Ignore("OperationMessageHandlerProxy turned off temporarily")
     public void testAsynchronousOperationWithMessageHandler() throws Exception {
-        ManagementChannel serverChannel = channels.getServerChannel();
-        ManagementChannel clientChannel = channels.getClientChannel();
-        clientChannel.startReceiving();
-
         final CountDownLatch executeLatch = new CountDownLatch(1);
         MockModelController controller = new MockModelController() {
             @Override
@@ -227,12 +224,9 @@ public class ModelControllerClientTestCase {
             }
         };
 
-        ModelControllerClientOperationHandler operationHandler = new ModelControllerClientOperationHandler(channels.getExecutorService(), controller);
-        serverChannel.setOperationHandler(operationHandler);
-
-        ModelControllerClient client = new ExistingChannelModelControllerClient(channels.getClientChannel());
+        // Set the handler
+        final ModelControllerClient client = setupTestClient(controller);
         try {
-            clientChannel.setOperationHandler((ManagementOperationHandler)client);
 
             ModelNode operation = new ModelNode();
             operation.get("test").set("123");
@@ -261,11 +255,8 @@ public class ModelControllerClientTestCase {
 
     @Test
     public void testCancelAsynchronousOperation() throws Exception {
-        ManagementChannel serverChannel = channels.getServerChannel();
-        ManagementChannel clientChannel = channels.getClientChannel();
-        clientChannel.startReceiving();
-
         final CountDownLatch executeLatch = new CountDownLatch(1);
+        final CountDownLatch interrupted = new CountDownLatch(1);
         MockModelController controller = new MockModelController() {
             @Override
             public ModelNode execute(ModelNode operation, OperationMessageHandler handler, OperationTransactionControl control, OperationAttachments attachments) {
@@ -280,19 +271,15 @@ public class ModelControllerClientTestCase {
                     result.get("testing").set(operation.get("test"));
                     return result;
                 } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
+                    interrupted.countDown();
                     throw new RuntimeException(e);
                 }
             }
         };
 
-        ModelControllerClientOperationHandler operationHandler = new ModelControllerClientOperationHandler(channels.getExecutorService(), controller);
-        serverChannel.setOperationHandler(operationHandler);
-
-        ModelControllerClient client = new ExistingChannelModelControllerClient(channels.getClientChannel());
+        // Set the handler
+        final ModelControllerClient client = setupTestClient(controller);
         try {
-            clientChannel.setOperationHandler((ManagementOperationHandler)client);
-
             ModelNode operation = new ModelNode();
             operation.get("test").set("123");
 
@@ -309,7 +296,8 @@ public class ModelControllerClientTestCase {
                         }
                     });
             executeLatch.await();
-            Assert.assertTrue(resultFuture.cancel(false));
+            resultFuture.cancel(false);
+            interrupted.await();
         } finally {
             IoUtils.safeClose(client);
         }
@@ -336,4 +324,5 @@ public class ModelControllerClientTestCase {
         }
 
     }
+
 }

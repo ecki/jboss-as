@@ -67,6 +67,7 @@ import static org.jboss.as.messaging.CommonAttributes.MESSAGE_COUNTER_MAX_DAY_HI
 import static org.jboss.as.messaging.CommonAttributes.MESSAGE_COUNTER_SAMPLE_PERIOD;
 import static org.jboss.as.messaging.CommonAttributes.MESSAGE_EXPIRY_SCAN_PERIOD;
 import static org.jboss.as.messaging.CommonAttributes.MESSAGE_EXPIRY_THREAD_PRIORITY;
+import static org.jboss.as.messaging.CommonAttributes.PAGE_MAX_CONCURRENT_IO;
 import static org.jboss.as.messaging.CommonAttributes.PAGING_DIRECTORY;
 import static org.jboss.as.messaging.CommonAttributes.PERF_BLAST_PAGES;
 import static org.jboss.as.messaging.CommonAttributes.PERSISTENCE_ENABLED;
@@ -76,6 +77,7 @@ import static org.jboss.as.messaging.CommonAttributes.POOLED_CONNECTION_FACTORY;
 import static org.jboss.as.messaging.CommonAttributes.QUEUE;
 import static org.jboss.as.messaging.CommonAttributes.RUN_SYNC_SPEED_TEST;
 import static org.jboss.as.messaging.CommonAttributes.SCHEDULED_THREAD_POOL_MAX_SIZE;
+import static org.jboss.as.messaging.CommonAttributes.SECURITY_DOMAIN;
 import static org.jboss.as.messaging.CommonAttributes.SECURITY_ENABLED;
 import static org.jboss.as.messaging.CommonAttributes.SECURITY_INVALIDATION_INTERVAL;
 import static org.jboss.as.messaging.CommonAttributes.SECURITY_SETTING;
@@ -109,18 +111,20 @@ import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.PathAddress;
 import org.jboss.as.controller.ServiceVerificationHandler;
-import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
 import org.jboss.as.controller.registry.Resource;
+import org.jboss.as.controller.services.path.PathManager;
+import org.jboss.as.controller.services.path.PathManagerService;
+import org.jboss.as.messaging.HornetQService.PathConfig;
 import org.jboss.as.messaging.jms.JMSService;
 import org.jboss.as.network.OutboundSocketBinding;
 import org.jboss.as.network.SocketBinding;
-import org.jboss.as.server.services.path.RelativePathService;
+import org.jboss.as.security.plugins.SecurityDomainContext;
+import org.jboss.as.security.service.SecurityDomainService;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.Property;
 import org.jboss.msc.service.ServiceBuilder;
 import org.jboss.msc.service.ServiceBuilder.DependencyType;
 import org.jboss.msc.service.ServiceController;
-import org.jboss.msc.service.ServiceListener;
 import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.service.ServiceTarget;
 
@@ -139,7 +143,7 @@ class HornetQServerAdd implements OperationStepHandler {
 
     static final String DEFAULT_BINDINGS_DIR = "bindings";
     static final String DEFAULT_JOURNAL_DIR = "journal";
-    static final String DEFAULT_LARGE_MESSSAGE_DIR = "largemessages";
+    static final String DEFAULT_LARGE_MESSAGE_DIR = "largemessages";
     static final String DEFAULT_PAGING_DIR = "paging";
 
     public static final HornetQServerAdd INSTANCE = new HornetQServerAdd();
@@ -165,7 +169,7 @@ class HornetQServerAdd implements OperationStepHandler {
         model.get(JMS_TOPIC).setEmptyObject();
         model.get(POOLED_CONNECTION_FACTORY).setEmptyObject();
 
-        if (context.getType() == OperationContext.Type.SERVER) {
+        if (context.isNormalServer()) {
             context.addStep(new OperationStepHandler() {
                 public void execute(OperationContext context, ModelNode operation) throws OperationFailedException {
                     final List<ServiceController<?>> controllers = new ArrayList<ServiceController<?>>();
@@ -203,13 +207,19 @@ class HornetQServerAdd implements OperationStepHandler {
 
                 // Create path services
 
-                final ServiceName bindingsPath = createDirectoryService(DEFAULT_BINDINGS_DIR, model.get(PATH, BINDINGS_DIRECTORY), serviceTarget, operation, newControllers, verificationHandler);
-                final ServiceName journalPath = createDirectoryService(DEFAULT_JOURNAL_DIR, model.get(PATH, JOURNAL_DIRECTORY), serviceTarget, operation, newControllers, verificationHandler);
-                final ServiceName largeMessagePath = createDirectoryService(DEFAULT_LARGE_MESSSAGE_DIR, model.get(PATH, LARGE_MESSAGES_DIRECTORY), serviceTarget, operation, newControllers, verificationHandler);
-                final ServiceName pagingPath = createDirectoryService(DEFAULT_PAGING_DIR, model.get(PATH, PAGING_DIRECTORY), serviceTarget, operation, newControllers, verificationHandler);
+                String bindingsPath = getPath(DEFAULT_BINDINGS_DIR, CommonAttributes.PATH.resolveModelAttribute(context, model.get(PATH, BINDINGS_DIRECTORY)));
+                String bindingsRelativeToPath = getRelativeToPath(model.get(PATH, BINDINGS_DIRECTORY));
+                String journalPath = getPath(DEFAULT_JOURNAL_DIR, CommonAttributes.PATH.resolveModelAttribute(context, model.get(PATH, JOURNAL_DIRECTORY)));
+                String journalRelativeToPath = getRelativeToPath(model.get(PATH, JOURNAL_DIRECTORY));
+                String largeMessagePath = getPath(DEFAULT_LARGE_MESSAGE_DIR, CommonAttributes.PATH.resolveModelAttribute(context, model.get(PATH, LARGE_MESSAGES_DIRECTORY)));
+                String largeMessageRelativeToPath = getRelativeToPath(model.get(PATH, LARGE_MESSAGES_DIRECTORY));
+                String pagingPath = getPath(DEFAULT_PAGING_DIR, CommonAttributes.PATH.resolveModelAttribute(context, model.get(PATH, PAGING_DIRECTORY)));
+                String pagingRelativeToPath = getRelativeToPath(model.get(PATH, PAGING_DIRECTORY));
 
                 // Create the HornetQ Service
-                final HornetQService hqService = new HornetQService();
+                final HornetQService hqService = new HornetQService(
+                        new PathConfig(bindingsPath, bindingsRelativeToPath, journalPath, journalRelativeToPath, largeMessagePath, largeMessageRelativeToPath, pagingPath, pagingRelativeToPath));
+
                 hqService.setConfiguration(configuration);
 
                 // Add the HornetQ Service
@@ -217,10 +227,14 @@ class HornetQServerAdd implements OperationStepHandler {
                 final ServiceBuilder<HornetQServer> serviceBuilder = serviceTarget.addService(hqServiceName, hqService)
                         .addDependency(DependencyType.OPTIONAL, ServiceName.JBOSS.append("mbean", "server"), MBeanServer.class, hqService.getMBeanServer());
 
-                serviceBuilder.addDependency(bindingsPath, String.class, hqService.getPathInjector(DEFAULT_BINDINGS_DIR));
-                serviceBuilder.addDependency(journalPath, String.class, hqService.getPathInjector(DEFAULT_JOURNAL_DIR));
-                serviceBuilder.addDependency(largeMessagePath, String.class, hqService.getPathInjector(DEFAULT_LARGE_MESSSAGE_DIR));
-                serviceBuilder.addDependency(pagingPath, String.class, hqService.getPathInjector(DEFAULT_PAGING_DIR));
+                serviceBuilder.addDependency(PathManagerService.SERVICE_NAME, PathManager.class, hqService.getPathManagerInjector());
+
+                // Add security
+                String domain = SECURITY_DOMAIN.resolveModelAttribute(context, model).asString();
+                serviceBuilder.addDependency(DependencyType.REQUIRED,
+                        SecurityDomainService.SERVICE_NAME.append(domain),
+                        SecurityDomainContext.class,
+                        hqService.getSecurityDomainContextInjector());
 
                 // Process acceptors and connectors
                 final Set<String> socketBindings = new HashSet<String>();
@@ -351,6 +365,9 @@ class HornetQServerAdd implements OperationStepHandler {
 
         configuration.setJournalPerfBlastPages(PERF_BLAST_PAGES.resolveModelAttribute(context, model).asInt());
         configuration.setPersistDeliveryCountBeforeDelivery(PERSIST_DELIVERY_COUNT_BEFORE_DELIVERY.resolveModelAttribute(context, model).asBoolean());
+
+        configuration.setPageMaxConcurrentIO(PAGE_MAX_CONCURRENT_IO.resolveModelAttribute(context, model).asInt());
+
         configuration.setPersistenceEnabled(PERSISTENCE_ENABLED.resolveModelAttribute(context, model).asBoolean());
         configuration.setPersistIDCache(PERSIST_ID_CACHE.resolveModelAttribute(context, model).asBoolean());
 
@@ -429,24 +446,28 @@ class HornetQServerAdd implements OperationStepHandler {
         }
     }
 
+   /**
+    * Get the path for a given target.
+    *
+    *
+    * @param name          the path service name
+    * @param path          the detyped path element
+    * @return the path
+    */
+    static String getPath(final String name, final ModelNode path) {
+        return path.isDefined() ? path.asString() : DEFAULT_PATH + name;
+    }
+
     /**
-     * Create a path service for a given target.
+     * Get the relative path for a given target.
      *
      *
      * @param name          the path service name
      * @param path          the detyped path element
-     * @param serviceTarget the service target
-     * @param operation
-     * @return the created service name
+     * @return the path
      */
-   static ServiceName createDirectoryService(final String name, final ModelNode path, final ServiceTarget serviceTarget, ModelNode operation,
-                                               final List<ServiceController<?>> newControllers, final ServiceListener listener) {
-         final ServiceName hqServiceName = MessagingServices.getHornetQServiceName(PathAddress.pathAddress(operation.get(ModelDescriptionConstants.OP_ADDR)));
-         final ServiceName serviceName = hqServiceName.append(name);
-         final String relativeTo = path.hasDefined(RELATIVE_TO) ? path.get(RELATIVE_TO).asString() : DEFAULT_RELATIVE_TO;
-         final String pathName = path.hasDefined(PATH) ? path.get(PATH).asString() : DEFAULT_PATH + name;
-         RelativePathService.addService(serviceName, pathName, true, relativeTo, serviceTarget, newControllers, listener);
-         return serviceName;
+     static String getRelativeToPath(final ModelNode path) {
+         return path.hasDefined(RELATIVE_TO) ? path.get(RELATIVE_TO).asString() : DEFAULT_RELATIVE_TO;
      }
 
 }

@@ -27,12 +27,14 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import org.jboss.as.cmp.CmpMessages;
+import static org.jboss.as.cmp.CmpMessages.MESSAGES;
 import org.jboss.as.cmp.jdbc.metadata.parser.ParsedCmpField;
 import org.jboss.as.cmp.jdbc.metadata.parser.ParsedRelationshipRole;
 import org.jboss.metadata.ejb.spec.RelationRoleMetaData;
 
 /**
- * Imutable class which represents one ejb-relationship-role element found in
+ * Immutable class which represents one ejb-relationship-role element found in
  * the ejb-jar.xml file's ejb-relation elements.
  *
  * @author <a href="mailto:dain@daingroup.com">Dain Sundstrom</a>
@@ -129,8 +131,7 @@ public final class JDBCRelationshipRoleMetaData {
         // get the entity for this role
         entity = application.getBeanByEjbName(role.getRoleSource().getEjbName());
         if (entity == null) {
-            throw new IllegalArgumentException("Entity: " + role.getRoleSource().getEjbName() +
-                    " not found for relation: " + role.getRelation().getEjbRelationName());
+            throw MESSAGES.entityNotFoundForRelation(role.getRoleSource().getEjbName(), role.getRelation().getEjbRelationName());
         }
     }
 
@@ -152,10 +153,10 @@ public final class JDBCRelationshipRoleMetaData {
         batchCascadeDelete = defaultValues.isBatchCascadeDelete();
         if (batchCascadeDelete) {
             if (!cascadeDelete)
-                throw new RuntimeException(relationMetaData.getRelationName() + '/' + relationshipRoleName + " has batch-cascade-delete in jbosscmp-jdbc.xml but has no cascade-delete in ejb-jar.xml");
+                throw MESSAGES.cascadeDeleteInJbossXmlButNoEjbJar(relationMetaData.getRelationName(), relationshipRoleName);
 
             if (relationMetaData.isTableMappingStyle()) {
-                throw new RuntimeException("Relationship " + relationMetaData.getRelationName() + " with relation-table-mapping style was setup for batch cascade-delete." + " Batch cascade-delete supported only for foreign key mapping style.");
+                throw MESSAGES.batchCascadeDeleteOnlyForFkMapping(relationMetaData.getRelationName());
             }
         }
     }
@@ -188,17 +189,10 @@ public final class JDBCRelationshipRoleMetaData {
         batchCascadeDelete = parsedRelationshipRole.getBatchCascadeDelete() != null && parsedRelationshipRole.getBatchCascadeDelete();
         if (batchCascadeDelete) {
             if (!cascadeDelete)
-                throw new RuntimeException(
-                        relationMetaData.getRelationName() + '/' + relationshipRoleName
-                                + " has batch-cascade-delete in jbosscmp-jdbc.xml but has no cascade-delete in ejb-jar.xml"
-                );
+                throw CmpMessages.MESSAGES.invalidCascadeDeleteForRelation(relationMetaData.getRelationName(), relationshipRoleName);
 
             if (relationMetaData.isTableMappingStyle()) {
-                throw new RuntimeException(
-                        "Relationship " + relationMetaData.getRelationName()
-                                + " with relation-table-mapping style was setup for batch cascade-delete."
-                                + " Batch cascade-delete supported only for foreign key mapping style."
-                );
+                throw MESSAGES.batchCascadeDeleteOnlyForFkMapping(relationMetaData.getRelationName());
             }
         }
     }
@@ -231,7 +225,7 @@ public final class JDBCRelationshipRoleMetaData {
     /**
      * Should this role use a foreign key constraint.
      *
-     * @return true if the store mananager will execute an ALTER TABLE ADD
+     * @return true if the store manager will execute an ALTER TABLE ADD
      *         CONSTRAINT statement to add a foreign key constraint.
      */
     public boolean hasForeignKeyConstraint() {
@@ -377,12 +371,16 @@ public final class JDBCRelationshipRoleMetaData {
 
         // no field overrides, we're done
         final List<ParsedCmpField> keyFields = parsedRole.getKeyFields();
-        if (keyFields == null || keyFields.isEmpty()) {
+        if (keyFields == null) {
             return loadKeyFields();
         }
+
+        if(keyFields.isEmpty()) {
+            return Collections.EMPTY_MAP;
+        }
+
         if (relationMetaData.isForeignKeyMappingStyle() && isMultiplicityMany()) {
-            throw new RuntimeException("Role: " + relationshipRoleName + " with multiplicity many using " +
-                    "foreign-key mapping is not allowed to have key-fields");
+            throw CmpMessages.MESSAGES.relationshipRoleCanNotHaveKeyFields(relationshipRoleName);
         }
 
         // load the default field values
@@ -395,7 +393,7 @@ public final class JDBCRelationshipRoleMetaData {
 
             JDBCCMPFieldMetaData cmpField = defaultFields.remove(fieldName);
             if (cmpField == null) {
-                throw new RuntimeException("Role '" + relationshipRoleName + "' on Entity Bean '" + entity.getName() + "' : CMP field for key not found: field " + "name='" + fieldName + "'");
+                throw MESSAGES.cmpFieldNotFoundForRole(relationshipRoleName, entity.getName(), fieldName);
             }
             genIndex = keyField.getGenIndex() != null && keyField.getGenIndex();
 
@@ -412,11 +410,9 @@ public final class JDBCRelationshipRoleMetaData {
             fields.put(cmpField.getFieldName(), cmpField);
         }
 
-        // all fields must be overriden
+        // all fields must be overridden
         if (!defaultFields.isEmpty()) {
-            throw new RuntimeException("Mappings were not provided for all " +
-                    "fields: unmaped fields=" + defaultFields.keySet() +
-                    " in role=" + relationshipRoleName);
+            throw MESSAGES.mappingsNotProvidedForAllFieldsForRole(defaultFields.keySet(), relationshipRoleName);
         }
         return Collections.unmodifiableMap(fields);
     }

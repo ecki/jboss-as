@@ -22,12 +22,14 @@
 
 package org.jboss.as.controller;
 
-import static org.jboss.as.controller.ControllerLogger.ROOT_LOGGER;
+import static org.jboss.as.controller.ControllerLogger.MGMT_OP_LOGGER;
 import static org.jboss.as.controller.ControllerMessages.MESSAGES;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.CALLER_TYPE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.CANCELLED;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.FAILED;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.FAILURE_DESCRIPTION;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OPERATION_HEADERS;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OPERATION_REQUIRES_RELOAD;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OPERATION_REQUIRES_RESTART;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
@@ -36,11 +38,13 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RES
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RESULT;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ROLLED_BACK;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RUNTIME_UPDATE_SKIPPED;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SERVER_GROUPS;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SUCCESS;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.EnumMap;
+import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.jboss.as.controller.client.MessageSeverity;
@@ -57,19 +61,24 @@ abstract class AbstractOperationContext implements OperationContext {
 
     static final ThreadLocal<Thread> controllingThread = new ThreadLocal<Thread>();
 
-    private final Type contextType;
     final Thread initiatingThread;
     private final EnumMap<Stage, Deque<Step>> steps;
     private final ModelController.OperationTransactionControl transactionControl;
     private final ControlledProcessState processState;
+    private final boolean booting;
+    private final ProcessType processType;
+    private final RunningMode runningMode;
 
+    // We only respect interruption on the way in; once we complete all steps and begin
+    // returning, any calls that can throw InterruptedException are converted to
+    // an uninterruptible form. This is to ensure rollback changes are not interrupted
     boolean respectInterruption = true;
 
     Stage currentStage = Stage.MODEL;
 
     ResultAction resultAction;
     /** Tracks whether we've detected cancellation */
-    private boolean cancelled;
+    boolean cancelled;
     /** Currently executing step */
     Step activeStep;
 
@@ -78,35 +87,66 @@ abstract class AbstractOperationContext implements OperationContext {
         ALLOW_RESOURCE_SERVICE_RESTART,
     }
 
-    AbstractOperationContext(final Type contextType,
+    AbstractOperationContext(final ProcessType processType,
+                             final RunningMode runningMode,
                              final ModelController.OperationTransactionControl transactionControl,
-                             final ControlledProcessState processState) {
-        this.contextType = contextType;
+                             final ControlledProcessState processState, boolean booting) {
+        this.processType = processType;
+        this.runningMode = runningMode;
         this.transactionControl = transactionControl;
         this.processState = processState;
+        this.booting = booting;
         steps = new EnumMap<Stage, Deque<Step>>(Stage.class);
         for (Stage stage : Stage.values()) {
-            steps.put(stage, new ArrayDeque<Step>());
+            if (booting && stage == Stage.VERIFY) {
+                // Use a concurrent structure as the parallel boot threads will concurrently add steps
+                steps.put(stage, new LinkedBlockingDeque<Step>());
+            } else {
+                steps.put(stage, new ArrayDeque<Step>());
+            }
         }
         initiatingThread = Thread.currentThread();
     }
 
-    public void addStep(final OperationStepHandler step, final Stage stage) throws IllegalArgumentException {
-        final ModelNode response = activeStep == null ? new ModelNode().setEmptyObject() : activeStep.response;
-        addStep(response, activeStep.operation, activeStep.address, step, stage);
+    @Override
+    public boolean isBooting() {
+        return booting;
     }
 
+    @Override
+    public void addStep(final OperationStepHandler step, final Stage stage) throws IllegalArgumentException {
+        addStep(step, stage, false);
+    }
+
+    @Override
     public void addStep(final ModelNode operation, final OperationStepHandler step, final Stage stage) throws IllegalArgumentException {
         final ModelNode response = activeStep == null ? new ModelNode().setEmptyObject() : activeStep.response;
         addStep(response, operation, null, step, stage);
     }
 
+    @Override
     public void addStep(final ModelNode response, final ModelNode operation, final OperationStepHandler step, final Stage stage) throws IllegalArgumentException {
         addStep(response, operation, null, step, stage);
     }
 
+    @Override
+    public void addStep(OperationStepHandler step, Stage stage, boolean addFirst) throws IllegalArgumentException {
+        final ModelNode response = activeStep == null ? new ModelNode().setEmptyObject() : activeStep.response;
+        addStep(response, activeStep.operation, activeStep.address, step, stage, addFirst);
+    }
+
     void addStep(final ModelNode response, final ModelNode operation, final PathAddress address,
                          final OperationStepHandler step, final Stage stage) throws IllegalArgumentException {
+        addStep(response, operation, address, step, stage, false);
+    }
+
+    @Override
+    public void addStep(ModelNode response, ModelNode operation, OperationStepHandler step, Stage stage, boolean addFirst) throws IllegalArgumentException {
+        addStep(response, operation, null, step, stage, addFirst);
+    }
+
+    void addStep(final ModelNode response, final ModelNode operation, final PathAddress address,
+                         final OperationStepHandler step, final Stage stage, boolean addFirst) throws IllegalArgumentException {
         assert isControllingThread();
         if (response == null) {
             throw MESSAGES.nullVar("response");
@@ -126,27 +166,46 @@ abstract class AbstractOperationContext implements OperationContext {
         if (stage.compareTo(currentStage) < 0 && (stage != Stage.IMMEDIATE || currentStage == Stage.DONE)) {
             throw MESSAGES.stageAlreadyComplete(stage);
         }
-        if (stage == Stage.DOMAIN && contextType != Type.HOST) {
-            throw MESSAGES.invalidStage(stage, contextType);
+        if (stage == Stage.DOMAIN && processType != ProcessType.HOST_CONTROLLER) {
+            throw MESSAGES.invalidStage(stage, processType);
         }
         if (stage == Stage.DONE) {
             throw MESSAGES.invalidStepStage();
         }
+        if (!booting && activeStep != null) {
+            // Added steps inherit the caller type of their parent
+            if (activeStep.operation.hasDefined(OPERATION_HEADERS) && activeStep.operation.get(OPERATION_HEADERS).hasDefined(CALLER_TYPE)) {
+                operation.get(OPERATION_HEADERS, CALLER_TYPE).set(activeStep.operation.get(OPERATION_HEADERS, CALLER_TYPE));
+            }
+        }
         if (stage == Stage.IMMEDIATE) {
             steps.get(currentStage).addFirst(new Step(step, response, operation, address));
         } else {
-            steps.get(stage).addLast(new Step(step, response, operation, address));
+            final Deque<Step> deque = steps.get(stage);
+            if(addFirst) {
+                deque.addFirst(new Step(step, response, operation, address));
+            } else {
+                deque.addLast(new Step(step, response, operation, address));
+            }
         }
     }
 
+    @Override
     public final ModelNode getFailureDescription() {
         return activeStep.response.get(FAILURE_DESCRIPTION);
     }
 
+    @Override
     public final boolean hasFailureDescription() {
         return activeStep.response.has(FAILURE_DESCRIPTION);
     }
 
+    @Override
+    public final ModelNode getResponseHeaders() {
+        return activeStep.response.get(RESPONSE_HEADERS);
+    }
+
+    @Override
     public final ResultAction completeStep() {
         try {
             doCompleteStep();
@@ -161,6 +220,7 @@ abstract class AbstractOperationContext implements OperationContext {
         }
     }
 
+    @Override
     public final void completeStep(RollbackHandler rollbackHandler) {
         if (rollbackHandler == null) {
             throw MESSAGES.nullVar("rollbackHandler");
@@ -200,7 +260,6 @@ abstract class AbstractOperationContext implements OperationContext {
                         try {
                             awaitModelControllerContainerMonitor();
                         } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
                             cancelled = true;
                             if (response != null) {
                                 response.get(OUTCOME).set(CANCELLED);
@@ -208,33 +267,50 @@ abstract class AbstractOperationContext implements OperationContext {
                                 response.get(ROLLED_BACK).set(true);
                             }
                             resultAction = ResultAction.ROLLBACK;
+                            respectInterruption = false;
+                            Thread.currentThread().interrupt();
+                            if (activeStep != null && activeStep.rollbackHandler != null) {
+                                // Finalize
+                                activeStep.finalizeStep(null);
+                            }
                             return;
                         }
                     }
                 }
             } else {
-                executeStep(step);
-                if (step.rollbackHandler == null) {
-                    // A recursive step executed
-                    return;
-                } else {
-                    // A non-recursive step executed
-                    // See if it put us in a state where we shouldn't do any more
-                    if (!canContinueProcessing()) {
-                        // We're done. Do the cleanup that would happen in executeStep's finally block
-                        // if this was a recursive step
-                        respectInterruption = false;
-                        step.finalizeStep();
+                // Execute the step, but make sure we always finalize any steps
+                Throwable toThrow = null;
+                try {
+                    executeStep(step);
+                } catch (RuntimeException re) {
+                    toThrow = re;
+                } catch (Error e) {
+                    toThrow = e;
+                } finally {
+                    if (step.rollbackHandler == null) {
+                        // A recursive step executed
+                        throwThrowable(toThrow);
                         return;
                     } else {
-                        // else move on to next step
-                        response = activeStep.response;
+                        // A non-recursive step executed
+                        // See if it put us in a state where we shouldn't do any more
+                        if (!canContinueProcessing()) {
+                            // We're done. Do the cleanup that would happen in executeStep's finally block
+                            // if this was a recursive step
+                            respectInterruption = false;
+                            step.finalizeStep(toThrow);
+                            return;
+                        } else {
+                            throwThrowable(toThrow);
+                            // else move on to next step
+                            response = activeStep.response;
+                        }
                     }
                 }
             }
         } while (currentStage != Stage.DONE);
 
-        // All steps are completed withuout triggering rollback; time for final processing
+        // All steps are completed without triggering rollback; time for final processing
 
         // Prepare persistence of any configuration changes
         ConfigurationPersister.PersistenceResource persistenceResource = null;
@@ -242,7 +318,7 @@ abstract class AbstractOperationContext implements OperationContext {
             try {
                 persistenceResource = createPersistenceResource();
             } catch (ConfigurationPersistenceException e) {
-                ROOT_LOGGER.failedToPersistConfigurationChange(e);
+                MGMT_OP_LOGGER.failedToPersistConfigurationChange(e);
                 if (response != null) {
                     response.get(OUTCOME).set(FAILED);
                     response.get(FAILURE_DESCRIPTION).set(MESSAGES.failedToPersistConfigurationChange(e.getLocalizedMessage()));
@@ -255,8 +331,8 @@ abstract class AbstractOperationContext implements OperationContext {
         // Allow any containing TransactionControl to vote
         final AtomicReference<ResultAction> ref = new AtomicReference<ResultAction>(transactionControl == null ? ResultAction.KEEP : ResultAction.ROLLBACK);
         if (transactionControl != null) {
-            if (ROOT_LOGGER.isTraceEnabled()) {
-                ROOT_LOGGER.trace("Prepared response is " + response);
+            if (MGMT_OP_LOGGER.isTraceEnabled()) {
+                MGMT_OP_LOGGER.trace("Prepared response is " + response);
             }
             transactionControl.operationPrepared(new ModelController.OperationTransaction() {
                 public void commit() {
@@ -323,26 +399,35 @@ abstract class AbstractOperationContext implements OperationContext {
                     SecurityActions.setThreadContextClassLoader(oldTccl);
                 }
 
-            } catch (OperationFailedException ofe) {
-                if (currentStage != Stage.DONE) {
-                    // Handler threw OFE before calling completeStep(); that's equivalent to
+            } catch (Throwable t) {
+                // Special handling for OperationClientException marker interface
+                if (! (t instanceof OperationClientException)) {
+                    throw t;
+                } else if (currentStage != Stage.DONE) {
+                    // Handler threw OCE before calling completeStep(); that's equivalent to
                     // a request that we set the failure description and call completeStep()
-                    step.response.get(FAILURE_DESCRIPTION).set(ofe.getFailureDescription());
-                    ROOT_LOGGER.operationFailed(step.operation.get(OP), step.operation.get(OP_ADDR), step.response.get(FAILURE_DESCRIPTION));
+                    final ModelNode failDesc = OperationClientException.class.cast(t).getFailureDescription();
+                    step.response.get(FAILURE_DESCRIPTION).set(failDesc);
+                    if (isBooting()) {
+                        // An OCE on boot needs to be logged as an ERROR
+                        MGMT_OP_LOGGER.operationFailed(step.operation.get(OP), step.operation.get(OP_ADDR), step.response.get(FAILURE_DESCRIPTION));
+                    } else {
+                        // An OCE post-boot is a client-side mistake and is logged at DEBUG
+                        MGMT_OP_LOGGER.operationFailedOnClientError(step.operation.get(OP), step.operation.get(OP_ADDR), step.response.get(FAILURE_DESCRIPTION));
+                    }
                     completeStep();
-                }
-                else {
-                    // Handler threw OFE after calling completeStep()
+                } else {
+                    // Handler threw OCE after calling completeStep()
                     // Throw it on and let standard error handling deal with it
-                    throw ofe;
+                    throw t;
                 }
             }
         } catch (Throwable t) {
             if (t instanceof StackOverflowError) {
-                ROOT_LOGGER.operationFailed(t, step.operation.get(OP), step.operation.get(OP_ADDR), AbstractControllerService.BOOT_STACK_SIZE_PROPERTY,
+                MGMT_OP_LOGGER.operationFailed(t, step.operation.get(OP), step.operation.get(OP_ADDR), AbstractControllerService.BOOT_STACK_SIZE_PROPERTY,
                         AbstractControllerService.DEFAULT_BOOT_STACK_SIZE);
             } else {
-                ROOT_LOGGER.operationFailed(t, step.operation.get(OP), step.operation.get(OP_ADDR));
+                MGMT_OP_LOGGER.operationFailed(t, step.operation.get(OP), step.operation.get(OP_ADDR));
             }
             // If this block is entered, then the step failed
             // The question is, did it fail before or after calling completeStep()?
@@ -362,7 +447,14 @@ abstract class AbstractOperationContext implements OperationContext {
             }
         } finally {
 
-            boolean finalize = true;
+            finishStep(step);
+        }
+    }
+
+    private void finishStep(Step step) {
+        boolean finalize = true;
+        Throwable toThrow = null;
+        try {
             if (step.rollbackHandler != null) {
                 // A non-recursive step executed
                 if (!hasMoreSteps()) {
@@ -372,17 +464,35 @@ abstract class AbstractOperationContext implements OperationContext {
                 } else {
                     // Let doCompleteStep carry on with subsequent steps.
                     // If this step has failed in a way that will prevent subsequent steps running,
-                    // doCompleteStep will finalize this step.
+                    // and doCompleteStep will finalize this step.
                     // Otherwise, some subsequent step will finalize this step
                     finalize = false;
                 }
             }
-
+        } catch (RuntimeException re) {
+            toThrow = re;
+        } catch (Error e) {
+            toThrow = e;
+        } finally {
             if (finalize) {
-                // We're on the way out on the recursive call path. Finish off this step
-                step.finalizeStep();
+                // We're on the way out on the recursive call path. Finish off this step.
+                // Any throwable we caught will get rethrown by this call
+                step.finalizeStep(toThrow);
+            } else {
+                // non-recursive steps get finished off by the succeeding recursive step
+                // Throw on toThrow if it's not null; otherwise just return
+                throwThrowable(toThrow);
             }
-            // else non-recursive steps get finished off by the succeeding recursive step
+        }
+    }
+
+    private static void throwThrowable(Throwable toThrow) {
+        if (toThrow != null) {
+            if (toThrow instanceof RuntimeException) {
+                throw (RuntimeException) toThrow;
+            } else {
+                throw (Error) toThrow;
+            }
         }
     }
 
@@ -400,15 +510,32 @@ abstract class AbstractOperationContext implements OperationContext {
         return ResultAction.KEEP;
     }
 
-    public final Type getType() {
-        assert isControllingThread();
-        return contextType;
+    public final ProcessType getProcessType() {
+        return processType;
     }
 
+    public final RunningMode getRunningMode() {
+        return runningMode;
+    }
+
+    @Override
+    @Deprecated
+    @SuppressWarnings("deprecation")
+    public final Type getType() {
+        return Type.getType(processType, runningMode);
+    }
+
+    @Override
+    public final boolean isNormalServer() {
+        return processType.isServer() && runningMode == RunningMode.NORMAL;
+    }
+
+    @Override
     public final boolean isRollbackOnly() {
         return resultAction == ResultAction.ROLLBACK;
     }
 
+    @Override
     public final void setRollbackOnly() {
         resultAction = ResultAction.ROLLBACK;
     }
@@ -465,12 +592,22 @@ abstract class AbstractOperationContext implements OperationContext {
         activeStep.response.get(RESPONSE_HEADERS, RUNTIME_UPDATE_SKIPPED).set(true);
     }
 
+    @Override
     public final ModelNode getResult() {
         return activeStep.response.get(RESULT);
     }
 
+    @Override
     public final boolean hasResult() {
         return activeStep.response.has(RESULT);
+    }
+
+    @Override
+    public final ModelNode getServerResults() {
+        if (processType != ProcessType.HOST_CONTROLLER ) {
+            throw MESSAGES.serverResultsAccessNotAllowed(ProcessType.HOST_CONTROLLER, processType);
+        }
+        return activeStep.response.get(SERVER_GROUPS);
     }
 
     private boolean hasMoreSteps() {
@@ -507,18 +644,47 @@ abstract class AbstractOperationContext implements OperationContext {
             response.get(OUTCOME);
         }
 
-        private void finalizeStep() {
-            finalizeInternal();
+        /**
+         * Perform any rollback needed to reverse this step (if this context is rolling back),
+         * and release any locks taken by this step.
+         *
+         * @param toThrow  RuntimeException or Error to throw when done; may be {@code null}
+         */
+        private void finalizeStep(Throwable toThrow) {
+            try {
+                finalizeInternal();
+            } catch (RuntimeException t) {
+                if (toThrow == null) {
+                    toThrow = t;
+                }
+            } catch (Error t) {
+                if (toThrow == null) {
+                    toThrow = t;
+                }
+            }
+
             Step step = this.predecessor;
             while (step != null) {
                 if (step.rollbackHandler != null) {
-                    step.finalizeInternal();
+                    try {
+                        step.finalizeInternal();
+                    } catch (RuntimeException t) {
+                        if (toThrow == null) {
+                            toThrow = t;
+                        }
+                    } catch (Error t) {
+                        if (toThrow == null) {
+                            toThrow = t;
+                        }
+                    }
                     step = step.predecessor;
                 } else {
                     AbstractOperationContext.this.activeStep = step;
                     break;
                 }
             }
+
+            throwThrowable(toThrow);
         }
 
         private void finalizeInternal() {
@@ -538,11 +704,11 @@ abstract class AbstractOperationContext implements OperationContext {
                     if (! response.hasDefined(FAILURE_DESCRIPTION)) {
                         response.get(FAILURE_DESCRIPTION).set(MESSAGES.operationHandlerFailedToComplete());
                     }
-                    response.get(OUTCOME).set(FAILED);
+                    response.get(OUTCOME).set(cancelled ? CANCELLED : FAILED);
                     response.get(ROLLED_BACK).set(true);
                     resultAction = getFailedResultAction(null);
                 } else if (resultAction == ResultAction.ROLLBACK) {
-                    response.get(OUTCOME).set(FAILED);
+                    response.get(OUTCOME).set(cancelled ? CANCELLED : FAILED);
                     response.get(ROLLED_BACK).set(true);
                 } else {
                     response.get(OUTCOME).set(response.hasDefined(FAILURE_DESCRIPTION) ? FAILED : SUCCESS);

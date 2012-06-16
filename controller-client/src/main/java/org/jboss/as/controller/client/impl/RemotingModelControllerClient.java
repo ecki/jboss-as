@@ -22,21 +22,28 @@
 
 package org.jboss.as.controller.client.impl;
 
+import org.jboss.as.controller.client.ControllerClientLogger;
+import org.jboss.as.controller.client.ControllerClientMessages;
 import static org.jboss.as.controller.client.ControllerClientMessages.MESSAGES;
 
 import java.io.IOException;
-import java.net.URISyntaxException;
-import java.util.Map;
-
-import javax.security.auth.callback.CallbackHandler;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
+import java.util.concurrent.TimeUnit;
 
 import org.jboss.as.controller.client.ModelControllerClient;
+import org.jboss.as.controller.client.ModelControllerClientConfiguration;
+import org.jboss.as.protocol.ProtocolChannelClient;
+import org.jboss.as.protocol.StreamUtils;
+import org.jboss.as.protocol.mgmt.ManagementChannelAssociation;
+import org.jboss.as.protocol.mgmt.ManagementChannelHandler;
 import org.jboss.as.protocol.mgmt.ManagementClientChannelStrategy;
+import org.jboss.remoting3.Channel;
+import org.jboss.remoting3.CloseHandler;
 import org.jboss.remoting3.Endpoint;
 import org.jboss.remoting3.Remoting;
 import org.jboss.remoting3.remote.RemoteConnectionProviderFactory;
 import org.xnio.OptionMap;
-import org.xnio.Options;
 
 /**
  * {@link ModelControllerClient} based on a Remoting {@link Endpoint}.
@@ -45,45 +52,110 @@ import org.xnio.Options;
  */
 public class RemotingModelControllerClient extends AbstractModelControllerClient {
 
-    private final String hostName;
-    private final int port;
-    private final CallbackHandler callbackHandler;
-    private final Map<String, String> saslOptions;
-    private volatile Endpoint endpoint;
+    private Endpoint endpoint;
     private ManagementClientChannelStrategy strategy;
     private boolean closed;
 
+    private final ManagementChannelHandler channelAssociation;
+    private final ModelControllerClientConfiguration clientConfiguration;
+    private final StackTraceElement[] allocationStackTrace;
 
-    public RemotingModelControllerClient(String hostName, int port, final CallbackHandler callbackHandler, final Map<String, String> saslOptions) {
-        this.hostName = hostName;
-        this.port = port;
-        this.callbackHandler = callbackHandler;
-        this.saslOptions = saslOptions;
+    public RemotingModelControllerClient(final ModelControllerClientConfiguration configuration) {
+        this.channelAssociation = new ManagementChannelHandler(new ManagementClientChannelStrategy() {
+            @Override
+            public Channel getChannel() throws IOException {
+                return getOrCreateChannel();
+            }
+
+            @Override
+            public synchronized void close() throws IOException {
+                //
+            }
+        }, configuration.getExecutor(), this);
+        this.clientConfiguration = configuration;
+        this.allocationStackTrace = Thread.currentThread().getStackTrace();
+    }
+
+    @Override
+    protected ManagementChannelAssociation getChannelAssociation() throws IOException {
+        return channelAssociation;
     }
 
     @Override
     public void close() throws IOException {
         synchronized (this) {
+            if(closed) {
+                return;
+            }
             closed = true;
+            // Don't allow any new request
+            channelAssociation.shutdown();
+            // First close the channel and connection
+            if (strategy != null) {
+                StreamUtils.safeClose(strategy);
+                strategy = null;
+            }
+            // Then the endpoint
             if (endpoint != null) {
-                endpoint.close();
+                StreamUtils.safeClose(endpoint);
                 endpoint = null;
             }
+            // Cancel all still active operations
+            channelAssociation.shutdownNow();
+            try {
+                channelAssociation.awaitCompletion(1, TimeUnit.SECONDS);
+            } catch (InterruptedException ignore) {
+                Thread.currentThread().interrupt();
+            } finally {
+                StreamUtils.safeClose(clientConfiguration);
+            }
         }
-        super.close();
     }
 
-    @Override
-    protected synchronized ManagementClientChannelStrategy getClientChannelStrategy() throws URISyntaxException, IOException {
+    protected synchronized Channel getOrCreateChannel() throws IOException {
         if (closed) {
             throw MESSAGES.objectIsClosed( ModelControllerClient.class.getSimpleName());
         }
         if (strategy == null) {
-            endpoint = Remoting.createEndpoint("management-client", OptionMap.EMPTY);
+            try {
+                final ProtocolChannelClient.Configuration configuration = ProtocolConfigurationFactory.create(clientConfiguration);
 
-            endpoint.addConnectionProvider("remote", new RemoteConnectionProviderFactory(), OptionMap.create(Options.SSL_ENABLED, Boolean.FALSE));
-            strategy = ManagementClientChannelStrategy.create(hostName, port, endpoint, this, callbackHandler, saslOptions);
+                // TODO move the endpoint creation somewhere else?
+                endpoint = Remoting.createEndpoint("management-client", OptionMap.EMPTY);
+                endpoint.addConnectionProvider("remote", new RemoteConnectionProviderFactory(), OptionMap.EMPTY);
+
+                configuration.setEndpoint(endpoint);
+
+                final ProtocolChannelClient setup = ProtocolChannelClient.create(configuration);
+                strategy = ManagementClientChannelStrategy.create(setup, channelAssociation, clientConfiguration.getCallbackHandler(),
+                        clientConfiguration.getSaslOptions(), clientConfiguration.getSSLContext(),
+                        new CloseHandler<Channel>() {
+                    @Override
+                    public void handleClose(final Channel closed, final IOException exception) {
+                        channelAssociation.handleChannelClosed(closed, exception);
+                    }
+                });
+            } catch (IOException e) {
+                throw e;
+            } catch (RuntimeException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
         }
-        return strategy;
+        return strategy.getChannel();
     }
+
+    @Override
+    protected void finalize() throws Throwable {
+        if(! closed) {
+            // Create the leak description
+            final Throwable t = ControllerClientMessages.MESSAGES.controllerClientNotClosed();
+            t.setStackTrace(allocationStackTrace);
+            ControllerClientLogger.ROOT_LOGGER.leakedControllerClient(t);
+            // Close
+            StreamUtils.safeClose(this);
+        }
+    }
+
 }

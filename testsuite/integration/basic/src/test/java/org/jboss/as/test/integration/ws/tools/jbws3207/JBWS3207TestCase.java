@@ -21,11 +21,6 @@
  */
 package org.jboss.as.test.integration.ws.tools.jbws3207;
 
-import static org.jboss.as.arquillian.container.Authentication.PASSWORD;
-import static org.jboss.as.arquillian.container.Authentication.USERNAME;
-import static org.jboss.as.protocol.StreamUtils.safeClose;
-import static org.junit.Assert.assertTrue;
-
 import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.InputStream;
@@ -33,9 +28,10 @@ import java.io.OutputStreamWriter;
 import java.net.URL;
 import java.net.URLConnection;
 
-import org.jboss.arquillian.container.test.api.RunAsClient;
 import org.jboss.arquillian.junit.Arquillian;
+import org.jboss.as.test.http.Authentication;
 import org.jboss.as.test.integration.ws.tools.jbws3207.service.EndpointImpl;
+import org.jboss.as.test.shared.TestSuiteEnvironment;
 import org.jboss.as.webservices.deployer.RemoteDeployer;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
 import org.jboss.shrinkwrap.api.asset.StringAsset;
@@ -49,6 +45,9 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import static org.jboss.as.protocol.StreamUtils.safeClose;
+import static org.junit.Assert.assertTrue;
+
 /**
  * [JBWS-3207] JBossWS remote deployer support.
  *
@@ -59,14 +58,16 @@ public class JBWS3207TestCase {
 
     @BeforeClass
     public static void setProperties() {
-        System.setProperty("jbossws.deployer.authentication.username", USERNAME);
-        System.setProperty("jbossws.deployer.authentication.password", PASSWORD);
+        System.setProperty("jbossws.deployer.authentication.username", Authentication.USERNAME);
+        System.setProperty("jbossws.deployer.authentication.password", Authentication.PASSWORD);
+        System.setProperty("jbossws.deployer.host", TestSuiteEnvironment.getServerAddress());
     }
 
     @AfterClass
     public static void clearProperties() {
         System.clearProperty("jbossws.deployer.authentication.username");
         System.clearProperty("jbossws.deployer.authentication.password");
+        System.clearProperty("jbossws.deployer.host");
     }
 
     @Test
@@ -100,8 +101,7 @@ public class JBWS3207TestCase {
         URLConnection conn = null;
         InputStream in = null;
         try {
-            String node0 = System.getProperty("node0", "not-defined");
-            URL url = new URL("http://" + node0 + ":8080/jbws3207/?wsdl");
+            URL url = new URL("http://" + TestSuiteEnvironment.getServerAddress() + ":8080/jbws3207/?wsdl");
             System.out.println("Reading response from " + url + ":");
             conn = url.openConnection();
             conn.setDoInput(true);
@@ -128,8 +128,7 @@ public class JBWS3207TestCase {
                 + "      <arg0>Foo</arg0>"
                 + "    </arc:echoString>" + "  </soapenv:Body>" + "</soapenv:Envelope>";
         try {
-            String node0 = System.getProperty("node0", "not-defined");
-            URL url = new URL("http://" + node0 + ":8080/jbws3207");
+            URL url = new URL("http://" + TestSuiteEnvironment.getServerAddress() + ":8080/jbws3207");
             System.out.println("Reading response from " + url + ":");
             conn = url.openConnection();
             conn.setDoInput(true);

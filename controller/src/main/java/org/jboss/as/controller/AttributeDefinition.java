@@ -37,6 +37,7 @@ import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
 import org.jboss.as.controller.descriptions.ResourceDescriptionResolver;
 import org.jboss.as.controller.operations.validation.AllowedValuesValidator;
 import org.jboss.as.controller.operations.validation.MinMaxValidator;
+import org.jboss.as.controller.operations.validation.NillableOrExpressionParameterValidator;
 import org.jboss.as.controller.operations.validation.ParameterValidator;
 import org.jboss.as.controller.parsing.ParseUtils;
 import org.jboss.as.controller.registry.AttributeAccess;
@@ -76,13 +77,14 @@ public abstract class AttributeDefinition {
                                final ParameterValidator validator, final String[] alternatives, final String[] requires,
                                final AttributeAccess.Flag... flags) {
         this(name, xmlName, defaultValue, type, allowNull, allowExpression, measurementUnit,
-                null, validator, alternatives, requires, flags);
+                null, validator, true, alternatives, requires, flags);
     }
 
     protected AttributeDefinition(String name, String xmlName, final ModelNode defaultValue, final ModelType type,
-            final boolean allowNull, final boolean allowExpression, final MeasurementUnit measurementUnit,
-            final ParameterCorrector valueCorrector, final ParameterValidator validator,
-            final String[] alternatives, final String[] requires, final AttributeAccess.Flag... flags) {
+                                  final boolean allowNull, final boolean allowExpression, final MeasurementUnit measurementUnit,
+                                  final ParameterCorrector valueCorrector, final ParameterValidator validator,
+                                  boolean validateNull, final String[] alternatives, final String[] requires,
+                                  final AttributeAccess.Flag... flags) {
 
         this.name = name;
         this.xmlName = xmlName;
@@ -98,7 +100,12 @@ public abstract class AttributeDefinition {
         this.alternatives = alternatives;
         this.requires = requires;
         this.valueCorrector = valueCorrector;
-        this.validator = validator;
+        if (validator == null) {
+            this.validator = null;
+        } else {
+            Boolean nullCheck = validateNull ? allowNull : null;
+            this.validator = new NillableOrExpressionParameterValidator(validator, nullCheck, allowExpression);
+        }
         if (flags == null || flags.length == 0) {
             this.flags = EnumSet.noneOf(AttributeAccess.Flag.class);
         } else if (flags.length == 0) {
@@ -189,21 +196,7 @@ public abstract class AttributeDefinition {
      * @throws OperationFailedException if the value is not valid
      */
     public ModelNode validateOperation(final ModelNode operationObject) throws OperationFailedException {
-
-        ModelNode node = new ModelNode();
-        if(operationObject.has(name)) {
-            node.set(operationObject.get(name));
-        }
-        if (isAllowExpression() && node.getType() == ModelType.STRING) {
-            node = ParseUtils.parsePossibleExpression(node.asString());
-        }
-        if (!node.isDefined() && defaultValue.isDefined()) {
-            validator.validateParameter(name, defaultValue);
-        } else {
-            validator.validateParameter(name, node);
-        }
-
-        return node;
+        return validateOperation(operationObject, true);
     }
 
     /**
@@ -216,10 +209,11 @@ public abstract class AttributeDefinition {
      * @throws OperationFailedException if the value is not valid
      */
     public final void validateAndSet(ModelNode operationObject, final ModelNode model) throws OperationFailedException {
-        if(this.valueCorrector != null) {
-            valueCorrector.correct(operationObject.get(name), model.get(name));
+        final ModelNode newValue = correctValue(operationObject.get(name), model.get(name));
+        if (!newValue.equals(operationObject.get(name))) {
+            operationObject.get(name).set(newValue);
         }
-        ModelNode node = validateOperation(operationObject);
+        ModelNode node = validateOperation(operationObject, false);
         model.get(name).set(node);
     }
 
@@ -439,6 +433,43 @@ public abstract class AttributeDefinition {
         return result;
     }
 
+    /**
+     * Corrects the value if the {@link ParameterCorrector value corrector} is not {@code null}. If the {@link
+     * ParameterCorrector value corrector} is {@code null}, the {@code newValue} parameter is returned.
+     *
+     * @param newValue the new value.
+     * @param oldValue the old value.
+     *
+     * @return the corrected value or the {@code newValue} if the {@link ParameterCorrector value corrector} is {@code
+     *         null}.
+     */
+    protected final ModelNode correctValue(final ModelNode newValue, final ModelNode oldValue) {
+        if (valueCorrector != null) {
+            return valueCorrector.correct(newValue, oldValue);
+        }
+        return newValue;
+    }
+
+    private ModelNode validateOperation(final ModelNode operationObject, final boolean correctValue) throws OperationFailedException {
+
+        ModelNode node = new ModelNode();
+        if(operationObject.has(name)) {
+            node.set(operationObject.get(name));
+        }
+        if (isAllowExpression() && node.getType() == ModelType.STRING) {
+            node = ParseUtils.parsePossibleExpression(node.asString());
+        }
+        if (!node.isDefined() && defaultValue.isDefined()) {
+            if (correctValue) correctValue(node, node);
+            validator.validateParameter(name, defaultValue);
+        } else {
+            if (correctValue) correctValue(node, node);
+            validator.validateParameter(name, node);
+        }
+
+        return node;
+    }
+
     private final OperationContext NO_OPERATION_CONTEXT_FOR_RESOLVING_MODEL_PARAMETERS = new OperationContext() {
 
         @Override
@@ -494,6 +525,21 @@ public abstract class AttributeDefinition {
         }
 
         @Override
+        public Resource readResource(PathAddress address, boolean recursive) {
+            return null;
+        }
+
+        @Override
+        public Resource readResourceFromRoot(PathAddress address) {
+            return null;
+        }
+
+        @Override
+        public Resource readResourceFromRoot(PathAddress address, boolean recursive) {
+            return null;
+        }
+
+        @Override
         public ModelNode readModelForUpdate(PathAddress address) {
             return null;
         }
@@ -501,6 +547,11 @@ public abstract class AttributeDefinition {
         @Override
         public ModelNode readModel(PathAddress address) {
             return null;
+        }
+
+        @Override
+        public final boolean isNormalServer() {
+            return false;
         }
 
         @Override
@@ -549,6 +600,18 @@ public abstract class AttributeDefinition {
         }
 
         @Override
+        public ProcessType getProcessType() {
+            return null;
+        }
+
+        @Override
+        public RunningMode getRunningMode() {
+            return null;
+        }
+
+        @Override
+        @Deprecated
+        @SuppressWarnings("deprecation")
         public Type getType() {
             return null;
         }
@@ -574,6 +637,11 @@ public abstract class AttributeDefinition {
         }
 
         @Override
+        public ModelNode getServerResults() {
+            return null;
+        }
+
+        @Override
         public ManagementResourceRegistration getResourceRegistrationForUpdate() {
             return null;
         }
@@ -584,7 +652,17 @@ public abstract class AttributeDefinition {
         }
 
         @Override
+        public ImmutableManagementResourceRegistration getRootResourceRegistration() {
+            return null;
+        }
+
+        @Override
         public ModelNode getFailureDescription() {
+            return null;
+        }
+
+        @Override
+        public ModelNode getResponseHeaders() {
             return null;
         }
 
@@ -635,12 +713,42 @@ public abstract class AttributeDefinition {
         }
 
         @Override
+        public void addStep(ModelNode response, ModelNode operation, OperationStepHandler step, Stage stage, boolean addFirst) throws IllegalArgumentException {
+            //
+        }
+
+        @Override
+        public void addStep(OperationStepHandler step, Stage stage, boolean addFirst) throws IllegalArgumentException {
+            //
+        }
+
+        @Override
         public void acquireControllerLock() {
         }
 
         @Override
         public ModelNode resolveExpressions(ModelNode node) throws OperationFailedException {
             return ExpressionResolver.DEFAULT.resolveExpressions(node);
+        }
+
+        @Override
+        public <T> T getAttachment(final AttachmentKey<T> key) {
+            return null;
+        }
+
+        @Override
+        public <T> T attach(final AttachmentKey<T> key, final T value) {
+            return null;
+        }
+
+        @Override
+        public <T> T attachIfAbsent(final AttachmentKey<T> key, final T value) {
+            return null;
+        }
+
+        @Override
+        public <T> T detach(final AttachmentKey<T> key) {
+            return null;
         }
 
         @Override

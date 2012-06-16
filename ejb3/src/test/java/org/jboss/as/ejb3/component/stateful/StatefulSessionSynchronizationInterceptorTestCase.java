@@ -21,23 +21,25 @@
  */
 package org.jboss.as.ejb3.component.stateful;
 
+import java.util.Arrays;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+
+import javax.transaction.Status;
+import javax.transaction.Synchronization;
+import javax.transaction.TransactionSynchronizationRegistry;
+
 import org.jboss.as.ee.component.Component;
 import org.jboss.as.ee.component.ComponentInstance;
 import org.jboss.as.ejb3.cache.Cache;
 import org.jboss.as.ejb3.concurrency.AccessTimeoutDetails;
+import org.jboss.ejb.client.SessionID;
 import org.jboss.invocation.Interceptor;
 import org.jboss.invocation.InterceptorContext;
 import org.junit.Test;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
-
-import javax.transaction.Status;
-import javax.transaction.Synchronization;
-import javax.transaction.TransactionSynchronizationRegistry;
-import java.util.Arrays;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 import static org.mockito.Matchers.any;
 import static org.mockito.Mockito.doAnswer;
@@ -68,21 +70,21 @@ public class StatefulSessionSynchronizationInterceptorTestCase {
      */
     @Test
     public void testDifferentTx() throws Exception {
-        final Interceptor interceptor = new StatefulSessionSynchronizationInterceptor();
+        final Interceptor interceptor = new StatefulSessionSynchronizationInterceptor(true);
         final InterceptorContext context = new InterceptorContext();
         context.setInterceptors(Arrays.asList(noop()));
         final StatefulSessionComponent component = mock(StatefulSessionComponent.class);
         context.putPrivateData(Component.class, component);
         when(component.getAccessTimeout(null)).thenReturn(defaultAccessTimeout());
-        Cache<StatefulSessionComponentInstance> cache = mock(Cache.class);
+        Cache<SessionID, StatefulSessionComponentInstance> cache = mock(Cache.class);
         when(component.getCache()).thenReturn(cache);
         final TransactionSynchronizationRegistry transactionSynchronizationRegistry = mock(TransactionSynchronizationRegistry.class);
         when(component.getTransactionSynchronizationRegistry()).thenReturn(transactionSynchronizationRegistry);
         when(transactionSynchronizationRegistry.getTransactionKey()).thenReturn("TX1");
         final List<Synchronization> synchronizations = new LinkedList<Synchronization>();
-        doAnswer(new Answer() {
+        doAnswer(new Answer<Void>() {
             @Override
-            public Object answer(InvocationOnMock invocation) throws Throwable {
+            public Void answer(InvocationOnMock invocation) throws Throwable {
                 Synchronization synchronization = (Synchronization) invocation.getArguments()[0];
                 synchronizations.add(synchronization);
                 return null;

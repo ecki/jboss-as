@@ -23,6 +23,7 @@
 package org.jboss.as.host.controller.operations;
 
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import org.jboss.as.controller.AbstractAddStepHandler;
 import org.jboss.as.controller.AttributeDefinition;
@@ -34,14 +35,21 @@ import org.jboss.as.controller.remote.ModelControllerClientOperationHandlerFacto
 import org.jboss.as.domain.controller.LocalHostControllerInfo;
 import org.jboss.as.domain.management.security.SecurityRealmService;
 import org.jboss.as.host.controller.DomainModelControllerService;
+import org.jboss.as.host.controller.jmx.RemotingConnectorService;
 import org.jboss.as.host.controller.mgmt.ServerToHostOperationHandlerFactoryService;
 import org.jboss.as.host.controller.resources.NativeManagementResourceDefinition;
+import org.jboss.as.protocol.ProtocolChannelClient;
+import org.jboss.as.remoting.EndpointService;
+import org.jboss.as.remoting.management.ManagementChannelRegistryService;
 import org.jboss.as.remoting.management.ManagementRemotingServices;
 import org.jboss.as.server.services.net.NetworkInterfaceService;
 import org.jboss.dmr.ModelNode;
 import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.service.ServiceTarget;
+import org.jboss.remoting3.RemotingOptions;
+import org.xnio.OptionMap;
+import org.xnio.Options;
 
 /**
  * @author Emanuel Muckenhuber
@@ -49,9 +57,18 @@ import org.jboss.msc.service.ServiceTarget;
  */
 public class NativeManagementAddHandler extends AbstractAddStepHandler {
 
+    private static final int heartbeatInterval = 15000;
     public static final String OPERATION_NAME = ModelDescriptionConstants.ADD;
+    private static final int WINDOW_SIZE = ProtocolChannelClient.Configuration.WINDOW_SIZE;
+
+    private static final OptionMap SERVICE_OPTIONS = OptionMap.create(RemotingOptions.TRANSMIT_WINDOW_SIZE, WINDOW_SIZE,
+                                                        RemotingOptions.RECEIVE_WINDOW_SIZE, WINDOW_SIZE);
+
+    private static final OptionMap CONNECTION_OPTIONS = OptionMap.create(RemotingOptions.HEARTBEAT_INTERVAL, heartbeatInterval,
+                                                        Options.READ_TIMEOUT, 45000);
 
     private final LocalHostControllerInfoImpl hostControllerInfo;
+
 
     public NativeManagementAddHandler(final LocalHostControllerInfoImpl hostControllerInfo) {
         this.hostControllerInfo = hostControllerInfo;
@@ -75,11 +92,14 @@ public class NativeManagementAddHandler extends AbstractAddStepHandler {
                                   final List<ServiceController<?>> newControllers) throws OperationFailedException {
 
         populateHostControllerInfo(hostControllerInfo, context, model);
+        final ServiceTarget serviceTarget = context.getServiceTarget();
 
-        if (!context.isBooting()) {
-            installNativeManagementServices(context.getServiceTarget(), hostControllerInfo, verificationHandler, newControllers);
-        }
-        // else DomainModelControllerService does the service install
+        ManagementChannelRegistryService.addService(serviceTarget, ManagementRemotingServices.MANAGEMENT_ENDPOINT);
+        ManagementRemotingServices.installRemotingEndpoint(serviceTarget, ManagementRemotingServices.MANAGEMENT_ENDPOINT,
+                hostControllerInfo.getLocalHostName(), EndpointService.EndpointType.MANAGEMENT, CONNECTION_OPTIONS, null, null);
+
+        final boolean onDemand = context.isBooting();
+        installNativeManagementServices(serviceTarget, hostControllerInfo, verificationHandler, newControllers, onDemand);
     }
 
     static void populateHostControllerInfo(LocalHostControllerInfoImpl hostControllerInfo, OperationContext context, ModelNode model) throws OperationFailedException {
@@ -92,7 +112,9 @@ public class NativeManagementAddHandler extends AbstractAddStepHandler {
 
     public static void installNativeManagementServices(final ServiceTarget serviceTarget, final LocalHostControllerInfo hostControllerInfo,
                                                        final ServiceVerificationHandler verificationHandler,
-                                                       final List<ServiceController<?>> newControllers) {
+                                                       final List<ServiceController<?>> newControllers,
+                                                       final boolean onDemand) {
+
         ServiceName realmSvcName = null;
         String nativeSecurityRealm = hostControllerInfo.getNativeManagementSecurityRealm();
         if (nativeSecurityRealm != null) {
@@ -103,16 +125,17 @@ public class NativeManagementAddHandler extends AbstractAddStepHandler {
                 NetworkInterfaceService.JBOSS_NETWORK_INTERFACE.append(hostControllerInfo.getNativeManagementInterface());
 
         ManagementRemotingServices.installDomainConnectorServices(serviceTarget, ManagementRemotingServices.MANAGEMENT_ENDPOINT,
-                nativeManagementInterfaceBinding, hostControllerInfo.getNativeManagementPort(), realmSvcName, null, null);
+                nativeManagementInterfaceBinding, hostControllerInfo.getNativeManagementPort(), realmSvcName, CONNECTION_OPTIONS, verificationHandler, newControllers);
 
         ManagementRemotingServices.installManagementChannelOpenListenerService(serviceTarget, ManagementRemotingServices.MANAGEMENT_ENDPOINT,
                 ManagementRemotingServices.SERVER_CHANNEL,
-                ServerToHostOperationHandlerFactoryService.SERVICE_NAME, verificationHandler, newControllers);
+                ServerToHostOperationHandlerFactoryService.SERVICE_NAME, SERVICE_OPTIONS, verificationHandler, newControllers, onDemand);
 
         ManagementRemotingServices.installManagementChannelServices(serviceTarget, ManagementRemotingServices.MANAGEMENT_ENDPOINT,
                 new ModelControllerClientOperationHandlerFactoryService(),
                 DomainModelControllerService.SERVICE_NAME, ManagementRemotingServices.MANAGEMENT_CHANNEL, verificationHandler, newControllers);
 
+        RemotingConnectorService.addService(serviceTarget, verificationHandler);
     }
 
 }

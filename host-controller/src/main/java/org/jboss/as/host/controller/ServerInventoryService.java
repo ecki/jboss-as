@@ -22,17 +22,18 @@
 
 package org.jboss.as.host.controller;
 
+import org.jboss.as.remoting.management.ManagementChannelRegistryService;
+
 import static org.jboss.msc.service.ServiceController.Mode.ON_DEMAND;
+import static org.jboss.as.host.controller.HostControllerLogger.ROOT_LOGGER;
 
 import java.net.InetSocketAddress;
-import java.net.NetworkInterface;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 
 import org.jboss.as.domain.controller.DomainController;
 import org.jboss.as.network.NetworkInterfaceBinding;
-import org.jboss.as.process.ProcessControllerClient;
 import org.jboss.as.server.services.net.NetworkInterfaceService;
-import org.jboss.logging.Logger;
 import org.jboss.msc.service.Service;
 import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.service.ServiceTarget;
@@ -43,39 +44,45 @@ import org.jboss.msc.value.InjectedValue;
 import org.jboss.threads.AsyncFutureTask;
 
 /**
+ * Service providing the {@link ServerInventory}
+ *
  * @author Emanuel Muckenhuber
+ * @author <a href="mailto:david.lloyd@redhat.com">David M. Lloyd</a>
  */
 class ServerInventoryService implements Service<ServerInventory> {
-    private static final Logger log = Logger.getLogger("org.jboss.as.host.controller");
 
     static final ServiceName SERVICE_NAME = ServiceName.JBOSS.append("host", "controller", "server-inventory");
 
     private final InjectedValue<ProcessControllerConnectionService> client = new InjectedValue<ProcessControllerConnectionService>();
     private final InjectedValue<NetworkInterfaceBinding> interfaceBinding = new InjectedValue<NetworkInterfaceBinding>();
+    private final InjectedValue<ServerInventoryCallbackService> serverCallback = new InjectedValue<ServerInventoryCallbackService>();
     private final DomainController domainController;
     private final HostControllerEnvironment environment;
+    private final HostRunningModeControl runningModeControl;
     private final int port;
+    private final InjectedValue<ExecutorService> executorService = new InjectedValue<ExecutorService>();
+
     private final FutureServerInventory futureInventory = new FutureServerInventory();
 
-    private ServerInventory serverInventory;
+    private ServerInventoryImpl serverInventory;
 
-    private ServerInventoryService(final DomainController domainController, final HostControllerEnvironment environment, final int port) {
+    private ServerInventoryService(final DomainController domainController, final HostRunningModeControl runningModeControl, final HostControllerEnvironment environment, final int port) {
         this.domainController = domainController;
+        this.runningModeControl = runningModeControl;
         this.environment = environment;
         this.port = port;
     }
 
-    static Future<ServerInventory> install(final ServiceTarget serviceTarget, final DomainController domainController, final HostControllerEnvironment environment, final String interfaceBinding, final int port){
-        final ServerInventoryCallbackService callbackService = new ServerInventoryCallbackService();
-        serviceTarget.addService(ServerInventoryCallbackService.SERVICE_NAME, callbackService)
-                .addDependency(ServerInventoryService.SERVICE_NAME, ServerInventory.class, callbackService.getServerInventoryInjectedValue())
-                .setInitialMode(ON_DEMAND)
-                .install();
+    static Future<ServerInventory> install(final ServiceTarget serviceTarget, final DomainController domainController, final HostRunningModeControl runningModeControl, final HostControllerEnvironment environment,
+                                           final String interfaceBinding, final int port){
 
-        final ServerInventoryService inventory = new ServerInventoryService(domainController, environment, port);
+        final ServerInventoryService inventory = new ServerInventoryService(domainController, runningModeControl, environment, port);
         serviceTarget.addService(ServerInventoryService.SERVICE_NAME, inventory)
+                .addDependency(HostControllerService.HC_EXECUTOR_SERVICE_NAME, ExecutorService.class, inventory.executorService)
                 .addDependency(ProcessControllerConnectionService.SERVICE_NAME, ProcessControllerConnectionService.class, inventory.getClient())
                 .addDependency(NetworkInterfaceService.JBOSS_NETWORK_INTERFACE.append(interfaceBinding), NetworkInterfaceBinding.class, inventory.interfaceBinding)
+                .addDependency(ServerInventoryCallbackService.SERVICE_NAME, ServerInventoryCallbackService.class, inventory.serverCallback)
+                .addDependency(ManagementChannelRegistryService.SERVICE_NAME)
                 .install();
         return inventory.futureInventory;
     }
@@ -83,12 +90,13 @@ class ServerInventoryService implements Service<ServerInventory> {
     /** {@inheritDoc} */
     @Override
     public synchronized void start(StartContext context) throws StartException {
-        log.debug("Starting Host Controller Server Inventory");
+        ROOT_LOGGER.debug("Starting Host Controller Server Inventory");
         try {
             final ProcessControllerConnectionService processControllerConnectionService = client.getValue();
             final InetSocketAddress binding = new InetSocketAddress(interfaceBinding.getValue().getAddress(), port);
             serverInventory = new ServerInventoryImpl(domainController, environment, binding, processControllerConnectionService.getClient());
             processControllerConnectionService.setServerInventory(serverInventory);
+            serverCallback.getValue().setCallbackHandler(serverInventory.getServerCallbackHandler());
             futureInventory.setInventory(serverInventory);
         } catch (Exception e) {
             futureInventory.setFailure(e);
@@ -96,12 +104,31 @@ class ServerInventoryService implements Service<ServerInventory> {
         }
     }
 
-    /** {@inheritDoc} */
+    /**
+     * Stops all servers.
+     *
+     * {@inheritDoc}
+     */
     @Override
-    public synchronized void stop(StopContext context) {
-        this.serverInventory.stopServers(-1); // TODO graceful shutdown // TODO async
-        this.serverInventory = null;
-        client.getValue().setServerInventory(null);
+    public synchronized void stop(final StopContext context) {
+        if (runningModeControl.getRestartMode() == RestartMode.SERVERS) {
+            context.asynchronous();
+            Runnable r = new Runnable() {
+
+                @Override
+                public void run() {
+                    try {
+                        serverInventory.shutdown(-1, true); // TODO graceful shutdown // TODO async
+                        serverInventory = null;
+                        // client.getValue().setServerInventory(null);
+                    } finally {
+                        serverCallback.getValue().setCallbackHandler(null);
+                        context.complete();
+                    }
+                }
+            };
+            executorService.getValue().execute(r);
+        }
     }
 
     /** {@inheritDoc} */

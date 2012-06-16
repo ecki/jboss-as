@@ -37,7 +37,7 @@ import org.jboss.as.controller.persistence.ConfigurationPersister;
 import org.jboss.as.controller.registry.Resource;
 import org.jboss.dmr.ModelNode;
 
-import static org.jboss.as.controller.ControllerLogger.ROOT_LOGGER;
+import static org.jboss.as.controller.ControllerLogger.MGMT_OP_LOGGER;
 
 /**
  * A {@link org.jboss.as.controller.OperationStepHandler} that can output a model in XML form
@@ -61,7 +61,7 @@ public class XmlMarshallingHandler implements OperationStepHandler, DescriptionP
 
     @Override
     public void execute(OperationContext context, ModelNode operation) {
-        final Resource resource = context.getRootResource().navigate(getBaseAddress());
+        final Resource resource = context.readResourceFromRoot(getBaseAddress());
         // Get the model recursively
         final ModelNode model = Resource.Tools.readModel(resource);
         try {
@@ -80,7 +80,7 @@ public class XmlMarshallingHandler implements OperationStepHandler, DescriptionP
             throw e;
         } catch (Exception e) {
             // Log this
-            ROOT_LOGGER.failedExecutingOperation(e, operation.require(ModelDescriptionConstants.OP),
+            MGMT_OP_LOGGER.failedExecutingOperation(e, operation.require(ModelDescriptionConstants.OP),
                     PathAddress.pathAddress(operation.get(ModelDescriptionConstants.OP_ADDR)));
             context.getFailureDescription().set(e.toString());
         }
@@ -95,7 +95,7 @@ public class XmlMarshallingHandler implements OperationStepHandler, DescriptionP
         if (closeable != null) try {
             closeable.close();
         } catch (Throwable t) {
-            ROOT_LOGGER.failedToCloseResource(t, closeable);
+            MGMT_OP_LOGGER.failedToCloseResource(t, closeable);
         }
     }
 }

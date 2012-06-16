@@ -22,22 +22,31 @@
 
 package org.jboss.as.remoting;
 
+import static org.jboss.as.remoting.RemotingMessages.MESSAGES;
+import static org.xnio.Options.SASL_POLICY_NOANONYMOUS;
+import static org.xnio.Options.SASL_POLICY_NOPLAINTEXT;
+
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 
+import javax.net.ssl.SSLContext;
+import javax.security.auth.callback.CallbackHandler;
+
+import org.jboss.as.domain.management.CallbackHandlerFactory;
+import org.jboss.as.domain.management.SecurityRealm;
+import org.jboss.as.network.NetworkUtils;
 import org.jboss.as.network.OutboundSocketBinding;
 import org.jboss.msc.inject.Injector;
 import org.jboss.msc.service.ServiceName;
-import org.jboss.msc.service.StartContext;
-import org.jboss.msc.service.StartException;
 import org.jboss.msc.value.InjectedValue;
 import org.jboss.remoting3.Connection;
 import org.jboss.remoting3.Endpoint;
-import org.jboss.remoting3.remote.RemoteConnectionProviderFactory;
 import org.xnio.IoFuture;
 import org.xnio.OptionMap;
+import org.xnio.Options;
+import org.xnio.Sequence;
 
 /**
  * A {@link RemoteOutboundConnectionService} manages a remoting connection created out of a remote:// URI scheme.
@@ -49,32 +58,17 @@ public class RemoteOutboundConnectionService extends AbstractOutboundConnectionS
     public static final ServiceName REMOTE_OUTBOUND_CONNECTION_BASE_SERVICE_NAME = RemotingServices.SUBSYSTEM_ENDPOINT.append("remote-outbound-connection");
 
     private static final String REMOTE_URI_SCHEME = "remote://";
+    private static final String JBOSS_LOCAL_USER = "JBOSS-LOCAL-USER";
 
     private final InjectedValue<OutboundSocketBinding> destinationOutboundSocketBindingInjectedValue = new InjectedValue<OutboundSocketBinding>();
+    private final InjectedValue<SecurityRealm> securityRealmInjectedValue = new InjectedValue<SecurityRealm>();
 
+    private final String username;
     private URI connectionURI;
 
-    public RemoteOutboundConnectionService(final String connectionName, final OptionMap connectionCreationOptions) {
+    public RemoteOutboundConnectionService(final String connectionName, final OptionMap connectionCreationOptions, final String username) {
         super(connectionName, connectionCreationOptions);
-    }
-
-    @Override
-    public void start(StartContext context) throws StartException {
-
-        super.start(context);
-        // setup the connection provider factory for remote:// scheme, for the endpoint
-        final Endpoint endpoint = this.endpointInjectedValue.getValue();
-        // first check if the URI scheme is already registered. If it is, then *don't* re-register
-        // Note: The isValidUriScheme method name is a bit misleading. All it does is a check for already
-        // registered connection providers for that URI scheme
-        if (!endpoint.isValidUriScheme(REMOTE_URI_SCHEME)) {
-            try {
-                // TODO: Allow a way to pass the options
-                endpoint.addConnectionProvider(REMOTE_URI_SCHEME, new RemoteConnectionProviderFactory(), OptionMap.EMPTY);
-            } catch (IOException ioe) {
-                throw new StartException("Could not register a connection provider factory for " + REMOTE_URI_SCHEME + " uri scheme", ioe);
-            }
-        }
+        this.username = username;
     }
 
     @Override
@@ -86,14 +80,41 @@ public class RemoteOutboundConnectionService extends AbstractOutboundConnectionS
             // if nothing really wants to create a connection out of it.
             uri = this.getConnectionURI();
         } catch (URISyntaxException e) {
-            throw new RuntimeException(e);
+            throw MESSAGES.couldNotConnect(e);
         }
         final Endpoint endpoint = this.endpointInjectedValue.getValue();
-        return endpoint.connect(uri, this.connectionCreationOptions, getCallbackHandler());
+
+        final CallbackHandler callbackHandler;
+        final CallbackHandlerFactory cbhFactory;
+        SSLContext sslContext = null;
+        SecurityRealm realm = securityRealmInjectedValue.getOptionalValue();
+        if (realm != null && (cbhFactory = realm.getSecretCallbackHandlerFactory()) != null && username != null) {
+            callbackHandler = cbhFactory.getCallbackHandler(username);
+        } else {
+            callbackHandler = getCallbackHandler();
+        }
+
+        if (realm != null) {
+            sslContext = realm.getSSLContext();
+        }
+
+        OptionMap.Builder builder = OptionMap.builder();
+        builder.addAll(this.connectionCreationOptions);
+        builder.set(SASL_POLICY_NOANONYMOUS, Boolean.FALSE);
+        builder.set(SASL_POLICY_NOPLAINTEXT, Boolean.FALSE);
+        builder.set(Options.SASL_DISALLOWED_MECHANISMS, Sequence.of(JBOSS_LOCAL_USER));
+        builder.set(Options.SSL_ENABLED, true);
+        builder.set(Options.SSL_STARTTLS, true);
+
+        return endpoint.connect(uri, builder.getMap(), callbackHandler, sslContext);
     }
 
     Injector<OutboundSocketBinding> getDestinationOutboundSocketBindingInjector() {
         return this.destinationOutboundSocketBindingInjectedValue;
+    }
+
+    Injector<SecurityRealm> getSecurityRealmInjector() {
+        return securityRealmInjectedValue;
     }
 
     /**
@@ -113,7 +134,7 @@ public class RemoteOutboundConnectionService extends AbstractOutboundConnectionS
         final InetAddress destinationAddress = destinationOutboundSocket.getDestinationAddress();
         final int port = destinationOutboundSocket.getDestinationPort();
 
-        this.connectionURI = new URI(REMOTE_URI_SCHEME + destinationAddress.getHostAddress() + ":" + port);
+        this.connectionURI = new URI(REMOTE_URI_SCHEME + NetworkUtils.formatPossibleIpv6Address( destinationAddress.getHostAddress()) + ":" + port);
         return this.connectionURI;
     }
 

@@ -24,16 +24,11 @@ package org.jboss.as.messaging;
 
 import java.util.Locale;
 
-import org.hornetq.core.server.HornetQServer;
 import org.jboss.as.controller.AbstractRemoveStepHandler;
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
-import org.jboss.as.controller.PathAddress;
 import org.jboss.as.controller.descriptions.DescriptionProvider;
-import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
 import org.jboss.dmr.ModelNode;
-import org.jboss.msc.service.ServiceController;
-import org.jboss.msc.service.ServiceRegistry;
 
 /**
  * Removes a broadcast group.
@@ -49,7 +44,7 @@ public class BroadcastGroupRemove extends AbstractRemoveStepHandler implements D
     }
 
     @Override
-    protected void performRemove(OperationContext context, ModelNode operation, ModelNode model) throws OperationFailedException {
+    protected void performRuntime(OperationContext context, ModelNode operation, ModelNode model) throws OperationFailedException {
         context.reloadRequired();
     }
 

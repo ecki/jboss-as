@@ -34,6 +34,7 @@ import static org.jboss.logging.Logger.Level.WARN;
  * Date: 05.11.2011
  *
  * @author <a href="mailto:jperkins@redhat.com">James R. Perkins</a>
+ * @author <a href="mailto:darran.lofthouse@jboss.com">Darran Lofthouse</a>
  */
 @MessageLogger(projectCode = "JBAS")
 public interface DomainManagementLogger extends BasicLogger {
@@ -49,4 +50,26 @@ public interface DomainManagementLogger extends BasicLogger {
     @LogMessage(level = WARN)
     @Message(id = 15200, value = "Properties file defined with default user and password, this will be easy to guess.")
     void userAndPasswordWarning();
+
+    /**
+     * Logs a warning message indicating that whitespace has been trimmed from the password when it was
+     * decoded from Base64.
+     */
+    @LogMessage(level = WARN)
+    @Message(id = 15201, value = "Whitespace has been trimmed from the Base64 representation of the secret identity.")
+    void whitespaceTrimmed();
+
+    /**
+     * Logs a warning message indicating that the password attribute is deprecated that that keystore-password
+     * should be used instead.
+     */
+    @LogMessage(level = WARN)
+    @Message(id = 15202, value = "The attribute 'password' is deprecated, 'keystore-password' should be used instead.")
+    void passwordAttributeDeprecated();
+
+    /*
+     * Logging IDs 15200 to 15299 are reserved for domain management, the file DomainManagementMessages
+     * also contains messages in this range commencing 15220.
+     */
+
 }

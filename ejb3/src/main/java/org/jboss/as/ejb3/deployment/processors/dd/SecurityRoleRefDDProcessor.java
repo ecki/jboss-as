@@ -30,11 +30,9 @@ import org.jboss.as.server.deployment.DeploymentUnit;
 import org.jboss.as.server.deployment.DeploymentUnitProcessingException;
 import org.jboss.logging.Logger;
 import org.jboss.metadata.ejb.spec.EnterpriseBeanMetaData;
-import org.jboss.metadata.ejb.spec.MessageDrivenBeanMetaData;
-import org.jboss.metadata.ejb.spec.SessionBeanMetaData;
 import org.jboss.metadata.javaee.spec.SecurityRoleRefMetaData;
 import org.jboss.metadata.javaee.spec.SecurityRoleRefsMetaData;
-import static org.jboss.as.ejb3.EjbLogger.ROOT_LOGGER;
+
 import static org.jboss.as.ejb3.EjbMessages.MESSAGES;
 /**
  * Sets up the {@link EJBComponentDescription} with the &lt;security-role-ref&gt;s declared for a EJB
@@ -52,13 +50,7 @@ public class SecurityRoleRefDDProcessor extends AbstractEjbXmlDescriptorProcesso
 
     @Override
     protected void processBeanMetaData(final EnterpriseBeanMetaData beanMetaData, final DeploymentPhaseContext phaseContext) throws DeploymentUnitProcessingException {
-        SecurityRoleRefsMetaData securityRoleRefs = null;
-        if (beanMetaData instanceof SessionBeanMetaData) {
-            securityRoleRefs = beanMetaData.getSecurityRoleRefs();
-        } else if (beanMetaData instanceof MessageDrivenBeanMetaData) {
-            // TODO: Why doesn't MessageDrivenBeanMetaData have security role refs metadata
-            ROOT_LOGGER.securityRoleForMdbNotImplemented();
-        }
+        final SecurityRoleRefsMetaData securityRoleRefs = beanMetaData.getSecurityRoleRefs();
         if (securityRoleRefs == null) {
             return;
         }

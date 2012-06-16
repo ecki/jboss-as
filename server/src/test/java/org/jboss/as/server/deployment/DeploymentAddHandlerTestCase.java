@@ -21,12 +21,18 @@
  */
 package org.jboss.as.server.deployment;
 
+import java.io.IOException;
+import java.io.InputStream;
+
 import org.jboss.as.controller.OperationContext;
-import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.OperationFailedException;
+import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.PathAddress;
-import org.jboss.as.server.deployment.repository.api.ContentRepository;
+import org.jboss.as.controller.ProcessType;
+import org.jboss.as.controller.RunningMode;
+import org.jboss.as.repository.ContentRepository;
 import org.jboss.dmr.ModelNode;
+import org.jboss.vfs.VirtualFile;
 import org.junit.Ignore;
 import org.junit.Test;
 import org.mockito.Mockito;
@@ -51,12 +57,13 @@ public class DeploymentAddHandlerTestCase {
     @Ignore("TODO: JBAS-9020: Archive deployments are not yet implemented")
     @Test
     public void testContent() throws OperationFailedException {
-        final ContentRepository contentRepository = null;
-        final DeploymentAddHandler handler = new DeploymentAddHandler(contentRepository);
+        final DeploymentAddHandler handler = DeploymentAddHandler.createForStandalone(contentRepository, null);
         final OperationContext context = Mockito.mock(OperationContext.class);
         Mockito.when(context.getResult()).thenReturn(new ModelNode());
         Mockito.when(context.readModelForUpdate(PathAddress.EMPTY_ADDRESS)).thenReturn(new ModelNode());
-        Mockito.when(context.getType()).thenReturn(OperationContext.Type.SERVER);
+        Mockito.when(context.getProcessType()).thenReturn(ProcessType.STANDALONE_SERVER);
+        Mockito.when(context.getRunningMode()).thenReturn(RunningMode.NORMAL);
+        Mockito.when(context.isNormalServer()).thenReturn(true);
         final ModelNode operation = new ModelNode();
         //operation.get("address").setEmptyList().get(0).get("deployment").set("test.war");
         operation.get("address").get(0).setExpression("deployment", "test.war");
@@ -70,8 +77,7 @@ public class DeploymentAddHandlerTestCase {
 
     @Test (expected = OperationFailedException.class)
     public void testTooMuchContent() throws OperationFailedException {
-        final ContentRepository contentRepository = null;
-        final DeploymentAddHandler handler = new DeploymentAddHandler(contentRepository);
+        final DeploymentAddHandler handler = DeploymentAddHandler.createForStandalone(contentRepository, null);
         final OperationContext context = Mockito.mock(OperationContext.class);
         final ModelNode operation = new ModelNode();
         //operation.get("address").setEmptyList().get(0).get("deployment").set("test.war");
@@ -84,8 +90,7 @@ public class DeploymentAddHandlerTestCase {
 
     @Test
     public void testValidator() throws OperationFailedException {
-        final ContentRepository contentRepository = null;
-        final DeploymentAddHandler handler = new DeploymentAddHandler(contentRepository);
+        final DeploymentAddHandler handler = DeploymentAddHandler.createForStandalone(contentRepository, null);
         final OperationContext context = Mockito.mock(OperationContext.class);
         final ModelNode operation = new ModelNode();
         operation.get("content").get(0).get("archive").set("wrong");
@@ -95,4 +100,26 @@ public class DeploymentAddHandlerTestCase {
             // TODO: check exception
         }
     }
+
+    private ContentRepository contentRepository = new ContentRepository() {
+
+        @Override
+        public void removeContent(byte[] hash) {
+        }
+
+        @Override
+        public boolean hasContent(byte[] hash) {
+            return false;
+        }
+
+        @Override
+        public VirtualFile getContent(byte[] hash) {
+            return null;
+        }
+
+        @Override
+        public byte[] addContent(InputStream stream) throws IOException {
+            return null;
+        }
+    };
 }

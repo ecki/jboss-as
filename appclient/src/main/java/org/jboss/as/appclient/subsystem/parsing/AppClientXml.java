@@ -22,53 +22,13 @@
 
 package org.jboss.as.appclient.subsystem.parsing;
 
-import java.util.ArrayList;
-import java.util.EnumSet;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-
-import javax.xml.XMLConstants;
-import javax.xml.stream.XMLStreamException;
-
-import org.jboss.as.controller.ControllerMessages;
-import org.jboss.as.controller.operations.common.Util;
-import org.jboss.as.controller.parsing.Attribute;
-import org.jboss.as.controller.parsing.CommonXml;
-import org.jboss.as.controller.parsing.Element;
-import org.jboss.as.controller.parsing.Namespace;
-import org.jboss.as.controller.parsing.ParseUtils;
-import org.jboss.as.controller.persistence.ModelMarshallingContext;
-import org.jboss.as.controller.persistence.SubsystemMarshallingContext;
-import org.jboss.as.controller.resource.SocketBindingGroupResourceDefinition;
-import org.jboss.dmr.ModelNode;
-import org.jboss.dmr.Property;
-import org.jboss.modules.ModuleLoader;
-import org.jboss.staxmapper.XMLElementWriter;
-import org.jboss.staxmapper.XMLExtendedStreamReader;
-import org.jboss.staxmapper.XMLExtendedStreamWriter;
-
 import static javax.xml.stream.XMLStreamConstants.END_ELEMENT;
 import static org.jboss.as.appclient.logging.AppClientMessages.MESSAGES;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADD;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.CONTENT;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.CORE_SERVICE;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.DEPLOYMENT;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ENABLED;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.EXTENSION;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.INTERFACE;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.MANAGEMENT;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.NAME;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PATH;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PERSISTENT;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RUNTIME_NAME;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SOCKET_BINDING_GROUP;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SUBSYSTEM;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SYSTEM_PROPERTY;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.VAULT;
 import static org.jboss.as.controller.parsing.Namespace.DOMAIN_1_0;
-import static org.jboss.as.controller.parsing.Namespace.DOMAIN_1_1;
 import static org.jboss.as.controller.parsing.ParseUtils.isNoNamespaceAttribute;
 import static org.jboss.as.controller.parsing.ParseUtils.missingRequired;
 import static org.jboss.as.controller.parsing.ParseUtils.nextElement;
@@ -77,6 +37,31 @@ import static org.jboss.as.controller.parsing.ParseUtils.requireNoAttributes;
 import static org.jboss.as.controller.parsing.ParseUtils.unexpectedAttribute;
 import static org.jboss.as.controller.parsing.ParseUtils.unexpectedElement;
 
+import java.util.ArrayList;
+import java.util.EnumSet;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
+import javax.xml.stream.XMLStreamException;
+
+import org.jboss.as.controller.ControllerMessages;
+import org.jboss.as.controller.extension.ExtensionRegistry;
+import org.jboss.as.controller.operations.common.Util;
+import org.jboss.as.controller.parsing.Attribute;
+import org.jboss.as.controller.parsing.Element;
+import org.jboss.as.controller.parsing.ExtensionXml;
+import org.jboss.as.controller.parsing.Namespace;
+import org.jboss.as.controller.parsing.ParseUtils;
+import org.jboss.as.controller.persistence.ModelMarshallingContext;
+import org.jboss.as.controller.resource.SocketBindingGroupResourceDefinition;
+import org.jboss.as.server.parsing.CommonXml;
+import org.jboss.dmr.ModelNode;
+import org.jboss.dmr.Property;
+import org.jboss.modules.ModuleLoader;
+import org.jboss.staxmapper.XMLExtendedStreamReader;
+import org.jboss.staxmapper.XMLExtendedStreamWriter;
+
 /**
  * A mapper between an AS server's configuration model and XML representations, particularly {@code appclient.xml}.
  *
@@ -84,8 +69,11 @@ import static org.jboss.as.controller.parsing.ParseUtils.unexpectedElement;
  */
 public class AppClientXml extends CommonXml {
 
-    public AppClientXml(final ModuleLoader loader) {
-        super(loader, null);
+    private final ExtensionXml extensionXml;
+
+    public AppClientXml(final ModuleLoader loader, final ExtensionRegistry extensionRegistry) {
+        super();
+        extensionXml = new ExtensionXml(loader, null, extensionRegistry);
     }
 
     public void readElement(final XMLExtendedStreamReader reader, final List<ModelNode> operationList)
@@ -102,8 +90,10 @@ public class AppClientXml extends CommonXml {
                 readServerElement_1_0(reader, address, operationList);
                 break;
             }
-            case DOMAIN_1_1: {
-                readServerElement_1_1(reader, address, operationList);
+            case DOMAIN_1_1:
+            case DOMAIN_1_2:
+            case DOMAIN_1_3:{
+                readServerElement_1_1(readerNS, reader, address, operationList);
                 break;
             }
             default: {
@@ -114,6 +104,11 @@ public class AppClientXml extends CommonXml {
 
     /**
      * Read the <server/> element based on version 1.0 of the schema.
+     *
+     * @param reader  the xml stream reader
+     * @param address address of the parent resource of any resources this method will add
+     * @param list the list of boot operations to which any new operations should be added
+     * @throws XMLStreamException if a parsing error occurs
      */
     private void readServerElement_1_0(final XMLExtendedStreamReader reader, final ModelNode address, final List<ModelNode> list)
             throws XMLStreamException {
@@ -160,16 +155,13 @@ public class AppClientXml extends CommonXml {
             }
         }
 
-        if (serverName == null) {
-            serverName = getDefaultName();
-        }
         setServerName(address, list, serverName);
 
         // elements - sequence
 
         Element element = nextElement(reader, DOMAIN_1_0);
         if (element == Element.EXTENSIONS) {
-            parseExtensions(reader, address, DOMAIN_1_0, list);
+            extensionXml.parseExtensions(reader, address, DOMAIN_1_0, list);
             element = nextElement(reader, DOMAIN_1_0);
         }
         // System properties
@@ -206,8 +198,13 @@ public class AppClientXml extends CommonXml {
 
     /**
      * Read the <server/> element based on version 1.1 of the schema.
+     *
+     * @param reader  the xml stream reader
+     * @param address address of the parent resource of any resources this method will add
+     * @param list the list of boot operations to which any new operations should be added
+     * @throws XMLStreamException if a parsing error occurs
      */
-    private void readServerElement_1_1(final XMLExtendedStreamReader reader, final ModelNode address, final List<ModelNode> list)
+    private void readServerElement_1_1(final Namespace namespace, final XMLExtendedStreamReader reader, final ModelNode address, final List<ModelNode> list)
             throws XMLStreamException {
 
         parseNamespaces(reader, address, list);
@@ -252,48 +249,45 @@ public class AppClientXml extends CommonXml {
             }
         }
 
-        if (serverName == null) {
-            serverName = getDefaultName();
-        }
         setServerName(address, list, serverName);
 
         // elements - sequence
 
-        Element element = nextElement(reader, DOMAIN_1_1);
+        Element element = nextElement(reader, namespace);
         if (element == Element.EXTENSIONS) {
-            parseExtensions(reader, address, DOMAIN_1_1, list);
-            element = nextElement(reader, DOMAIN_1_1);
+            extensionXml.parseExtensions(reader, address, namespace, list);
+            element = nextElement(reader, namespace);
         }
         // System properties
         if (element == Element.SYSTEM_PROPERTIES) {
-            parseSystemProperties(reader, address, DOMAIN_1_1, list, true);
-            element = nextElement(reader, DOMAIN_1_1);
+            parseSystemProperties(reader, address, namespace, list, true);
+            element = nextElement(reader, namespace);
         }
         if (element == Element.PATHS) {
-            parsePaths(reader, address, DOMAIN_1_1, list, true);
-            element = nextElement(reader, DOMAIN_1_1);
+            parsePaths(reader, address, namespace, list, true);
+            element = nextElement(reader, namespace);
         }
 
         if (element == Element.VAULT) {
-            parseVault(reader, address, DOMAIN_1_1, list);
-            element = nextElement(reader, DOMAIN_1_1);
+            parseVault(reader, address, namespace, list);
+            element = nextElement(reader, namespace);
         }
         // Single profile
         if (element == Element.PROFILE) {
             parseServerProfile(reader, address, list);
-            element = nextElement(reader, DOMAIN_1_1);
+            element = nextElement(reader, namespace);
         }
 
         // Interfaces
         final Set<String> interfaceNames = new HashSet<String>();
         if (element == Element.INTERFACES) {
-            parseInterfaces(reader, interfaceNames, address, DOMAIN_1_1, list, true);
-            element = nextElement(reader, DOMAIN_1_1);
+            parseInterfaces(reader, interfaceNames, address, namespace, list, true);
+            element = nextElement(reader, namespace);
         }
         // Single socket binding group
         if (element == Element.SOCKET_BINDING_GROUP) {
-            parseSocketBindingGroup(reader, interfaceNames, address, DOMAIN_1_1, list);
-            element = nextElement(reader, DOMAIN_1_1);
+            parseSocketBindingGroup(reader, interfaceNames, address, namespace, list);
+            element = nextElement(reader, namespace);
         }
 
         if (element != null) {
@@ -326,12 +320,12 @@ public class AppClientXml extends CommonXml {
                     break;
                 }
                 case DEFAULT_INTERFACE: {
-                    SocketBindingGroupResourceDefinition.DEFAULT_INTERFACE.parseAndSetParameter(value, op, reader.getLocation());
+                    SocketBindingGroupResourceDefinition.DEFAULT_INTERFACE.parseAndSetParameter(value, op, reader);
                     required.remove(attribute);
                     break;
                 }
                 case PORT_OFFSET: {
-                    SocketBindingGroupResourceDefinition.PORT_OFFSET.parseAndSetParameter(value, op, reader.getLocation());
+                    SocketBindingGroupResourceDefinition.PORT_OFFSET.parseAndSetParameter(value, op, reader);
                     break;
                 }
                 default:
@@ -364,7 +358,7 @@ public class AppClientXml extends CommonXml {
                     break;
                 }
                 case OUTBOUND_SOCKET_BINDING: {
-                    final String bindingName = parseOutboundSocketBinding(reader, interfaces, socketBindingGroupName, groupAddress, updates);
+                    final String bindingName = parseOutboundSocketBinding(reader, interfaces, groupAddress, updates);
                     if (!uniqueBindingNames.add(bindingName)) {
                         throw ControllerMessages.MESSAGES.alreadyDeclared(Element.SOCKET_BINDING.getLocalName(), Element.OUTBOUND_SOCKET_BINDING.getLocalName(),
                                 bindingName, Element.SOCKET_BINDING_GROUP.getLocalName(), socketBindingGroupName, reader.getLocation());
@@ -409,7 +403,7 @@ public class AppClientXml extends CommonXml {
     }
 
     private void setServerName(final ModelNode address, final List<ModelNode> operationList, final String value) {
-        if (value.length() > 0) {
+        if (value != null && value.length() > 0) {
             final ModelNode update = Util.getWriteAttributeOperation(address, NAME, value);
             operationList.add(update);
         }
@@ -417,123 +411,6 @@ public class AppClientXml extends CommonXml {
 
     public void writeContent(final XMLExtendedStreamWriter writer, final ModelMarshallingContext context)
             throws XMLStreamException {
-
-        ModelNode modelNode = context.getModelNode();
-        writer.writeStartDocument();
-        writer.writeStartElement(Element.SERVER.getLocalName());
-
-        if (modelNode.hasDefined(NAME)) {
-            writeAttribute(writer, Attribute.NAME, modelNode.get(NAME).asString());
-        }
-
-        writer.writeDefaultNamespace(Namespace.CURRENT.getUriString());
-        writeNamespaces(writer, modelNode);
-        writeSchemaLocation(writer, modelNode);
-
-        if (modelNode.hasDefined(EXTENSION)) {
-            writeExtensions(writer, modelNode.get(EXTENSION));
-        }
-
-        if (modelNode.hasDefined(SYSTEM_PROPERTY)) {
-            writeProperties(writer, modelNode.get(SYSTEM_PROPERTY), Element.SYSTEM_PROPERTIES, true);
-        }
-
-        if (modelNode.hasDefined(PATH)) {
-            writePaths(writer, modelNode.get(PATH));
-        }
-
-        if (modelNode.hasDefined(CORE_SERVICE) && modelNode.get(CORE_SERVICE).hasDefined(VAULT)) {
-            writeVault(writer, modelNode.get(CORE_SERVICE, VAULT));
-        }
-
-        if (modelNode.hasDefined(CORE_SERVICE) && modelNode.get(CORE_SERVICE).hasDefined(MANAGEMENT)) {
-            writeManagement(writer, modelNode.get(CORE_SERVICE, MANAGEMENT), true);
-        }
-
-        writeServerProfile(writer, context);
-
-        if (modelNode.hasDefined(INTERFACE)) {
-            writeInterfaces(writer, modelNode.get(INTERFACE));
-        }
-
-        if (modelNode.hasDefined(SOCKET_BINDING_GROUP)) {
-            Set<String> groups = modelNode.get(SOCKET_BINDING_GROUP).keys();
-            if (groups.size() > 1) {
-                throw MESSAGES.multipleNodesFound(SOCKET_BINDING_GROUP);
-            }
-            for (String group : groups) {
-                writeSocketBindingGroup(writer, modelNode.get(SOCKET_BINDING_GROUP, group), true);
-            }
-        }
-
-        if (modelNode.hasDefined(DEPLOYMENT)) {
-            writeServerDeployments(writer, modelNode.get(DEPLOYMENT));
-        }
-        writer.writeEndElement();
-        writer.writeEndDocument();
-    }
-
-    private void writeServerDeployments(final XMLExtendedStreamWriter writer, final ModelNode modelNode)
-            throws XMLStreamException {
-
-        Set<String> deploymentNames = modelNode.keys();
-        if (deploymentNames.size() > 0) {
-            boolean deploymentWritten = false;
-            for (String uniqueName : deploymentNames) {
-                final ModelNode deployment = modelNode.get(uniqueName);
-                if (deployment.hasDefined(PERSISTENT) && !deployment.get(PERSISTENT).asBoolean()) {
-                    continue;
-                }
-                if (!deploymentWritten) {
-                    writer.writeStartElement(Element.DEPLOYMENTS.getLocalName());
-                    deploymentWritten = true;
-                }
-                final String runtimeName = deployment.get(RUNTIME_NAME).asString();
-                boolean enabled = deployment.get(ENABLED).asBoolean();
-                writer.writeStartElement(Element.DEPLOYMENT.getLocalName());
-                writeAttribute(writer, Attribute.NAME, uniqueName);
-                writeAttribute(writer, Attribute.RUNTIME_NAME, runtimeName);
-                if (!enabled) {
-                    writeAttribute(writer, Attribute.ENABLED, "false");
-                }
-                final List<ModelNode> contentItems = deployment.require(CONTENT).asList();
-                for (ModelNode contentItem : contentItems) {
-                    writeContentItem(writer, contentItem);
-                }
-                writer.writeEndElement();
-            }
-            if (deploymentWritten) {
-                writer.writeEndElement();
-            }
-        }
-    }
-
-    private void writeServerProfile(final XMLExtendedStreamWriter writer, final ModelMarshallingContext context)
-            throws XMLStreamException {
-
-        final ModelNode profileNode = context.getModelNode();
-        // In case there are no subsystems defined
-        if(! profileNode.hasDefined(SUBSYSTEM)) {
-            writer.writeEmptyElement(Element.PROFILE.getLocalName());
-            return;
-        }
-
-        writer.writeStartElement(Element.PROFILE.getLocalName());
-        Set<String> subsystemNames = profileNode.get(SUBSYSTEM).keys();
-        if (subsystemNames.size() > 0) {
-            String defaultNamespace = writer.getNamespaceContext().getNamespaceURI(XMLConstants.DEFAULT_NS_PREFIX);
-            for (String subsystemName : subsystemNames) {
-                try {
-                    ModelNode subsystem = profileNode.get(SUBSYSTEM, subsystemName);
-                    XMLElementWriter<SubsystemMarshallingContext> subsystemWriter = context.getSubsystemWriter(subsystemName);
-                    if (subsystemWriter != null) { // FIXME -- remove when extensions are doing the registration
-                        subsystemWriter.writeContent(writer, new SubsystemMarshallingContext(subsystem, writer));
-                    }
-                } finally {
-                    writer.setDefaultNamespace(defaultNamespace);
-                }
-            }
-        }
-        writer.writeEndElement();
+        // we don't marshall appclient.xml
     }
 }

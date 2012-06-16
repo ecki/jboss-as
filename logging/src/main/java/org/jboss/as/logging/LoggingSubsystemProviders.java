@@ -22,30 +22,6 @@
 
 package org.jboss.as.logging;
 
-import org.jboss.as.controller.AttributeDefinition;
-import org.jboss.as.controller.descriptions.DescriptionProvider;
-import org.jboss.as.logging.handlers.file.HandlerFileChange;
-import org.jboss.as.logging.handlers.HandlerLevelChange;
-import org.jboss.as.logging.handlers.async.AsyncHandlerAssignSubhandler;
-import org.jboss.as.logging.handlers.async.AsyncHandlerUnassignSubhandler;
-import org.jboss.as.logging.handlers.async.AsyncHandlerUpdateProperties;
-import org.jboss.as.logging.handlers.console.ConsoleHandlerUpdateProperties;
-import org.jboss.as.logging.handlers.custom.CustomHandlerUpdateProperties;
-import org.jboss.as.logging.handlers.file.FileHandlerUpdateProperties;
-import org.jboss.as.logging.handlers.file.PeriodicHandlerUpdateProperties;
-import org.jboss.as.logging.handlers.file.SizeRotatingHandlerUpdateProperties;
-import org.jboss.as.logging.loggers.LoggerAssignHandler;
-import org.jboss.as.logging.loggers.LoggerLevelChange;
-import org.jboss.as.logging.loggers.LoggerUnassignHandler;
-import org.jboss.as.logging.loggers.RootLoggerAssignHandler;
-import org.jboss.as.logging.loggers.RootLoggerLevelChange;
-import org.jboss.as.logging.loggers.RootLoggerUnassignHandler;
-import org.jboss.dmr.ModelNode;
-import org.jboss.dmr.ModelType;
-
-import java.util.Locale;
-import java.util.ResourceBundle;
-
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADD;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ATTRIBUTES;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.CHILDREN;
@@ -88,6 +64,35 @@ import static org.jboss.as.logging.CommonAttributes.SUFFIX;
 import static org.jboss.as.logging.CommonAttributes.TARGET;
 import static org.jboss.as.logging.CommonAttributes.USE_PARENT_HANDLERS;
 import static org.jboss.as.logging.CommonAttributes.VALUE;
+
+import java.util.Locale;
+import java.util.ResourceBundle;
+
+import org.jboss.as.controller.AttributeDefinition;
+import org.jboss.as.controller.SimpleAttributeDefinition;
+import org.jboss.as.controller.descriptions.DescriptionProvider;
+import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
+import org.jboss.as.logging.handlers.HandlerLevelChange;
+import org.jboss.as.logging.handlers.async.AsyncHandlerAssignSubhandler;
+import org.jboss.as.logging.handlers.async.AsyncHandlerUnassignSubhandler;
+import org.jboss.as.logging.handlers.async.AsyncHandlerUpdateProperties;
+import org.jboss.as.logging.handlers.async.AsyncHandlerWriteAttributeHandler;
+import org.jboss.as.logging.handlers.console.ConsoleHandlerUpdateProperties;
+import org.jboss.as.logging.handlers.custom.CustomHandlerUpdateProperties;
+import org.jboss.as.logging.handlers.file.FileHandlerUpdateProperties;
+import org.jboss.as.logging.handlers.file.HandlerFileChange;
+import org.jboss.as.logging.handlers.file.PeriodicHandlerUpdateProperties;
+import org.jboss.as.logging.handlers.file.SizeRotatingHandlerUpdateProperties;
+import org.jboss.as.logging.loggers.LoggerAssignHandler;
+import org.jboss.as.logging.loggers.LoggerLevelChange;
+import org.jboss.as.logging.loggers.LoggerUnassignHandler;
+import org.jboss.as.logging.loggers.RootLoggerAdd;
+import org.jboss.as.logging.loggers.RootLoggerAssignHandler;
+import org.jboss.as.logging.loggers.RootLoggerLevelChange;
+import org.jboss.as.logging.loggers.RootLoggerRemove;
+import org.jboss.as.logging.loggers.RootLoggerUnassignHandler;
+import org.jboss.dmr.ModelNode;
+import org.jboss.dmr.ModelType;
 
 /**
  * @author Emanuel Muckenhuber
@@ -138,6 +143,19 @@ class LoggingSubsystemProviders {
         }
     };
 
+    static final DescriptionProvider SUBSYSTEM_REMOVE = new DescriptionProvider() {
+        @Override
+        public ModelNode getModelDescription(Locale locale) {
+            final ResourceBundle bundle = getResourceBundle(locale);
+            final ModelNode op = new ModelNode();
+            op.get(OPERATION_NAME).set(REMOVE);
+            op.get(DESCRIPTION).set(bundle.getString("logging.remove"));
+            op.get(REPLY_PROPERTIES).setEmptyObject();
+            op.get(REQUEST_PROPERTIES).setEmptyObject();
+            return op;
+        }
+    };
+
     static final DescriptionProvider ROOT_LOGGER = new DescriptionProvider() {
         @Override
         public ModelNode getModelDescription(Locale locale) {
@@ -152,12 +170,27 @@ class LoggingSubsystemProviders {
         }
     };
 
-    static final DescriptionProvider SET_ROOT_LOGGER = new DescriptionProvider() {
+    static final DescriptionProvider ADD_ROOT_LOGGER = new DescriptionProvider() {
         @Override
         public ModelNode getModelDescription(Locale locale) {
             final ResourceBundle bundle = getResourceBundle(locale);
             final ModelNode node = new ModelNode();
-            node.get(OPERATION_NAME).set("set-root-logger");
+            node.get(OPERATION_NAME).set(ModelDescriptionConstants.ADD);
+            node.get(DESCRIPTION).set(bundle.getString("root.logger.set"));
+
+            addCommonLoggerRequestProperties(node, bundle);
+
+            node.get(REPLY_PROPERTIES).setEmptyObject();
+            return node;
+        }
+    };
+
+    static final DescriptionProvider LEGACY_ADD_ROOT_LOGGER = new DescriptionProvider() {
+        @Override
+        public ModelNode getModelDescription(Locale locale) {
+            final ResourceBundle bundle = getResourceBundle(locale);
+            final ModelNode node = new ModelNode();
+            node.get(OPERATION_NAME).set(RootLoggerAdd.LEGACY_OPERATION_NAME);
             node.get(DESCRIPTION).set(bundle.getString("root.logger.set"));
 
             addCommonLoggerRequestProperties(node, bundle);
@@ -174,7 +207,7 @@ class LoggingSubsystemProviders {
 
             final ModelNode operation = new ModelNode();
 
-            operation.get(OPERATION_NAME).set("remove-root-logger");
+            operation.get(OPERATION_NAME).set(ModelDescriptionConstants.REMOVE);
             operation.get(DESCRIPTION).set(bundle.getString("root.logger.remove"));
             operation.get(REQUEST_PROPERTIES).setEmptyObject();
             operation.get(REPLY_PROPERTIES).setEmptyObject();
@@ -182,6 +215,23 @@ class LoggingSubsystemProviders {
             return operation;
         }
     };
+
+    static final DescriptionProvider LEGACY_REMOVE_ROOT_LOGGER = new DescriptionProvider() {
+        @Override
+        public ModelNode getModelDescription(Locale locale) {
+            final ResourceBundle bundle = getResourceBundle(locale);
+
+            final ModelNode operation = new ModelNode();
+
+            operation.get(OPERATION_NAME).set(RootLoggerRemove.LEGACY_OPERATION_NAME);
+            operation.get(DESCRIPTION).set(bundle.getString("root.logger.remove"));
+            operation.get(REQUEST_PROPERTIES).setEmptyObject();
+            operation.get(REPLY_PROPERTIES).setEmptyObject();
+
+            return operation;
+        }
+    };
+
 
     static final DescriptionProvider ROOT_LOGGER_CHANGE_LEVEL = new DescriptionProvider() {
         @Override
@@ -238,7 +288,6 @@ class LoggingSubsystemProviders {
 
             addCommonLoggerAttributes(node, bundle);
             USE_PARENT_HANDLERS.addResourceAttributeDescription(bundle, "logger", node);
-            CATEGORY.addResourceAttributeDescription(bundle, "logger", node);
 
             return node;
         }
@@ -345,7 +394,6 @@ class LoggingSubsystemProviders {
     }
 
     private static void addCommonHandlerAttributes(final ModelNode modelNode, final ResourceBundle bundle) {
-        NAME.addResourceAttributeDescription(bundle, "handler", modelNode);
         ENCODING.addResourceAttributeDescription(bundle, "handler", modelNode);
         LEVEL.addResourceAttributeDescription(bundle, "handler", modelNode);
         FILTER.addResourceAttributeDescription(bundle, "handler", modelNode);
@@ -378,13 +426,13 @@ class LoggingSubsystemProviders {
             final ModelNode node = new ModelNode();
             node.get(DESCRIPTION).set(bundle.getString("async.handler"));
 
-            NAME.addResourceAttributeDescription(bundle, "handler", node);
             LEVEL.addResourceAttributeDescription(bundle, "handler", node);
             FILTER.addResourceAttributeDescription(bundle, "handler", node);
             FORMATTER.addResourceAttributeDescription(bundle, "handler", node);
             QUEUE_LENGTH.addResourceAttributeDescription(bundle, "async", node);
             OVERFLOW_ACTION.addResourceAttributeDescription(bundle, "async", node);
             SUBHANDLERS.addResourceAttributeDescription(bundle, "async.handler", node);
+            ENCODING.addResourceAttributeDescription(bundle, "handler", node);
 
             return node;
         }

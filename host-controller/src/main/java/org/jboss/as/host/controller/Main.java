@@ -22,29 +22,35 @@
 
 package org.jboss.as.host.controller;
 
-import static org.jboss.as.process.Main.getVersionString;
+import static org.jboss.as.host.controller.HostControllerMessages.MESSAGES;
+
 import static org.jboss.as.process.Main.usage;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintStream;
+import java.lang.management.ManagementFactory;
+import java.lang.management.RuntimeMXBean;
 import java.net.InetAddress;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.UnknownHostException;
-import java.security.cert.TrustAnchor;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
 
+import org.jboss.as.controller.RunningMode;
+import org.jboss.as.controller.interfaces.InetAddressUtil;
 import org.jboss.as.process.CommandLineConstants;
 import org.jboss.as.process.ExitCodes;
 import org.jboss.as.process.protocol.StreamUtils;
+import org.jboss.as.version.ProductConfig;
 import org.jboss.logging.MDC;
 import org.jboss.logmanager.Level;
 import org.jboss.logmanager.Logger;
 import org.jboss.logmanager.handlers.ConsoleHandler;
+import org.jboss.modules.Module;
 import org.jboss.stdio.LoggingOutputStream;
 import org.jboss.stdio.NullInputStream;
 import org.jboss.stdio.SimpleStdioContextSelector;
@@ -61,8 +67,7 @@ public final class Main {
     /**
      * The main method.
      *
-     * @param args
-     *            the command-line arguments
+     * @param args the command-line arguments
      */
     public static void main(String[] args) throws IOException {
         MDC.put("process", "host controller");
@@ -76,7 +81,7 @@ public final class Main {
         try {
             StreamUtils.readFully(System.in, authKey);
         } catch (IOException e) {
-            System.err.printf("Failed to read authentication key: %s", e);
+            System.err.println(MESSAGES.failedToReadAuthenticationKey(e));
             System.exit(1);
             return;
         }
@@ -119,7 +124,7 @@ public final class Main {
             } else {
                 try {
                     final HostControllerBootstrap hc = new HostControllerBootstrap(config, authCode);
-                    hc.start();
+                    hc.bootstrap();
                     return hc;
                 } catch(Throwable t) {
                     abort(t);
@@ -155,14 +160,16 @@ public final class Main {
         Integer pmPort = null;
         InetAddress pmAddress = null;
         final PCSocketConfig pcSocketConfig = new PCSocketConfig();
-        final String procName = "Host Controller";   // final because we have no proper support for changing it
         String defaultJVM = null;
         boolean isRestart = false;
         boolean backupDomainFiles = false;
         boolean cachedDc = false;
         String domainConfig = null;
         String hostConfig = null;
-        Map<String, String> hostSystemProperties = new HashMap<String, String>();
+        RunningMode initialRunningMode = RunningMode.NORMAL;
+        Map<String, String> hostSystemProperties = getHostSystemProperties();
+        ProductConfig productConfig;
+        String modulePath = null;
 
         final int argsLength = args.length;
         for (int i = 0; i < argsLength; i++) {
@@ -171,7 +178,8 @@ public final class Main {
             try {
                 if (CommandLineConstants.VERSION.equals(arg) || CommandLineConstants.SHORT_VERSION.equals(arg)
                         || CommandLineConstants.OLD_VERSION.equals(arg) || CommandLineConstants.OLD_SHORT_VERSION.equals(arg)) {
-                    System.out.println("JBoss Application Server " + getVersionString());
+                    productConfig = new ProductConfig(Module.getBootModuleLoader(), SecurityActions.getSystemProperty(HostControllerEnvironment.HOME_DIR));
+                    System.out.println(productConfig.getPrettyVersionString());
                     return null;
                 } else if (CommandLineConstants.HELP.equals(arg) || CommandLineConstants.SHORT_HELP.equals(arg) || CommandLineConstants.OLD_HELP.equals(arg)) {
                     usage();
@@ -179,22 +187,22 @@ public final class Main {
                 } else if (CommandLineConstants.PROPERTIES.equals(arg) || CommandLineConstants.OLD_PROPERTIES.equals(arg)
                         || CommandLineConstants.SHORT_PROPERTIES.equals(arg)) {
                     // Set system properties from url/file
-                    if (!processProperties(arg, args[++i])) {
+                    if (!processProperties(arg, args[++i], hostSystemProperties)) {
                         return null;
                     }
                 } else if (arg.startsWith(CommandLineConstants.PROPERTIES)) {
                     String urlSpec = parseValue(arg, CommandLineConstants.PROPERTIES);
-                    if (urlSpec == null || !processProperties(arg, urlSpec)) {
+                    if (urlSpec == null || !processProperties(arg, urlSpec, hostSystemProperties)) {
                         return null;
                     }
                 } else if (arg.startsWith(CommandLineConstants.SHORT_PROPERTIES)) {
                     String urlSpec = parseValue(arg, CommandLineConstants.SHORT_PROPERTIES);
-                    if (urlSpec == null || !processProperties(arg, urlSpec)) {
+                    if (urlSpec == null || !processProperties(arg, urlSpec, hostSystemProperties)) {
                         return null;
                     }
                 }  else if (arg.startsWith(CommandLineConstants.OLD_PROPERTIES)) {
                     String urlSpec = parseValue(arg, CommandLineConstants.OLD_PROPERTIES);
-                    if (urlSpec == null || !processProperties(arg, urlSpec)) {
+                    if (urlSpec == null || !processProperties(arg, urlSpec, hostSystemProperties)) {
                         return null;
                     }
                 } else if (CommandLineConstants.PROCESS_CONTROLLER_BIND_PORT.equals(arg)) {
@@ -202,7 +210,7 @@ public final class Main {
                     try {
                         pmPort = Integer.valueOf(port);
                     } catch (NumberFormatException e) {
-                        System.err.printf("Value for %s is not an Integer -- %s\n", CommandLineConstants.PROCESS_CONTROLLER_BIND_PORT, port);
+                        System.err.println(MESSAGES.invalidValue(CommandLineConstants.PROCESS_CONTROLLER_BIND_PORT, "Integer", port));
                         usage();
                         return null;
                     }
@@ -221,7 +229,7 @@ public final class Main {
                     try {
                         pmAddress = InetAddress.getByName(addr);
                     } catch (UnknownHostException e) {
-                        System.err.printf("Value for %s is not a known host -- %s\n", CommandLineConstants.PROCESS_CONTROLLER_BIND_ADDR, addr);
+                        System.err.println(MESSAGES.unknownHostValue(CommandLineConstants.PROCESS_CONTROLLER_BIND_ADDR, addr));
                         usage();
                         return null;
                     }
@@ -285,6 +293,38 @@ public final class Main {
                     }
                     hostConfig = val;
 
+                } else if (arg.startsWith(CommandLineConstants.MASTER_ADDRESS)) {
+
+                    int idx = arg.indexOf('=');
+                    if (idx == arg.length() - 1) {
+                        System.err.println(MESSAGES.argumentExpected(arg));
+                        usage();
+                        return null;
+                    }
+                    String value = idx > -1 ? arg.substring(idx + 1) : args[++i];
+
+                    hostSystemProperties.put(HostControllerEnvironment.JBOSS_DOMAIN_MASTER_ADDRESS, value);
+                    SecurityActions.setSystemProperty(HostControllerEnvironment.JBOSS_DOMAIN_MASTER_ADDRESS, value);
+
+                } else if (arg.startsWith(CommandLineConstants.MASTER_PORT)) {
+
+                    int idx = arg.indexOf('=');
+                    if (idx == arg.length() - 1) {
+                        System.err.println(MESSAGES.argumentExpected(arg));
+                        usage();
+                        return null;
+                    }
+                    String value = idx > -1 ? arg.substring(idx + 1) : args[++i];
+                    final Integer port = parsePort(value, CommandLineConstants.MASTER_PORT);
+                    if (port == null) {
+                        return null;
+                    }
+
+                    hostSystemProperties.put(HostControllerEnvironment.JBOSS_DOMAIN_MASTER_PORT, value);
+                    SecurityActions.setSystemProperty(HostControllerEnvironment.JBOSS_DOMAIN_MASTER_PORT, value);
+
+                } else if (CommandLineConstants.ADMIN_ONLY.equals(arg)) {
+                    initialRunningMode = RunningMode.ADMIN_ONLY;
                 } else if (arg.startsWith(CommandLineConstants.SYS_PROP)) {
 
                     // set a system property
@@ -303,7 +343,7 @@ public final class Main {
 
                     int idx = arg.indexOf('=');
                     if (idx == arg.length() - 1) {
-                        System.err.printf("Argument expected for option %s\n", arg);
+                        System.err.println(MESSAGES.argumentExpected(arg));
                         usage();
                         return null;
                     }
@@ -326,7 +366,7 @@ public final class Main {
 
                     int idx = arg.indexOf('=');
                     if (idx == arg.length() - 1) {
-                        System.err.printf("Argument expected for option %s\n", arg);
+                        System.err.println(MESSAGES.argumentExpected(arg));
                         usage();
                         return null;
                     }
@@ -334,21 +374,24 @@ public final class Main {
 
                     hostSystemProperties.put(HostControllerEnvironment.JBOSS_DEFAULT_MULTICAST_ADDRESS, value);
                     SecurityActions.setSystemProperty(HostControllerEnvironment.JBOSS_DEFAULT_MULTICAST_ADDRESS, value);
+                } else if (arg.equals(CommandLineConstants.MODULE_PATH)) {
+                    modulePath = args[++i];
                 } else {
-                    System.err.printf("Invalid option '%s'\n", arg);
+                    System.err.println(MESSAGES.invalidOption(arg));
                     usage();
                     return null;
                 }
             } catch (IndexOutOfBoundsException e) {
-                System.err.printf("Argument expected for option %s\n", arg);
+                System.err.println(MESSAGES.argumentExpected(arg));
                 usage();
                 return null;
             }
         }
 
-        return new HostControllerEnvironment(hostSystemProperties, isRestart,  stdin, stdout, stderr, pmAddress, pmPort,
+        productConfig = new ProductConfig(Module.getBootModuleLoader(), SecurityActions.getSystemProperty(HostControllerEnvironment.HOME_DIR));
+        return new HostControllerEnvironment(hostSystemProperties, isRestart, modulePath, pmAddress, pmPort,
                 pcSocketConfig.getBindAddress(), pcSocketConfig.getBindPort(), defaultJVM,
-                domainConfig, hostConfig, backupDomainFiles, cachedDc);
+                domainConfig, hostConfig, initialRunningMode, backupDomainFiles, cachedDc, productConfig);
     }
 
     private static String parseValue(final String arg, final String key) {
@@ -362,19 +405,24 @@ public final class Main {
         return value;
     }
 
-    private static boolean processProperties(final String arg, final String urlSpec) {
+    private static boolean processProperties(final String arg, final String urlSpec, Map<String, String> hostSystemProperties) {
          URL url = null;
          try {
              url = makeURL(urlSpec);
-             Properties props = SecurityActions.getSystemProperties();
+             Properties props = new Properties();
              props.load(url.openConnection().getInputStream());
+
+             SecurityActions.getSystemProperties().putAll(props);
+             for (Map.Entry<Object, Object> entry : props.entrySet()) {
+                 hostSystemProperties.put((String)entry.getKey(), (String)entry.getValue());
+             }
              return true;
          } catch (MalformedURLException e) {
-             System.err.printf("Malformed URL provided for option %s\n", arg);
+             System.err.println(MESSAGES.malformedUrl(arg));
              usage();
              return false;
          } catch (IOException e) {
-             System.err.printf("Unable to load properties from URL %s\n", url);
+             System.err.println(MESSAGES.unableToLoadProperties(url));
              usage();
              return false;
          }
@@ -384,7 +432,7 @@ public final class Main {
          try {
              return Integer.valueOf(value);
          } catch (NumberFormatException e) {
-             System.err.printf("Value for %s is not an Integer -- %s\n", key, value);
+             System.err.println(MESSAGES.invalidValue(key, "Integer", value));
              usage();
              return null;
          }
@@ -394,7 +442,7 @@ public final class Main {
         try {
             return InetAddress.getByName(value);
         } catch (UnknownHostException e) {
-            System.err.printf("Value for %s is not a known host -- %s\n", key, value);
+            System.err.println(MESSAGES.unknownHostValue(key, value));
             usage();
             return null;
         }
@@ -425,6 +473,26 @@ public final class Main {
         return url;
     }
 
+    private static Map<String, String> getHostSystemProperties() {
+        final Map<String, String> hostSystemProperties = new HashMap<String, String>();
+        try {
+            RuntimeMXBean runtime = ManagementFactory.getRuntimeMXBean();
+            for (String arg : runtime.getInputArguments()) {
+                if (arg != null && arg.length() > 2 && arg.startsWith("-D")) {
+                    arg = arg.substring(2);
+                    String[] split = arg.split("=");
+                    if (!hostSystemProperties.containsKey(split[0])) {
+                        String val = split.length == 2 ? split[1] : null;
+                        hostSystemProperties.put(split[0], val);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println(MESSAGES.cannotAccessJvmInputArgument(e));
+        }
+        return hostSystemProperties;
+    }
+
     private static class PCSocketConfig {
         private final String defaultBindAddress;
         private InetAddress bindAddress;
@@ -441,7 +509,7 @@ public final class Main {
                 bindAddress = InetAddress.getByName(defaultBindAddress);
             } catch (UnknownHostException e) {
                 try {
-                    bindAddress = InetAddress.getLocalHost();
+                    bindAddress = InetAddressUtil.getLocalHost();
                 } catch (UnknownHostException uhe) {
                     toCache = uhe;
                 }
@@ -451,10 +519,7 @@ public final class Main {
 
         private InetAddress getBindAddress() {
             if (bindAddress == null) {
-                throw new RuntimeException(String.format("Cannot obtain a valid default address for communicating with " +
-                        "the ProcessController using either %s or InetAddress.getLocalHost(). Please check your system's " +
-                        "network configuration or use the %s command line switch to configure a valid address",
-                        defaultBindAddress, CommandLineConstants.INTERPROCESS_HC_ADDRESS), uhe);
+                throw MESSAGES.cannotObtainValidDefaultAddress(uhe, defaultBindAddress, CommandLineConstants.INTERPROCESS_HC_ADDRESS);
             }
             return bindAddress;
         }
@@ -522,7 +587,7 @@ public final class Main {
                 bindAddress = InetAddress.getByName(value);
             } catch (UnknownHostException e) {
                 parseFailed = true;
-                System.err.printf("Value for %s is not a valid InetAddress -- %s\n", key, value);
+                System.out.println(MESSAGES.invalidValue(key, "InetAddress", value));
                 usage();
             }
         }

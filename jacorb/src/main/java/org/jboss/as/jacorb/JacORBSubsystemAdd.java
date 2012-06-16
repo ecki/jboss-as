@@ -22,14 +22,23 @@
 
 package org.jboss.as.jacorb;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Locale;
+import java.util.Properties;
+
 import org.jboss.as.controller.AbstractAddStepHandler;
+import org.jboss.as.controller.AttributeDefinition;
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.ServiceVerificationHandler;
-import org.jboss.as.controller.SimpleAttributeDefinition;
 import org.jboss.as.jacorb.deployment.JacORBDependencyProcessor;
 import org.jboss.as.jacorb.deployment.JacORBMarkerProcessor;
 import org.jboss.as.jacorb.naming.jndi.JBossCNCtxFactory;
+import org.jboss.as.jacorb.rmi.DelegatingStubFactoryFactory;
+import org.jboss.as.jacorb.security.DomainServerSocketFactory;
+import org.jboss.as.jacorb.security.DomainSocketFactory;
 import org.jboss.as.jacorb.service.CorbaNamingService;
 import org.jboss.as.jacorb.service.CorbaORBService;
 import org.jboss.as.jacorb.service.CorbaPOAService;
@@ -38,24 +47,15 @@ import org.jboss.as.network.SocketBinding;
 import org.jboss.as.server.AbstractDeploymentChainStep;
 import org.jboss.as.server.DeploymentProcessorTarget;
 import org.jboss.as.server.deployment.Phase;
-import org.jboss.com.sun.corba.se.impl.orbutil.ORBConstants;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.Property;
-import org.jboss.logging.Logger;
 import org.jboss.msc.service.ServiceBuilder;
 import org.jboss.msc.service.ServiceController;
+import org.jboss.msc.service.ServiceName;
 import org.omg.CORBA.ORB;
 import org.omg.PortableServer.IdAssignmentPolicyValue;
 import org.omg.PortableServer.LifespanPolicyValue;
 import org.omg.PortableServer.POA;
-
-import java.security.AccessController;
-import java.security.PrivilegedAction;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Properties;
-
 
 /**
  * <p>
@@ -73,13 +73,9 @@ import java.util.Properties;
  */
 public class JacORBSubsystemAdd extends AbstractAddStepHandler {
 
-    private static final Logger log = Logger.getLogger("org.jboss.as.jacorb");
-
-    private static final String JACORB_SOCKET_BINDING = "jacorb";
-
-    private static final String JACORB_SSL_SOCKET_BINDING = "jacorb-ssl";
-
     static final JacORBSubsystemAdd INSTANCE = new JacORBSubsystemAdd();
+
+    private static final ServiceName SECURITY_DOMAIN_SERVICE_NAME = ServiceName.JBOSS.append("security").append("security-domain");
 
     /**
      * <p>
@@ -92,7 +88,7 @@ public class JacORBSubsystemAdd extends AbstractAddStepHandler {
     @Override
     protected void populateModel(ModelNode operation, ModelNode model) throws OperationFailedException {
         // populate the submodel.
-        for (SimpleAttributeDefinition attrDefinition : JacORBSubsystemDefinitions.SUBSYSTEM_ATTRIBUTES) {
+        for (AttributeDefinition attrDefinition : JacORBSubsystemDefinitions.SUBSYSTEM_ATTRIBUTES) {
             attrDefinition.validateAndSet(operation, model);
         }
         // if generic properties have been specified, add them to the model as well.
@@ -106,46 +102,57 @@ public class JacORBSubsystemAdd extends AbstractAddStepHandler {
                                   ServiceVerificationHandler verificationHandler,
                                   List<ServiceController<?>> newControllers) throws OperationFailedException {
 
-        log.info("Activating JacORB Subsystem");
+        JacORBLogger.ROOT_LOGGER.activatingSubsystem();
 
-        AccessController.doPrivileged(new PrivilegedAction<Object>() {
-            @Override
-            public Object run() {
-                System.setProperty("org.jboss.com.sun.CORBA.ORBUseDynamicStub", "true");
-                System.setProperty(ORBConstants.DYNAMIC_STUB_FACTORY_FACTORY_CLASS, "org.jboss.as.jacorb.rmi.DelegatingStubFactoryFactory");
-                return null;
-            }
-        });
+        // set the ORBUseDynamicStub system property.
+        SecurityActions.setSystemProperty("org.jboss.com.sun.CORBA.ORBUseDynamicStub", "true");
+        //we set the same stub factory to both the static and dynamic stub factory. As there is no way to dynamically change
+        //the userDynamicStubs's property at runtime it is possible for the ORB class's <clinit> method to be
+        //called before this property is set.
+        //TODO: investigate a better way to handle this
+        org.jboss.com.sun.corba.se.spi.orb.ORB.getPresentationManager().setStubFactoryFactory(true, new DelegatingStubFactoryFactory());
+        org.jboss.com.sun.corba.se.spi.orb.ORB.getPresentationManager().setStubFactoryFactory(false, new DelegatingStubFactoryFactory());
 
-        //setup naming
+        //setup naming.
         InitialContext.addUrlContextFactory("corbaloc", JBossCNCtxFactory.INSTANCE);
         InitialContext.addUrlContextFactory("corbaname", JBossCNCtxFactory.INSTANCE);
         InitialContext.addUrlContextFactory("IOR", JBossCNCtxFactory.INSTANCE);
         InitialContext.addUrlContextFactory("iiopname", JBossCNCtxFactory.INSTANCE);
         InitialContext.addUrlContextFactory("iiop", JBossCNCtxFactory.INSTANCE);
 
-
         context.addStep(new AbstractDeploymentChainStep() {
             public void execute(DeploymentProcessorTarget processorTarget) {
-                processorTarget.addDeploymentProcessor(Phase.DEPENDENCIES, Phase.DEPENDENCIES_JACORB, new JacORBDependencyProcessor());
-                processorTarget.addDeploymentProcessor(Phase.PARSE, Phase.PARSE_JACORB, new JacORBMarkerProcessor());
+                processorTarget.addDeploymentProcessor(JacORBExtension.SUBSYSTEM_NAME, Phase.DEPENDENCIES, Phase.DEPENDENCIES_JACORB, new JacORBDependencyProcessor());
+                processorTarget.addDeploymentProcessor(JacORBExtension.SUBSYSTEM_NAME, Phase.PARSE, Phase.PARSE_JACORB, new JacORBMarkerProcessor());
             }
         }, OperationContext.Stage.RUNTIME);
 
         // get the configured ORB properties.
-        Properties props = this.getConfigurationProperties(model);
+        Properties props = this.getConfigurationProperties(context, model);
 
         // setup the ORB initializers using the configured properties.
         this.setupInitializers(props);
+
+        // setup the SSL socket factories, if necessary.
+        this.setupSSLFactories(props);
 
         // create the service that initializes and starts the CORBA ORB.
         CorbaORBService orbService = new CorbaORBService(props);
         final ServiceBuilder<ORB> builder = context.getServiceTarget().addService(
                 CorbaORBService.SERVICE_NAME, orbService);
+        org.jboss.as.server.Services.addServerExecutorDependency(builder, orbService.getExecutorInjector(), false);
+
+        // if a security domain has been specified, add a dependency to the domain service.
+        String securityDomain = props.getProperty(JacORBSubsystemConstants.SECURITY_SECURITY_DOMAIN);
+        if (securityDomain != null && !securityDomain.isEmpty())
+            builder.addDependency(SECURITY_DOMAIN_SERVICE_NAME.append(securityDomain));
+
         // inject the socket bindings that specify the JacORB IIOP and IIOP/SSL ports.
-        builder.addDependency(SocketBinding.JBOSS_BINDING_NAME.append(JACORB_SOCKET_BINDING), SocketBinding.class,
+        String socketBinding = props.getProperty(JacORBSubsystemConstants.ORB_SOCKET_BINDING);
+        builder.addDependency(SocketBinding.JBOSS_BINDING_NAME.append(socketBinding), SocketBinding.class,
                 orbService.getJacORBSocketBindingInjector());
-        builder.addDependency(SocketBinding.JBOSS_BINDING_NAME.append(JACORB_SSL_SOCKET_BINDING), SocketBinding.class,
+        String sslSocketBinding = props.getProperty(JacORBSubsystemConstants.ORB_SSL_SOCKET_BINDING);
+        builder.addDependency(SocketBinding.JBOSS_BINDING_NAME.append(sslSocketBinding), SocketBinding.class,
                 orbService.getJacORBSSLSocketBindingInjector());
         builder.addListener(verificationHandler);
         // set the initial mode and install the service.
@@ -195,28 +202,39 @@ public class JacORBSubsystemAdd extends AbstractAddStepHandler {
      * before being added to the returned {@code Properties} object.
      * </p>
      *
-     * @param node the {@code ModelNode} that contains the subsystem configuration properties.
+     * @param model the {@code ModelNode} that contains the subsystem configuration properties.
      * @return a {@code Properties} instance containing all configured subsystem properties.
      * @throws OperationFailedException if an error occurs while resolving the properties.
      */
-    private Properties getConfigurationProperties(ModelNode node) throws OperationFailedException {
+    private Properties getConfigurationProperties(OperationContext context, ModelNode model) throws OperationFailedException {
         Properties props = new Properties();
 
         // get the configuration properties from the attribute definitions.
-        for (SimpleAttributeDefinition attrDefinition : JacORBSubsystemDefinitions.SUBSYSTEM_ATTRIBUTES) {
-            String name = attrDefinition.getName();
-            String value = attrDefinition.validateResolvedOperation(node).asString();
+        for (AttributeDefinition attrDefinition : JacORBSubsystemDefinitions.SUBSYSTEM_ATTRIBUTES) {
+            ModelNode resolvedModelAttribute = attrDefinition.resolveModelAttribute(context, model);
+            if (resolvedModelAttribute.isDefined()) {
+                String name = attrDefinition.getName();
+                String value = resolvedModelAttribute.asString();
 
-            // check if the property can be mapped to a jacorb property.
-            String jacorbProperty = PropertiesMap.JACORB_PROPS_MAP.get(name);
-            if (jacorbProperty != null)
-                name = jacorbProperty;
-            props.setProperty(name, value);
+                // check if the property can be mapped to a jacorb property.
+                String jacorbProperty = PropertiesMap.JACORB_PROPS_MAP.get(name);
+                if (jacorbProperty != null)
+                    name = jacorbProperty;
+
+                // check if the property is an SSL config property, in which case the value must be mapped to the JacORB
+                // integer representation.
+                if (JacORBSubsystemDefinitions.SSL_CONFIG_ATTRIBUTES.contains(attrDefinition)) {
+                    SSLConfigValue sslConfigValue = SSLConfigValue.valueOf(value.toUpperCase(Locale.ENGLISH));
+                    if (sslConfigValue != null)
+                        value = sslConfigValue.getJacorbValue();
+                }
+                props.setProperty(name, value);
+            }
         }
 
         // check if the node contains a list of generic properties.
-        if (node.hasDefined(JacORBSubsystemConstants.PROPERTIES)) {
-            ModelNode propertiesNode = node.get(JacORBSubsystemConstants.PROPERTIES);
+        if (model.hasDefined(JacORBSubsystemConstants.PROPERTIES)) {
+            ModelNode propertiesNode = model.get(JacORBSubsystemConstants.PROPERTIES);
 
             for (Property property : propertiesNode.asPropertyList()) {
                 String name = property.getName();
@@ -229,7 +247,7 @@ public class JacORBSubsystemAdd extends AbstractAddStepHandler {
 
     /**
      * <p>
-     * Sets up the ORB initializers according to what hs been configured in the subsystem.
+     * Sets up the ORB initializers according to what has been configured in the subsystem.
      * </p>
      *
      * @param props the subsystem configuration properties.
@@ -238,22 +256,46 @@ public class JacORBSubsystemAdd extends AbstractAddStepHandler {
         List<String> orbInitializers = new ArrayList<String>();
 
         // check which groups of initializers are to be installed.
-        String installCodebase = (String) props.remove(JacORBSubsystemConstants.ORB_INIT_CODEBASE);
-        if (installCodebase.equalsIgnoreCase("on"))
-            orbInitializers.addAll(Arrays.asList(ORBInitializer.CODEBASE.getInitializerClasses()));
-
         String installSecurity = (String) props.remove(JacORBSubsystemConstants.ORB_INIT_SECURITY);
         if (installSecurity.equalsIgnoreCase("on"))
             orbInitializers.addAll(Arrays.asList(ORBInitializer.SECURITY.getInitializerClasses()));
 
         String installTransaction = (String) props.remove(JacORBSubsystemConstants.ORB_INIT_TRANSACTIONS);
-        if (installTransaction.equalsIgnoreCase("on"))
+        if (installTransaction.equalsIgnoreCase("on")) {
             orbInitializers.addAll(Arrays.asList(ORBInitializer.TRANSACTIONS.getInitializerClasses()));
+        } else if(installTransaction.equalsIgnoreCase("spec")) {
+            orbInitializers.addAll(Arrays.asList(ORBInitializer.SPEC_TRANSACTIONS.getInitializerClasses()));
+        }
 
         // add the standard jacorb initializer plus all configured initializers.
         props.setProperty(JacORBSubsystemConstants.JACORB_STD_INITIALIZER_KEY,
                 JacORBSubsystemConstants.JACORB_STD_INITIALIZER_VALUE);
         for (String initializerClass : orbInitializers)
             props.setProperty(JacORBSubsystemConstants.ORB_INITIALIZER_PREFIX + initializerClass, "");
+    }
+
+    /**
+     * <p>
+     * Sets up the SSL domain socket factories if SSL support has been enabled.
+     * </p>
+     *
+     * @param props the subsystem configuration properties.
+     * @throws OperationFailedException if the SSL setup has not been done correctly (SSL support has been turned on
+     * but no security domain has been specified).
+     */
+    private void setupSSLFactories(final Properties props) throws OperationFailedException {
+        String supportSSLKey = PropertiesMap.JACORB_PROPS_MAP.get(JacORBSubsystemConstants.SECURITY_SUPPORT_SSL);
+        boolean supportSSL = "on".equalsIgnoreCase(props.getProperty(supportSSLKey));
+
+        if (supportSSL) {
+            // if SSL is to be used, check if a security domain has been specified.
+            String securityDomain = props.getProperty(JacORBSubsystemConstants.SECURITY_SECURITY_DOMAIN);
+            if (securityDomain == null || securityDomain.isEmpty())
+                throw JacORBMessages.MESSAGES.noSecurityDomainSpecified();
+
+            // add the domain socket factories.
+            props.setProperty(JacORBSubsystemConstants.JACORB_SSL_SOCKET_FACTORY, DomainSocketFactory.class.getName());
+            props.setProperty(JacORBSubsystemConstants.JACORB_SSL_SERVER_SOCKET_FACTORY, DomainServerSocketFactory.class.getName());
+        }
     }
 }

@@ -16,41 +16,36 @@
  */
 package org.jboss.as.arquillian.container.managed;
 
-import org.jboss.arquillian.container.spi.client.container.LifecycleException;
-import org.jboss.as.arquillian.container.CommonDeployableContainer;
-import org.jboss.sasl.JBossSaslProvider;
-import org.jboss.sasl.util.UsernamePasswordHashUtil;
-
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.PrintWriter;
+import java.net.DatagramSocket;
+import java.net.ServerSocket;
 import java.net.Socket;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
-import java.security.Provider;
-import java.security.Security;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
 import java.util.logging.Logger;
 
-import static org.jboss.as.arquillian.container.Authentication.USERNAME;
-import static org.jboss.as.arquillian.container.Authentication.PASSWORD;
+import org.jboss.arquillian.container.spi.client.container.LifecycleException;
+import org.jboss.as.arquillian.container.CommonDeployableContainer;
 
 /**
- * JBossAsManagedContainer
+ * The managed deployable container.
  *
  * @author Thomas.Diesler@jboss.com
  * @since 17-Nov-2010
  */
 public final class ManagedDeployableContainer extends CommonDeployableContainer<ManagedContainerConfiguration> {
 
+    private static final String CONFIG_PATH = "/standalone/configuration/";
+
+    private static final int PORT_RANGE_MIN = 1;
+    private static final int PORT_RANGE_MAX = 65535;
+
     private final Logger log = Logger.getLogger(ManagedDeployableContainer.class.getName());
-    private final Provider saslProvider = new JBossSaslProvider();
     private Thread shutdownThread;
     private Process process;
 
@@ -73,8 +68,8 @@ public final class ManagedDeployableContainer extends CommonDeployableContainer<
     protected void startInternal() throws LifecycleException {
         ManagedContainerConfiguration config = getContainerConfiguration();
 
-        if(isServerRunning()) {
-            if(config.isAllowConnectingToRunningServer()) {
+        if (isServerRunning()) {
+            if (config.isAllowConnectingToRunningServer()) {
                 return;
             } else {
                 failDueToRunning();
@@ -82,36 +77,26 @@ public final class ManagedDeployableContainer extends CommonDeployableContainer<
         }
 
         try {
+            final String jbossHome = config.getJbossHome();
+            File jbossHomeDir = new File(jbossHome).getCanonicalFile();
+            if (jbossHomeDir.isDirectory() == false)
+                throw new IllegalStateException("Cannot find: " + jbossHomeDir);
 
-            AccessController.doPrivileged(new PrivilegedAction<Object>() {
-                public Object run() {
-                    if (Security.getProperty(saslProvider.getName()) == null) {
-                        Security.insertProviderAt(saslProvider, 1);
-                    }
-                    return null;
-                }
-            });
-
-            final String jbossHomeDir = config.getJbossHome();
-            final String modulePath;
-            if(config.getModulePath() != null && !config.getModulePath().isEmpty()) {
-                modulePath = config.getModulePath();
-            } else {
-               modulePath = jbossHomeDir + File.separatorChar + "modules";
+            String modulesPath = config.getModulePath();
+            if (modulesPath == null || modulesPath.isEmpty()) {
+                modulesPath = jbossHome + File.separatorChar + "modules";
             }
+
+            String bundlesPath = config.getBundlePath();
+            if (bundlesPath == null || bundlesPath.isEmpty()) {
+                bundlesPath = jbossHome + File.separatorChar + "bundles";
+            }
+
             final String additionalJavaOpts = config.getJavaVmArguments();
 
-            File modulesJar = new File(jbossHomeDir + File.separatorChar + "jboss-modules.jar");
+            File modulesJar = new File(jbossHome + File.separatorChar + "jboss-modules.jar");
             if (!modulesJar.exists())
                 throw new IllegalStateException("Cannot find: " + modulesJar);
-
-            // No point backing up the file in a test scenario, just write what we need.
-            File usersFile = new File(jbossHomeDir + "/standalone/configuration/mgmt-users.properties");
-            FileOutputStream fos = new FileOutputStream(usersFile);
-            PrintWriter pw = new PrintWriter(fos);
-            pw.println(USERNAME + "=" + new UsernamePasswordHashUtil().generateHashedHexURP(USERNAME, "ManagementRealm", PASSWORD.toCharArray()));
-            pw.close();
-            fos.close();
 
             List<String> cmd = new ArrayList<String>();
             String javaExec = config.getJavaHome() + File.separatorChar + "bin" + File.separatorChar + "java";
@@ -124,21 +109,29 @@ public final class ManagedDeployableContainer extends CommonDeployableContainer<
                     cmd.add(opt);
                 }
             }
-            cmd.add("-Djboss.home.dir=" + jbossHomeDir);
-            cmd.add("-Dorg.jboss.boot.log.file=" + jbossHomeDir + "/standalone/log/boot.log");
-            cmd.add("-Dlogging.configuration=file:" + jbossHomeDir + "/standalone/configuration/logging.properties");
-            cmd.add("-Djboss.modules.dir=" + modulePath);
+
+            if (config.isEnableAssertions()) {
+                cmd.add("-ea");
+            }
+
+            cmd.add("-Djboss.home.dir=" + jbossHome);
+            cmd.add("-Dorg.jboss.boot.log.file=" + jbossHome + "/standalone/log/boot.log");
+            cmd.add("-Dlogging.configuration=file:" + jbossHome + CONFIG_PATH + "logging.properties");
+            cmd.add("-Djboss.bundles.dir=" + bundlesPath);
             cmd.add("-jar");
             cmd.add(modulesJar.getAbsolutePath());
             cmd.add("-mp");
-            cmd.add(modulePath);
-            cmd.add("-logmodule");
-            cmd.add("org.jboss.logmanager");
+            cmd.add(modulesPath);
             cmd.add("-jaxpmodule");
             cmd.add("javax.xml.jaxp-provider");
             cmd.add("org.jboss.as.standalone");
             cmd.add("-server-config");
             cmd.add(config.getServerConfig());
+            if (config.isAdminOnly())
+               cmd.add("--admin-only");
+
+            // Wait on ports before launching; AS7-4070
+            this.waitOnPorts();
 
             log.info("Starting container with: " + cmd.toString());
             ProcessBuilder processBuilder = new ProcessBuilder(cmd);
@@ -172,7 +165,7 @@ public final class ManagedDeployableContainer extends CommonDeployableContainer<
                         break;
                     Thread.sleep(sleep);
                     timeout -= sleep;
-                    sleep = Math.max(sleep/2, 100);
+                    sleep = Math.max(sleep / 2, 100);
                 }
             }
             if (!serverAvailable) {
@@ -184,6 +177,84 @@ public final class ManagedDeployableContainer extends CommonDeployableContainer<
             throw new LifecycleException("Could not start container", e);
         }
     }
+
+    /**
+     * If specified in the configuration, waits on the specified ports to become
+     * available for the specified time, else throws a {@link PortAcquisitionTimeoutException}
+     * @throws PortAcquisitionTimeoutException
+     */
+    private void waitOnPorts() throws PortAcquisitionTimeoutException {
+        // Get the config
+        final Integer[] ports = this.getContainerConfiguration().getWaitForPorts();
+        final int timeoutInSeconds = this.getContainerConfiguration().getWaitForPortsTimeoutInSeconds();
+
+        // For all ports we'll wait on
+        if (ports != null && ports.length > 0) {
+            for (int i = 0; i < ports.length; i++) {
+                final int port = ports[i];
+                final long start = System.currentTimeMillis();
+                // If not available
+                while (!this.isPortAvailable(port)) {
+
+                    // Get time elapsed
+                    final int elapsedSeconds = (int) ((System.currentTimeMillis() - start) / 1000);
+
+                    // See that we haven't timed out
+                    if (elapsedSeconds > timeoutInSeconds) {
+                        throw new PortAcquisitionTimeoutException(port, timeoutInSeconds);
+                    }
+                    try {
+                        // Wait a bit, then try again.
+                        Thread.sleep(500);
+                    } catch (final InterruptedException e) {
+                        Thread.interrupted();
+                    }
+
+                    // Log that we're waiting
+                    log.warning("Waiting on port " + port + " to become available for "
+                        + (timeoutInSeconds - elapsedSeconds) + "s");
+                }
+            }
+        }
+    }
+
+    private boolean isPortAvailable(final int port) {
+        // Precondition checks
+        if (port < PORT_RANGE_MIN || port > PORT_RANGE_MAX) {
+            throw new IllegalArgumentException("Port specified is out of range: " + port);
+        }
+
+        ServerSocket ss = null;
+        DatagramSocket ds = null;
+        try {
+            // Attempt both TCP and UDP
+            ss = new ServerSocket(port);
+            ds = new DatagramSocket(port);
+            // So we don't block from using this port while it's in a TIMEOUT state after we release it
+            ss.setReuseAddress(true);
+            ds.setReuseAddress(true);
+            // Could be acquired
+            return true;
+        } catch (final IOException e) {
+            // Swallow
+        } finally {
+            if (ds != null) {
+                ds.close();
+            }
+            if (ss != null) {
+                try {
+                    ss.close();
+                } catch (final IOException e) {
+                    // Swallow
+
+                }
+            }
+        }
+
+        // Couldn't be acquired
+        return false;
+    }
+
 
     @Override
     protected void stopInternal() throws LifecycleException {
@@ -254,18 +325,18 @@ public final class ManagedDeployableContainer extends CommonDeployableContainer<
         @Override
         public void run() {
             final InputStream stream = process.getInputStream();
-            final BufferedReader reader = new BufferedReader(new InputStreamReader(stream));
             final boolean writeOutput = getContainerConfiguration().isOutputToConsole();
 
-            String line = null;
-            try {
-                while ((line = reader.readLine()) != null) {
-                    if (writeOutput) {
-                        System.out.println(line);
-                    }
-                }
-            } catch (IOException e) {
-            }
+           try {
+              byte[] buf = new byte[32];
+              int num;
+              // Do not try reading a line cos it considers '\r' end of line
+              while((num = stream.read(buf)) != -1){
+                 if (writeOutput)
+                    System.out.write(buf, 0, num);
+              }
+           } catch (IOException e) {
+           }
         }
 
     }

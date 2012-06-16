@@ -23,6 +23,7 @@
 package org.jboss.as.test.integration.messaging.mgmt;
 
 import java.io.IOException;
+import java.util.HashMap;
 
 import javax.jms.MessageProducer;
 import javax.jms.Topic;
@@ -37,7 +38,13 @@ import org.hornetq.core.remoting.impl.netty.NettyConnectorFactory;
 import org.hornetq.jms.client.HornetQConnectionFactory;
 import org.jboss.arquillian.container.test.api.RunAsClient;
 import org.jboss.arquillian.junit.Arquillian;
-import org.jboss.as.test.integration.common.JMSAdminOperations;
+import org.jboss.as.arquillian.api.ContainerResource;
+import org.jboss.as.arquillian.container.ManagementClient;
+import org.jboss.as.controller.client.ModelControllerClient;
+import org.jboss.as.controller.client.OperationBuilder;
+import org.jboss.as.test.shared.TestSuiteEnvironment;
+import org.jboss.as.test.integration.common.jms.JMSOperations;
+import org.jboss.as.test.integration.common.jms.JMSOperationsProvider;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.ModelType;
 import org.junit.After;
@@ -54,23 +61,46 @@ import org.junit.runner.RunWith;
  */
 @RunAsClient()
 @RunWith(Arquillian.class)
-//@Ignore("Ignore failing tests")
 public class JMSTopicManagementTestCase {
 
-    private static JMSAdminOperations adminSupport;
     private static long count = System.currentTimeMillis();
 
+    private static HornetQConnectionFactory senderConnectionFactory;
+
+    private static HornetQConnectionFactory consumerConnectionFactory;
+
     @BeforeClass
-    public static void connectManagmentClient() {
-        adminSupport = new JMSAdminOperations();
+    public static void beforeClass() throws Exception {HashMap<String, Object> map = new HashMap<String, Object>();
+        map.put("host", TestSuiteEnvironment.getServerAddress());
+        TransportConfiguration transportConfiguration =
+                     new TransportConfiguration(NettyConnectorFactory.class.getName(), map);
+        senderConnectionFactory = HornetQJMSClient.createConnectionFactoryWithoutHA(JMSFactoryType.CF, transportConfiguration);
+        senderConnectionFactory.setClientID("sender");
+        senderConnectionFactory.setBlockOnDurableSend(true);
+        senderConnectionFactory.setBlockOnNonDurableSend(true);
+
+        consumerConnectionFactory = HornetQJMSClient.createConnectionFactoryWithoutHA(JMSFactoryType.CF, transportConfiguration);
+        consumerConnectionFactory.setClientID("consumer");
+        consumerConnectionFactory.setBlockOnDurableSend(true);
+        consumerConnectionFactory.setBlockOnNonDurableSend(true);
     }
 
     @AfterClass
-    public static void closeManagementClient() {
-        if (adminSupport != null) {
-            adminSupport.close();
+    public static void afterClass() throws Exception {
+
+        if (senderConnectionFactory != null) {
+            senderConnectionFactory.close();
+        }
+
+        if (consumerConnectionFactory != null) {
+            consumerConnectionFactory.close();
         }
     }
+
+    @ContainerResource
+    private ManagementClient managementClient;
+
+    private JMSOperations adminSupport;
 
     private TopicConnection conn;
     private Topic topic;
@@ -82,24 +112,46 @@ public class JMSTopicManagementTestCase {
     @Before
     public void addTopic() throws Exception {
 
+        adminSupport = JMSOperationsProvider.getInstance(managementClient);
         count++;
+
         final String jndiName = getTopicJndiName();
         adminSupport.createJmsTopic(getTopicName(), jndiName);
 
-        TransportConfiguration transportConfiguration =
-                     new TransportConfiguration(NettyConnectorFactory.class.getName());
-        HornetQConnectionFactory cf = HornetQJMSClient.createConnectionFactoryWithoutHA(JMSFactoryType.CF, transportConfiguration);
-        cf.setClientID("sender");
-        conn = cf.createTopicConnection();
+        conn = senderConnectionFactory.createTopicConnection("guest", "guest");
         conn.start();
         topic = HornetQJMSClient.createTopic(getTopicName());
         session = conn.createTopicSession(false, TopicSession.AUTO_ACKNOWLEDGE);
 
-        cf = HornetQJMSClient.createConnectionFactoryWithoutHA(JMSFactoryType.CF, transportConfiguration);
-        cf.setClientID("consumer");
-        consumerConn = cf.createTopicConnection();
+
+        consumerConn = consumerConnectionFactory.createTopicConnection("guest", "guest");
         consumerConn.start();
         consumerSession = consumerConn.createTopicSession(false, TopicSession.AUTO_ACKNOWLEDGE);
+    }
+
+    @Before
+    public void addSecuritySettings() throws Exception
+    {
+        //subsystem=messaging/hornetq-server=default/security-setting=#/role=guest:write-attribute(name=create-durable-queue, value=TRUE)
+        ModelNode op = new ModelNode();
+        op.get("operation").set("write-attribute");
+        op.get("address").add("subsystem", "messaging");
+        op.get("address").add("hornetq-server", "default");
+        op.get("address").add("security-setting", "#");
+        op.get("address").add("role", "guest");
+        op.get("name").set("create-durable-queue");
+        op.get("value").set(true);
+        applyUpdate(op, managementClient.getControllerClient());
+
+        op = new ModelNode();
+        op.get("operation").set("write-attribute");
+        op.get("address").add("subsystem", "messaging");
+        op.get("address").add("hornetq-server", "default");
+        op.get("address").add("security-setting", "#");
+        op.get("address").add("role", "guest");
+        op.get("name").set("delete-durable-queue");
+        op.get("value").set(true);
+        applyUpdate(op, managementClient.getControllerClient());
     }
 
     @After
@@ -125,7 +177,35 @@ public class JMSTopicManagementTestCase {
             consumerConn.close();
         }
 
-        adminSupport.removeJmsTopic(getTopicName());
+        if (adminSupport != null) {
+            adminSupport.removeJmsTopic(getTopicName());
+            adminSupport.close();
+        }
+    }
+
+    @After
+    public void removeSecuritySetting() throws Exception
+    {
+        //subsystem=messaging/hornetq-server=default/security-setting=#/role=guest:write-attribute(name=create-durable-queue, value=FALSE)
+        ModelNode op = new ModelNode();
+        op.get("operation").set("write-attribute");
+        op.get("address").add("subsystem", "messaging");
+        op.get("address").add("hornetq-server", "default");
+        op.get("address").add("security-setting", "#");
+        op.get("address").add("role", "guest");
+        op.get("name").set("create-durable-queue");
+        op.get("value").set(false);
+        applyUpdate(op, managementClient.getControllerClient());
+
+        op = new ModelNode();
+        op.get("operation").set("write-attribute");
+        op.get("address").add("subsystem", "messaging");
+        op.get("address").add("hornetq-server", "default");
+        op.get("address").add("security-setting", "#");
+        op.get("address").add("role", "guest");
+        op.get("name").set("delete-durable-queue");
+        op.get("value").set(false);
+        applyUpdate(op, managementClient.getControllerClient());
     }
 
     @Test
@@ -304,7 +384,7 @@ public class JMSTopicManagementTestCase {
     }
 
     private ModelNode execute(final ModelNode op, final boolean expectSuccess) throws IOException {
-        ModelNode response = adminSupport.getModelControllerClient().execute(op);
+        ModelNode response = managementClient.getControllerClient().execute(op);
         final String outcome = response.get("outcome").asString();
         if (expectSuccess) {
             if (!"success".equals(outcome)) {
@@ -327,5 +407,20 @@ public class JMSTopicManagementTestCase {
 
     private String getTopicJndiName() {
         return "topic/" + getTopicName();
+    }
+
+   static void applyUpdate(ModelNode update, final ModelControllerClient client) throws IOException {
+        ModelNode result = client.execute(new OperationBuilder(update).build());
+        if (result.hasDefined("outcome") && "success".equals(result.get("outcome").asString())) {
+            if (result.hasDefined("result")) {
+                System.out.println(result.get("result"));
+            }
+        }
+        else if (result.hasDefined("failure-description")){
+            throw new RuntimeException(result.get("failure-description").toString());
+        }
+        else {
+            throw new RuntimeException("Operation not successful; outcome = " + result.get("outcome"));
+        }
     }
 }

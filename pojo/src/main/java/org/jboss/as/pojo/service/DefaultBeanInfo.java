@@ -22,6 +22,7 @@
 
 package org.jboss.as.pojo.service;
 
+import org.jboss.as.pojo.PojoMessages;
 import org.jboss.as.server.deployment.reflect.ClassReflectionIndex;
 import org.jboss.as.server.deployment.reflect.DeploymentReflectionIndex;
 
@@ -53,6 +54,11 @@ public class DefaultBeanInfo<T> implements BeanInfo<T> {
 
     /**
      * Do lazy lookup.
+     *
+     * @param lookup the lookup
+     * @param start the start
+     * @param depth the depth
+     * @return reflection index result
      */
     protected <U> U lookup(Lookup<U> lookup, int start, int depth) {
         int size;
@@ -80,7 +86,10 @@ public class DefaultBeanInfo<T> implements BeanInfo<T> {
         return lookup(
                 new Lookup<Constructor<T>>() {
                     public Constructor<T> lookup(ClassReflectionIndex index) {
-                        return index.getConstructor(parameterTypes);
+                        final Constructor ctor = index.getConstructor(parameterTypes);
+                        if (ctor == null)
+                            throw PojoMessages.MESSAGES.ctorNotFound(Arrays.toString(parameterTypes), beanClass.getName());
+                        return ctor;
                     }
                 }, 0, 1);
     }
@@ -90,37 +99,49 @@ public class DefaultBeanInfo<T> implements BeanInfo<T> {
         return lookup(new Lookup<Constructor<T>>() {
             @Override
             public Constructor<T> lookup(ClassReflectionIndex index) {
-                Collection<Constructor> ctors = index.getConstructors();
+                final Collection<Constructor> ctors = index.getConstructors();
                 for (Constructor c : ctors) {
                     if (Configurator.equals(parameterTypes, c.getParameterTypes()))
                         return c;
                 }
-                throw new IllegalArgumentException("No such constructor: " + Arrays.toString(parameterTypes) + " on class " + beanClass.getName());
+                throw PojoMessages.MESSAGES.ctorNotFound(Arrays.toString(parameterTypes), beanClass.getName());
             }
         }, 0, 1);
     }
 
     @Override
     public Field getField(final String name) {
-        return lookup(new Lookup<Field>() {
+        final Field lookup = lookup(new Lookup<Field>() {
             @Override
             public Field lookup(ClassReflectionIndex index) {
                 return index.getField(name);
             }
         }, 0, Integer.MAX_VALUE);
+        if (lookup == null)
+            throw PojoMessages.MESSAGES.fieldNotFound(name, beanClass.getName());
+        return lookup;
     }
 
     @Override
     public Method getMethod(final String name, final String... parameterTypes) {
-        return lookup(new Lookup<Method>() {
+        final Method lookup = lookup(new Lookup<Method>() {
             @Override
             public Method lookup(ClassReflectionIndex index) {
                 Collection<Method> methods = index.getMethods(name, parameterTypes);
-                if (methods.size() != 1)
-                    throw new IllegalArgumentException("Ambigous method matching: " + methods);
-                return methods.iterator().next();
+                int size = methods.size();
+                switch (size) {
+                    case 0:
+                        return null;
+                    case 1:
+                        return methods.iterator().next();
+                    default:
+                        throw PojoMessages.MESSAGES.ambiguousMatch(methods, name, beanClass.getName());
+                }
             }
         }, 0, Integer.MAX_VALUE);
+        if (lookup == null)
+            throw PojoMessages.MESSAGES.methodNotFound(name, Arrays.toString(parameterTypes), beanClass.getName());
+        return lookup;
     }
 
     @Override
@@ -151,7 +172,7 @@ public class DefaultBeanInfo<T> implements BeanInfo<T> {
             }
         }, 0, Integer.MAX_VALUE);
         if (result == null)
-            throw new IllegalArgumentException("No such getter: " + type + " on class " + beanClass.getName());
+            throw PojoMessages.MESSAGES.getterNotFound(type, beanClass.getName());
         return result;
     }
 
@@ -177,7 +198,7 @@ public class DefaultBeanInfo<T> implements BeanInfo<T> {
             }
         }, 0, Integer.MAX_VALUE);
         if (result == null)
-            throw new IllegalArgumentException("No such setter: " + type + " on class " + beanClass.getName());
+            throw PojoMessages.MESSAGES.setterNotFound(type, beanClass.getName());
         return result;
     }
 

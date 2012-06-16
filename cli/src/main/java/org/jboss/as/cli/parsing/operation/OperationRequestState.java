@@ -24,7 +24,7 @@ package org.jboss.as.cli.parsing.operation;
 import org.jboss.as.cli.CommandFormatException;
 import org.jboss.as.cli.parsing.CharacterHandler;
 import org.jboss.as.cli.parsing.DefaultParsingState;
-import org.jboss.as.cli.parsing.EnterStateCharacterHandler;
+import org.jboss.as.cli.parsing.LineBreakHandler;
 import org.jboss.as.cli.parsing.OutputTargetState;
 import org.jboss.as.cli.parsing.ParsingContext;
 
@@ -45,7 +45,17 @@ public class OperationRequestState extends DefaultParsingState {
     public OperationRequestState(final NodeState nodeState, final AddressOperationSeparatorState addrOpSep, final PropertyListState propList,
             final HeaderListState headerList, final OutputTargetState outRedirect) {
         super(ID);
-        setDefaultHandler(new EnterStateCharacterHandler(nodeState));
+        //setDefaultHandler(new EnterStateCharacterHandler(nodeState));
+        setDefaultHandler(new LineBreakHandler(false, false){
+            @Override
+            public void doHandle(ParsingContext ctx) throws CommandFormatException {
+                final CharacterHandler handler = enterStateHandlers.getHandler(ctx.getCharacter());
+                if(handler == null) {
+                    ctx.enterState(nodeState);
+                } else {
+                    handler.handle(ctx);
+                }
+            }});
         enterState(':', addrOpSep);
         enterState('(', propList);
         enterState('{', headerList);

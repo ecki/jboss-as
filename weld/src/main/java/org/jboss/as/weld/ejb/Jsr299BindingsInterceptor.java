@@ -17,12 +17,28 @@
 
 package org.jboss.as.weld.ejb;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
+
+import javax.enterprise.context.spi.CreationalContext;
+import javax.enterprise.inject.spi.BeanManager;
+import javax.enterprise.inject.spi.InterceptionType;
+import javax.enterprise.inject.spi.Interceptor;
+import javax.interceptor.InvocationContext;
+
 import org.jboss.as.ee.component.Component;
 import org.jboss.as.ee.component.ComponentInstanceInterceptorFactory;
+import org.jboss.as.ejb3.component.stateful.SerializedCdiInterceptorsKey;
+import org.jboss.as.naming.ManagedReference;
+import org.jboss.as.naming.ValueManagedReference;
 import org.jboss.as.weld.WeldContainer;
 import org.jboss.as.weld.services.bootstrap.WeldEjbServices;
 import org.jboss.invocation.InterceptorContext;
 import org.jboss.invocation.InterceptorFactoryContext;
+import org.jboss.msc.value.ImmediateValue;
 import org.jboss.msc.value.InjectedValue;
 import org.jboss.weld.bean.SessionBean;
 import org.jboss.weld.ejb.spi.EjbDescriptor;
@@ -33,17 +49,6 @@ import org.jboss.weld.manager.BeanManagerImpl;
 import org.jboss.weld.serialization.spi.ContextualStore;
 import org.jboss.weld.serialization.spi.helpers.SerializableContextualInstance;
 
-import javax.enterprise.context.spi.CreationalContext;
-import javax.enterprise.inject.spi.BeanManager;
-import javax.enterprise.inject.spi.InterceptionType;
-import javax.enterprise.inject.spi.Interceptor;
-import javax.interceptor.InvocationContext;
-import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
 /**
  * Interceptor for applying the JSR-299 specific interceptor bindings.
  * <p/>
@@ -53,7 +58,7 @@ import java.util.Map;
  * @author Marius Bogoevici
  * @author Stuart Douglas
  */
-public class Jsr299BindingsInterceptor implements Serializable, org.jboss.invocation.Interceptor {
+public class Jsr299BindingsInterceptor implements org.jboss.invocation.Interceptor {
 
     private final Map<String, SerializableContextualInstance<Interceptor<Object>, Object>> interceptorInstances;
     private final CreationalContext<Object> creationalContext;
@@ -73,9 +78,10 @@ public class Jsr299BindingsInterceptor implements Serializable, org.jboss.invoca
             this.interceptionType = interceptionType;
             EjbDescriptor<Object> descriptor = beanManager.getEjbDescriptor(this.ejbName);
             SessionBean<Object> bean = beanManager.getBean(descriptor);
-            InterceptorInstances instances = (InterceptorInstances) context.getContextData().get(InterceptorInstances.class);
 
-            if (instances == null) {
+            final AtomicReference<ManagedReference> reference = (AtomicReference<ManagedReference>) context.getContextData().get(SerializedCdiInterceptorsKey.class);
+
+            if (reference == null) {
                 creationalContext = beanManager.createCreationalContext(bean);
                 interceptorInstances = new HashMap<String, SerializableContextualInstance<Interceptor<Object>, Object>>();
                 InterceptorBindings interceptorBindings = getInterceptorBindings(this.ejbName);
@@ -84,11 +90,12 @@ public class Jsr299BindingsInterceptor implements Serializable, org.jboss.invoca
                         addInterceptorInstance((Interceptor<Object>) interceptor, beanManager, interceptorInstances);
                     }
                 }
-                instances = new InterceptorInstances(creationalContext, interceptorInstances);
-                context.getContextData().put(InterceptorInstances.class, instances);
+                WeldInterceptorInstances instances = new WeldInterceptorInstances(creationalContext, interceptorInstances);
+                context.getContextData().put(SerializedCdiInterceptorsKey.class, new AtomicReference<ManagedReference>(new ValueManagedReference(new ImmediateValue<Object>(instances))));
             } else {
-                creationalContext = instances.creationalContext;
-                interceptorInstances = instances.interceptorInstances;
+                final WeldInterceptorInstances instances = (WeldInterceptorInstances) reference.get().getInstance();
+                creationalContext = instances.getCreationalContext();
+                interceptorInstances = instances.getInterceptorInstances();
             }
         } finally {
             SecurityActions.setContextClassLoader(tccl);
@@ -195,7 +202,11 @@ public class Jsr299BindingsInterceptor implements Serializable, org.jboss.invoca
 
         @Override
         public org.jboss.invocation.Interceptor create(final Component component, final InterceptorFactoryContext context) {
-            return new Jsr299BindingsInterceptor((BeanManagerImpl) weldContainer.getValue().getBeanManager(beanArchiveId), ejbName, context, interceptionType, classLoader);
+
+            //we use the interception type as the context key
+            //as there are potentially up to six instances of this interceptor for every component
+            final Jsr299BindingsInterceptor interceptor = new Jsr299BindingsInterceptor((BeanManagerImpl) weldContainer.getValue().getBeanManager(beanArchiveId), ejbName, context, interceptionType, classLoader);
+            return interceptor;
         }
 
         public InjectedValue<WeldContainer> getWeldContainer() {
@@ -203,13 +214,4 @@ public class Jsr299BindingsInterceptor implements Serializable, org.jboss.invoca
         }
     }
 
-    private static class InterceptorInstances {
-        protected final CreationalContext<Object> creationalContext;
-        protected final Map<String, SerializableContextualInstance<Interceptor<Object>, Object>> interceptorInstances;
-
-        public InterceptorInstances(final CreationalContext<Object> creationalContext, final Map<String, SerializableContextualInstance<Interceptor<Object>, Object>> interceptorInstances) {
-            this.creationalContext = creationalContext;
-            this.interceptorInstances = interceptorInstances;
-        }
-    }
 }

@@ -31,8 +31,10 @@ import java.util.logging.Handler;
 
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
+import org.jboss.as.controller.services.path.AbstractPathService;
+import org.jboss.as.controller.services.path.PathManager;
+import org.jboss.as.controller.services.path.PathManagerService;
 import org.jboss.as.logging.util.LogServices;
-import org.jboss.as.server.services.path.AbstractPathService;
 import org.jboss.dmr.ModelNode;
 import org.jboss.msc.service.ServiceBuilder;
 import org.jboss.msc.service.ServiceController;
@@ -47,7 +49,8 @@ import org.jboss.msc.service.ServiceTarget;
  */
 class FileHandlers {
 
-    static void addFile(final OperationContext context, final ServiceBuilder<Handler> serviceBuilder, final AbstractFileHandlerService service, final ModelNode file, final String name) throws OperationFailedException {
+    static ServiceController<?> addFile(final OperationContext context, final ServiceBuilder<Handler> serviceBuilder, final AbstractFileHandlerService service, final ModelNode file, final String name) throws OperationFailedException {
+        ServiceController<?> result = null;
         if (file.isDefined()) {
             final ModelNode path = PATH.resolveModelAttribute(context, file);
             final ModelNode relativeTo = RELATIVE_TO.resolveModelAttribute(context, file);
@@ -55,15 +58,13 @@ class FileHandlers {
 
             // Retrieve the current service
             final ServiceTarget serviceTarget = context.getServiceTarget();
-            final HandlerFileService fileService = new HandlerFileService(path.asString());
+            final HandlerFileService fileService = new HandlerFileService(path.asString(), relativeTo.isDefined() ? relativeTo.asString() : null);
             final ServiceBuilder<?> fileBuilder = serviceTarget.addService(serviceName, fileService);
-            // Add the relative path dependency
-            if (relativeTo.isDefined()) {
-                fileBuilder.addDependency(AbstractPathService.pathNameOf(relativeTo.asString()), String.class, fileService.getRelativeToInjector());
-            }
-            fileBuilder.setInitialMode(ServiceController.Mode.ACTIVE).install();
-            serviceBuilder.addDependency(LogServices.handlerFileName(name), String.class, service.getFileNameInjector());
+            fileBuilder.addDependency(PathManagerService.SERVICE_NAME, PathManager.class, fileService.getPathManagerInjector());
+            result = fileBuilder.setInitialMode(ServiceController.Mode.ACTIVE).install();
+            serviceBuilder.addDependency(serviceName, String.class, service.getFileNameInjector());
         }
+        return result;
     }
 
     static boolean changeFile(final OperationContext context, final ModelNode oldFile, final ModelNode newFile, final String name) throws OperationFailedException {

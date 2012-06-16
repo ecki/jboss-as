@@ -21,11 +21,9 @@
  */
 package org.jboss.as.cli.operation;
 
-import org.jboss.as.cli.CommandFormatException;
-import org.jboss.dmr.ModelNode;
+import org.jboss.as.cli.CommandLineCompleter;
 
 /**
- * Represents a request header.
  *
  * @author Alexey Loubyansky
  */
@@ -33,5 +31,5 @@ public interface OperationRequestHeader {
 
     String getName();
 
-    void addTo(ModelNode headers) throws CommandFormatException;
+    CommandLineCompleter getCompleter();
 }

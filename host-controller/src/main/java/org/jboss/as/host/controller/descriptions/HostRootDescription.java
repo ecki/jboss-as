@@ -23,6 +23,7 @@
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ATTRIBUTES;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.CHILDREN;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.CORE_SERVICE;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.DEFAULT;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.DESCRIPTION;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.DOMAIN_CONTROLLER;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.EXPRESSIONS_ALLOWED;
@@ -32,6 +33,8 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.HOS
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.INTERFACE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.JVM;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.LOCAL;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.MANAGEMENT_MAJOR_VERSION;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.MANAGEMENT_MINOR_VERSION;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.MASTER;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.MAX;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.MAX_OCCURS;
@@ -46,28 +49,43 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OPE
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OPERATION_NAME;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PATH;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PORT;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PRODUCT_NAME;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PRODUCT_VERSION;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RELEASE_CODENAME;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RELEASE_VERSION;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.REMOTE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.REPLY_PROPERTIES;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.REQUEST_PROPERTIES;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.REQUIRED;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RESTART;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RUNNING_SERVER;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SCHEMA_LOCATIONS;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SECURITY_REALM;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SERVER;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SERVER_CONFIG;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SYSTEM_PROPERTY;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.TAIL_COMMENT_ALLOWED;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.TYPE;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.USERNAME;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.VALUE_TYPE;
+import static org.jboss.as.server.controller.descriptions.ServerDescriptionConstants.PROCESS_STATE;
 
 import java.util.Locale;
 import java.util.ResourceBundle;
 
+import org.jboss.as.controller.SimpleAttributeDefinition;
+import org.jboss.as.controller.SimpleAttributeDefinitionBuilder;
+import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
 import org.jboss.as.controller.descriptions.ResourceDescriptionResolver;
 import org.jboss.as.controller.descriptions.StandardResourceDescriptionResolver;
 import org.jboss.as.controller.descriptions.common.CommonDescriptions;
+import org.jboss.as.controller.operations.validation.EnumValidator;
+import org.jboss.as.controller.registry.AttributeAccess.Flag;
+import org.jboss.as.host.controller.DirectoryGrouping;
+import org.jboss.as.host.controller.operations.HostShutdownHandler;
+import org.jboss.as.host.controller.operations.LocalDomainControllerAddHandler;
 import org.jboss.as.host.controller.operations.RemoteDomainControllerAddHandler;
+import org.jboss.as.host.controller.operations.RemoteDomainControllerRemoveHandler;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.ModelType;
 
@@ -77,6 +95,14 @@ import org.jboss.dmr.ModelType;
  * @author Brian Stansberry
  */
 public class HostRootDescription {
+
+    private static final String BLOCKING = "blocking";
+
+    public static final SimpleAttributeDefinition DIRECTORY_GROUPING = SimpleAttributeDefinitionBuilder.create(ModelDescriptionConstants.DIRECTORY_GROUPING, ModelType.STRING, true).
+            addFlag(Flag.RESTART_ALL_SERVICES).
+            setDefaultValue(DirectoryGrouping.defaultValue().toModelNode()).
+            setValidator(EnumValidator.create(DirectoryGrouping.class, true, false)).
+            build();
 
     private static final String RESOURCE_NAME = HostRootDescription.class.getPackage().getName() + ".LocalDescriptions";
 
@@ -112,6 +138,36 @@ public class HostRootDescription {
         root.get(ATTRIBUTES, RELEASE_CODENAME, NILLABLE).set(false);
         root.get(ATTRIBUTES, RELEASE_CODENAME, MIN_LENGTH).set(1);
 
+        root.get(ATTRIBUTES, PRODUCT_NAME, DESCRIPTION).set(bundle.getString("host.product-name"));
+        root.get(ATTRIBUTES, PRODUCT_NAME, TYPE).set(ModelType.STRING);
+        root.get(ATTRIBUTES, PRODUCT_NAME, REQUIRED).set(true);
+        root.get(ATTRIBUTES, PRODUCT_NAME, NILLABLE).set(true);
+        root.get(ATTRIBUTES, PRODUCT_NAME, MIN_LENGTH).set(1);
+
+        root.get(ATTRIBUTES, PRODUCT_VERSION, DESCRIPTION).set(bundle.getString("host.product-version"));
+        root.get(ATTRIBUTES, PRODUCT_VERSION, TYPE).set(ModelType.STRING);
+        root.get(ATTRIBUTES, PRODUCT_VERSION, REQUIRED).set(true);
+        root.get(ATTRIBUTES, PRODUCT_VERSION, NILLABLE).set(true);
+        root.get(ATTRIBUTES, PRODUCT_VERSION, MIN_LENGTH).set(1);
+
+        root.get(ATTRIBUTES, MANAGEMENT_MAJOR_VERSION, DESCRIPTION).set(bundle.getString("host.management-major-version"));
+        root.get(ATTRIBUTES, MANAGEMENT_MAJOR_VERSION, TYPE).set(ModelType.INT);
+        root.get(ATTRIBUTES, MANAGEMENT_MAJOR_VERSION, REQUIRED).set(true);
+        root.get(ATTRIBUTES, MANAGEMENT_MAJOR_VERSION, NILLABLE).set(false);
+        root.get(ATTRIBUTES, MANAGEMENT_MAJOR_VERSION, MIN).set(1);
+
+        root.get(ATTRIBUTES, MANAGEMENT_MINOR_VERSION, DESCRIPTION).set(bundle.getString("host.management-minor-version"));
+        root.get(ATTRIBUTES, MANAGEMENT_MINOR_VERSION, TYPE).set(ModelType.INT);
+        root.get(ATTRIBUTES, MANAGEMENT_MINOR_VERSION, REQUIRED).set(true);
+        root.get(ATTRIBUTES, MANAGEMENT_MINOR_VERSION, NILLABLE).set(false);
+        root.get(ATTRIBUTES, MANAGEMENT_MINOR_VERSION, MIN).set(1);
+
+        root.get(ATTRIBUTES, PROCESS_STATE, DESCRIPTION).set(bundle.getString("host.state"));
+        root.get(ATTRIBUTES, PROCESS_STATE, TYPE).set(ModelType.STRING);
+        root.get(ATTRIBUTES, PROCESS_STATE, REQUIRED).set(true);
+        root.get(ATTRIBUTES, PROCESS_STATE, NILLABLE).set(false);
+        root.get(ATTRIBUTES, PROCESS_STATE, MIN_LENGTH).set(1);
+
         root.get(ATTRIBUTES, DOMAIN_CONTROLLER, DESCRIPTION).set(bundle.getString("host.domain-controller"));
         root.get(ATTRIBUTES, DOMAIN_CONTROLLER, TYPE).set(ModelType.OBJECT);
         root.get(ATTRIBUTES, DOMAIN_CONTROLLER, REQUIRED).set(true);
@@ -133,6 +189,8 @@ public class HostRootDescription {
 
         root.get(ATTRIBUTES, MASTER, DESCRIPTION).set(bundle.getString("host.master"));
         root.get(ATTRIBUTES, MASTER, TYPE).set(ModelType.BOOLEAN);
+
+        DIRECTORY_GROUPING.addResourceAttributeDescription(bundle, "host", root);
 
         root.get(OPERATIONS).setEmptyObject();
 
@@ -188,6 +246,12 @@ public class HostRootDescription {
         root.get(REQUEST_PROPERTIES, SERVER, REQUIRED).set(true);
         root.get(REQUEST_PROPERTIES, SERVER, MIN_LENGTH).set(1);
         root.get(REQUEST_PROPERTIES, SERVER, NILLABLE).set(false);
+        root.get(REQUEST_PROPERTIES, BLOCKING, TYPE).set(ModelType.BOOLEAN);
+        root.get(REQUEST_PROPERTIES, BLOCKING, DEFAULT).set(false);
+        root.get(REQUEST_PROPERTIES, BLOCKING, DESCRIPTION).set(bundle.getString("host.start-server.blocking"));
+        root.get(REQUEST_PROPERTIES, BLOCKING, REQUIRED).set(false);
+        root.get(REQUEST_PROPERTIES, BLOCKING, NILLABLE).set(true);
+        root.get(REPLY_PROPERTIES, TYPE).set(ModelType.STRING);
         root.get(REPLY_PROPERTIES, TYPE).set(ModelType.STRING);
         root.get(REPLY_PROPERTIES, DESCRIPTION).set(bundle.getString("host.start-server.reply"));
         return root;
@@ -204,6 +268,11 @@ public class HostRootDescription {
         root.get(REQUEST_PROPERTIES, SERVER, REQUIRED).set(true);
         root.get(REQUEST_PROPERTIES, SERVER, MIN_LENGTH).set(1);
         root.get(REQUEST_PROPERTIES, SERVER, NILLABLE).set(false);
+        root.get(REQUEST_PROPERTIES, BLOCKING, TYPE).set(ModelType.BOOLEAN);
+        root.get(REQUEST_PROPERTIES, BLOCKING, DEFAULT).set(false);
+        root.get(REQUEST_PROPERTIES, BLOCKING, DESCRIPTION).set(bundle.getString("host.restart-server.blocking"));
+        root.get(REQUEST_PROPERTIES, BLOCKING, REQUIRED).set(false);
+        root.get(REQUEST_PROPERTIES, BLOCKING, NILLABLE).set(true);
         root.get(REPLY_PROPERTIES, TYPE).set(ModelType.STRING);
         root.get(REPLY_PROPERTIES, DESCRIPTION).set(bundle.getString("host.restart-server.reply"));
         return root;
@@ -220,8 +289,27 @@ public class HostRootDescription {
         root.get(REQUEST_PROPERTIES, SERVER, REQUIRED).set(true);
         root.get(REQUEST_PROPERTIES, SERVER, MIN_LENGTH).set(1);
         root.get(REQUEST_PROPERTIES, SERVER, NILLABLE).set(false);
+        root.get(REQUEST_PROPERTIES, BLOCKING, TYPE).set(ModelType.BOOLEAN);
+        root.get(REQUEST_PROPERTIES, BLOCKING, DEFAULT).set(false);
+        root.get(REQUEST_PROPERTIES, BLOCKING, DESCRIPTION).set(bundle.getString("host.stop-server.blocking"));
+        root.get(REQUEST_PROPERTIES, BLOCKING, REQUIRED).set(false);
+        root.get(REQUEST_PROPERTIES, BLOCKING, NILLABLE).set(true);
         root.get(REPLY_PROPERTIES, TYPE).set(ModelType.STRING);
         root.get(REPLY_PROPERTIES, DESCRIPTION).set(bundle.getString("host.stop-server.reply"));
+        return root;
+    }
+
+    public static ModelNode getHostShutdownHandler(final Locale locale) {
+        final ResourceBundle bundle = getResourceBundle(locale);
+        final ModelNode root = new ModelNode();
+        root.get(OPERATION_NAME).set(HostShutdownHandler.OPERATION_NAME);
+        root.get(DESCRIPTION).set(bundle.getString("host.shutdown"));
+        root.get(REQUEST_PROPERTIES, RESTART, TYPE).set(ModelType.BOOLEAN);
+        root.get(REQUEST_PROPERTIES, RESTART, DESCRIPTION).set(bundle.getString("host.shutdown.restart"));
+        root.get(REQUEST_PROPERTIES, RESTART, DEFAULT).set(false);
+        root.get(REQUEST_PROPERTIES, RESTART, REQUIRED).set(false);
+        root.get(REQUEST_PROPERTIES, RESTART, NILLABLE).set(true);
+        root.get(REPLY_PROPERTIES).setEmptyObject();
         return root;
     }
 
@@ -235,7 +323,7 @@ public class HostRootDescription {
 
         final ModelNode result = new ModelNode();
 
-        result.get(OPERATION_NAME).set(RemoteDomainControllerAddHandler.OPERATION_NAME);
+        result.get(OPERATION_NAME).set(LocalDomainControllerAddHandler.OPERATION_NAME);
         result.get(DESCRIPTION).set(bundle.getString("host.domain-controller.local.add"));
 
         result.get(REQUEST_PROPERTIES).setEmptyObject();
@@ -263,6 +351,31 @@ public class HostRootDescription {
         result.get(REQUEST_PROPERTIES, PORT, MIN).set(1);
         result.get(REQUEST_PROPERTIES, PORT, MAX).set(65535);
 
+        result.get(REQUEST_PROPERTIES, USERNAME, TYPE).set(ModelType.STRING);
+        result.get(REQUEST_PROPERTIES, USERNAME, DESCRIPTION).set(bundle.getString("host.domain-controller.remote.username"));
+        result.get(REQUEST_PROPERTIES, USERNAME, REQUIRED).set(false);
+        result.get(REQUEST_PROPERTIES, USERNAME, EXPRESSIONS_ALLOWED).set(true);
+        result.get(REQUEST_PROPERTIES, USERNAME, MIN_LENGTH).set(1);
+
+        result.get(REQUEST_PROPERTIES, SECURITY_REALM, TYPE).set(ModelType.STRING);
+        result.get(REQUEST_PROPERTIES, SECURITY_REALM, DESCRIPTION).set(bundle.getString("host.domain-controller.remote.security-realm"));
+        result.get(REQUEST_PROPERTIES, SECURITY_REALM, REQUIRED).set(false);
+        result.get(REQUEST_PROPERTIES, SECURITY_REALM, EXPRESSIONS_ALLOWED).set(false);
+        result.get(REQUEST_PROPERTIES, SECURITY_REALM, MIN_LENGTH).set(1);
+
+        result.get(REPLY_PROPERTIES).setEmptyObject();
+        return result;
+    }
+
+    public static ModelNode getRemoteDomainControllerRemove(Locale locale) {
+        final ResourceBundle bundle = getResourceBundle(locale);
+
+        final ModelNode result = new ModelNode();
+
+        result.get(OPERATION_NAME).set(RemoteDomainControllerRemoveHandler.OPERATION_NAME);
+        result.get(DESCRIPTION).set(bundle.getString("host.domain-controller.remote.remove"));
+
+        result.get(REQUEST_PROPERTIES).setEmptyObject();
         result.get(REPLY_PROPERTIES).setEmptyObject();
         return result;
     }

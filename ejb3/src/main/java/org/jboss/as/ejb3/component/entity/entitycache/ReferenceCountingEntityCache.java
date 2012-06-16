@@ -25,7 +25,10 @@ package org.jboss.as.ejb3.component.entity.entitycache;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
+
 import javax.ejb.NoSuchEntityException;
+
+import org.jboss.as.ejb3.EjbLogger;
 import org.jboss.as.ejb3.component.entity.EntityBeanComponent;
 import org.jboss.as.ejb3.component.entity.EntityBeanComponentInstance;
 
@@ -40,54 +43,93 @@ public class ReferenceCountingEntityCache implements ReadyEntityCache {
         this.component = component;
     }
 
-    public void create(final EntityBeanComponentInstance instance) {
-        if (cache.putIfAbsent(instance.getPrimaryKey(), new CacheEntry(instance)) != null) {
-            throw new IllegalArgumentException("Instance for PK [" + instance.getPrimaryKey() + "] already registerd.");
-        }
+    public synchronized void create(final EntityBeanComponentInstance instance) {
+        final CacheEntry entry = realCreate(instance);
+        entry.referenceCount.incrementAndGet();
     }
 
-    public EntityBeanComponentInstance get(final Object key) throws NoSuchEntityException {
+    private CacheEntry realCreate(final EntityBeanComponentInstance instance) {
+        final CacheEntry cacheEntry = new CacheEntry(instance);
+        final CacheEntry existing = cache.putIfAbsent(instance.getPrimaryKey(), cacheEntry);
+        if (existing != null) {
+            if (existing.instance.isRemoved()) {
+                //this happens in an instance is removed and then re-added in the space of the same transaction
+                existing.replacedInstance = instance;
+            } else {
+                throw EjbLogger.EJB3_LOGGER.instanceAlreadyRegisteredForPK(instance.getPrimaryKey());
+            }
+        }
+        return cacheEntry;
+    }
+
+    public synchronized EntityBeanComponentInstance get(final Object key) throws NoSuchEntityException {
         if (!cache.containsKey(key)) {
             final EntityBeanComponentInstance instance = createInstance(key);
-            create(instance);
+            realCreate(instance);
         }
-        return cache.get(key).instance;
-    }
-
-    public void reference(final EntityBeanComponentInstance instance) {
-        final CacheEntry cacheEntry = cache.get(instance.getPrimaryKey());
-        if (cacheEntry == null) {
-            throw new IllegalArgumentException("Instance [" + instance + "] not found in cache");
-        }
+        final CacheEntry cacheEntry = cache.get(key);
         cacheEntry.referenceCount.incrementAndGet();
+        if (cacheEntry.replacedInstance != null) {
+            return cacheEntry.replacedInstance;
+        } else {
+            return cacheEntry.instance;
+        }
     }
-
-    public void release(final EntityBeanComponentInstance instance, boolean success) {
-        if(instance.getPrimaryKey() == null) return;  // TODO: Should this be an Exception
+    public synchronized void release(final EntityBeanComponentInstance instance, boolean success) {
+        if (instance.isDiscarded()) {
+            return;
+        }
+        if (instance.getPrimaryKey() == null) return;  // TODO: Should this be an Exception
         final CacheEntry cacheEntry = cache.get(instance.getPrimaryKey());
         if (cacheEntry == null) {
-            throw new IllegalArgumentException("Instance [" + instance + "] not found in cache");
+            throw EjbLogger.EJB3_LOGGER.entityBeanInstanceNotFoundInCache(instance);
+        }
+        if (cacheEntry.replacedInstance != null) {
+            //this can happen if an entity is removed and a new entity with the same PK is added in a transactions
+            if (instance == cacheEntry.replacedInstance) {
+                if (success) {
+                    cacheEntry.instance = cacheEntry.replacedInstance;
+                } else if (cacheEntry.instance.isDiscarded()) {
+                    //if the TX was a failure, and the previous instance has been discarded
+                    //we just remove the entry and return
+                    cache.remove(instance.getPrimaryKey());
+                    return;
+                }
+                cacheEntry.replacedInstance = null;
+            }
+        }
+        //TODO: this should probably be somewhere else
+        //roll back unsuccessful removal
+        if (!success && instance.isRemoved()) {
+            instance.setRemoved(false);
         }
         if (cacheEntry.referenceCount.decrementAndGet() == 0) {
-            //TODO: this should probably be somewhere else
-            //roll back unsuccessful removal
-            if (!success && instance.isRemoved()) {
-                instance.setRemoved(false);
+            final Object pk = instance.getPrimaryKey();
+            try {
+                instance.passivate();
+                component.releaseEntityBeanInstance(instance);
+            } finally {
+                cache.remove(pk);
             }
-            instance.passivate();
-            component.getPool().release(instance);
-            cache.remove(instance.getPrimaryKey());
-        } else if(instance.isRemoved() && success) {
-            //the instance has been removed, we need to remove it from the cache
-            //even if someone is still referencing it, as their reference is no longer usable
-            component.getPool().release(instance);
-            cache.remove(instance.getPrimaryKey());
         }
     }
 
-    public void discard(final EntityBeanComponentInstance instance) {
-        cache.remove(instance.getPrimaryKey());
-        instance.discard();
+    public synchronized void discard(final EntityBeanComponentInstance instance) {
+        if(instance.getPrimaryKey() == null) {
+            //instance has already been passivated
+            return;
+        }
+        final CacheEntry entry = cache.get(instance.getPrimaryKey());
+        if (entry != null) {
+            if (instance == entry.replacedInstance) {
+                //this instance that is being discarded is the new instance
+                //we can just set it to null
+                entry.replacedInstance = null;
+            } else if (entry.replacedInstance == null) {
+                //if there is a new instance we cannot discard the entry entirely
+                cache.remove(instance.getPrimaryKey());
+            }
+        }
     }
 
     public void start() {
@@ -97,14 +139,15 @@ public class ReferenceCountingEntityCache implements ReadyEntityCache {
     }
 
     private EntityBeanComponentInstance createInstance(final Object pk) {
-        final EntityBeanComponentInstance instance = component.getPool().get();
+        final EntityBeanComponentInstance instance = component.acquireUnAssociatedInstance();
         instance.associate(pk);
         return instance;
     }
 
     private class CacheEntry {
         private final AtomicInteger referenceCount = new AtomicInteger(0);
-        private final EntityBeanComponentInstance instance;
+        private volatile EntityBeanComponentInstance instance;
+        private volatile EntityBeanComponentInstance replacedInstance;
 
         private CacheEntry(EntityBeanComponentInstance instance) {
             this.instance = instance;

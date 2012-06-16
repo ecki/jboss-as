@@ -26,25 +26,45 @@ import java.util.List;
 import java.util.Map;
 
 import org.jboss.jca.common.api.metadata.common.CommonAdminObject;
-import org.jboss.jca.common.api.metadata.common.CommonConnDef;
 import org.jboss.jca.common.api.metadata.common.TransactionSupportEnum;
-import org.jboss.jca.common.metadata.resourceadapter.ResourceAdapterImpl;
+import org.jboss.jca.common.api.metadata.common.v10.CommonConnDef;
+import org.jboss.jca.common.metadata.resourceadapter.v10.ResourceAdapterImpl;
+import org.jboss.msc.service.ServiceName;
 
 
 public class ModifiableResourceAdapter extends ResourceAdapterImpl {
+
+    private volatile ServiceName raXmlDeploymentServiceName = null;
+
     public ModifiableResourceAdapter(String archive, TransactionSupportEnum transactionSupport, List<CommonConnDef> connectionDefinitions, List<CommonAdminObject> adminObjects, Map<String, String> configProperties, List<String> beanValidationGroups, String bootstrapContext) {
         super(archive, transactionSupport, connectionDefinitions, adminObjects, configProperties, beanValidationGroups, bootstrapContext);
     }
 
-    public void addConfigProperty(String name, String value) {
+    public synchronized void addConfigProperty(String name, String value) {
         configProperties.put(name, value);
     }
 
-    public void addConnectionDefinition(CommonConnDef value) {
+    public synchronized void addConnectionDefinition(CommonConnDef value) {
         connectionDefinitions.add(value);
     }
 
-    public void addAdminObject(CommonAdminObject value) {
+    public synchronized int connectionDefinitionSize() {
+            return connectionDefinitions.size();
+    }
+
+    public synchronized void addAdminObject(CommonAdminObject value) {
         adminObjects.add(value);
+    }
+
+    public synchronized int adminObjectSize() {
+        return adminObjects.size();
+    }
+
+    public ServiceName getRaXmlDeploymentServiceName() {
+        return raXmlDeploymentServiceName;
+    }
+
+    public void setRaXmlDeploymentServiceName(ServiceName raXmlDeploymentServiceName) {
+        this.raXmlDeploymentServiceName = raXmlDeploymentServiceName;
     }
 }

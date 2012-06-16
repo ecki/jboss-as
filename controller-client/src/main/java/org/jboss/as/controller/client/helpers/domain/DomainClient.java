@@ -92,11 +92,11 @@ public interface DomainClient extends ModelControllerClient {
      * @param gracefulShutdownTimeout maximum period to wait to allow the server
      *           to gracefully handle long running tasks before shutting down,
      *           or {@code -1} to shutdown immediately
-     * @param timeunit time unit in which {@code gracefulShutdownTimeout} is expressed
+     * @param timeUnit time unit in which {@code gracefulShutdownTimeout} is expressed
      *
      * @return the status of the server following the stop. Will not be <code>null</code>
      */
-    ServerStatus stopServer(String hostControllerName, String serverName, long gracefulShutdownTimeout, TimeUnit timeunit);
+    ServerStatus stopServer(String hostControllerName, String serverName, long gracefulShutdownTimeout, TimeUnit timeUnit);
 
     /**
      * Restarts the given server.
@@ -106,11 +106,11 @@ public interface DomainClient extends ModelControllerClient {
      * @param gracefulShutdownTimeout maximum period to wait to allow the server
      *           to gracefully handle long running tasks before shutting down,
      *           or {@code -1} to shutdown immediately
-     * @param timeunit time unit in which {@code gracefulShutdownTimeout} is expressed
+     * @param timeUnit time unit in which {@code gracefulShutdownTimeout} is expressed
      *
      * @return the status of the server following the restart. Will not be <code>null</code>
      */
-    ServerStatus restartServer(String hostControllerName, String serverName, long gracefulShutdownTimeout, TimeUnit timeunit);
+    ServerStatus restartServer(String hostControllerName, String serverName, long gracefulShutdownTimeout, TimeUnit timeUnit);
 
     /**
      * Factory used to create an {@link org.jboss.as.controller.client.helpers.domain.DomainClient} instance for a remote address
@@ -139,6 +139,17 @@ public interface DomainClient extends ModelControllerClient {
          */
         public static DomainClient create(final InetAddress address, int port, CallbackHandler handler) {
             return new DomainClientImpl(address, port, handler);
+        }
+
+        /**
+         * Create an {@link org.jboss.as.controller.client.helpers.domain.DomainClient} instance based on an existing
+         * {@link ModelControllerClient}.
+         *
+         * @param client the client
+         * @return A domain domain
+         */
+        public static DomainClient create(final ModelControllerClient client) {
+            return new DomainClientImpl(client);
         }
 
     }

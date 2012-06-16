@@ -23,7 +23,6 @@ package org.jboss.as.ejb3.component.entity;
 
 import java.lang.reflect.Method;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -35,49 +34,56 @@ import javax.ejb.EJBObject;
 import org.jboss.as.ee.component.BasicComponentInstance;
 import org.jboss.as.ee.component.Component;
 import org.jboss.as.ejb3.component.EJBComponent;
+import org.jboss.as.ejb3.component.allowedmethods.AllowedMethodsInformation;
 import org.jboss.as.ejb3.component.entity.entitycache.ReadyEntityCache;
 import org.jboss.as.ejb3.component.entity.entitycache.ReferenceCountingEntityCache;
-import org.jboss.as.ejb3.pool.InfinitePool;
+import org.jboss.as.ejb3.component.entity.entitycache.TransactionLocalEntityCache;
+import org.jboss.as.ejb3.component.pool.PoolConfig;
+import org.jboss.as.ejb3.component.pool.PooledComponent;
 import org.jboss.as.ejb3.pool.Pool;
 import org.jboss.as.ejb3.pool.StatelessObjectFactory;
-import org.jboss.as.ejb3.timerservice.EntityTimedObjectInvokerImpl;
-import org.jboss.as.ejb3.timerservice.spi.TimedObjectInvoker;
 import org.jboss.as.naming.ManagedReference;
 import org.jboss.invocation.Interceptor;
 import org.jboss.invocation.InterceptorFactory;
 import org.jboss.invocation.InterceptorFactoryContext;
 import org.jboss.invocation.SimpleInterceptorFactoryContext;
 
+import static org.jboss.as.ejb3.EjbLogger.ROOT_LOGGER;
+import static org.jboss.as.ejb3.EjbMessages.MESSAGES;
+
 /**
  * @author Stuart Douglas
  */
-public class EntityBeanComponent extends EJBComponent {
+public class EntityBeanComponent extends EJBComponent implements PooledComponent<EntityBeanComponentInstance> {
 
     public static final Object PRIMARY_KEY_CONTEXT_KEY = new Object();
 
+    private final StatelessObjectFactory<EntityBeanComponentInstance> factory;
     private final Pool<EntityBeanComponentInstance> pool;
+    private final String poolName;
     private final ReadyEntityCache cache;
     private final Class<EJBHome> homeClass;
     private final Class<EJBLocalHome> localHomeClass;
     private final Class<EJBLocalObject> localClass;
     private final Class<EJBObject> remoteClass;
     private final Class<Object> primaryKeyClass;
+    private final Boolean optimisticLocking;
 
     private final Method ejbStoreMethod;
     private final Method ejbLoadMethod;
     private final Method ejbActivateMethod;
     private final Method ejbPassivateMethod;
+    private final Method unsetEntityContextMethod;
     private final InterceptorFactory ejbStore;
     private final InterceptorFactory ejbLoad;
     private final InterceptorFactory ejbActivate;
     private final InterceptorFactory ejbPassivate;
-
-    private final TimedObjectInvoker timedObjectInvoker;
+    private final InterceptorFactory unsetEntityContext;
 
     protected EntityBeanComponent(final EntityBeanComponentCreateService ejbComponentCreateService) {
         super(ejbComponentCreateService);
 
-        StatelessObjectFactory<EntityBeanComponentInstance> factory = new StatelessObjectFactory<EntityBeanComponentInstance>() {
+        factory = new StatelessObjectFactory<EntityBeanComponentInstance>() {
             @Override
             public EntityBeanComponentInstance create() {
                 return (EntityBeanComponentInstance) createInstance();
@@ -88,7 +94,17 @@ public class EntityBeanComponent extends EJBComponent {
                 obj.destroy();
             }
         };
-        pool = new InfinitePool<EntityBeanComponentInstance>(factory);
+        optimisticLocking = ejbComponentCreateService.getOptimisticLocking();
+        final PoolConfig poolConfig = ejbComponentCreateService.getPoolConfig();
+        if (poolConfig == null) {
+            ROOT_LOGGER.debug("Pooling is disabled for entity bean " + ejbComponentCreateService.getComponentName());
+            this.pool = null;
+            this.poolName = null;
+        } else {
+            ROOT_LOGGER.debug("Using pool config " + poolConfig + " to create pool for entity bean " + ejbComponentCreateService.getComponentName());
+            this.pool = poolConfig.createPool(factory);
+            this.poolName = poolConfig.getPoolName();
+        }
         this.cache = createEntityCache(ejbComponentCreateService);
 
         this.homeClass = ejbComponentCreateService.getHomeClass();
@@ -105,59 +121,65 @@ public class EntityBeanComponent extends EJBComponent {
         this.ejbStoreMethod = ejbComponentCreateService.getEjbStoreMethod();
         this.ejbPassivate = ejbComponentCreateService.getEjbPassivate();
         this.ejbPassivateMethod = ejbComponentCreateService.getEjbPassivateMethod();
-        final String deploymentName;
-        if (ejbComponentCreateService.getDistinctName() == null || ejbComponentCreateService.getDistinctName().length() == 0) {
-            deploymentName = ejbComponentCreateService.getApplicationName() + "." + ejbComponentCreateService.getModuleName();
-        } else {
-            deploymentName = ejbComponentCreateService.getApplicationName() + "." + ejbComponentCreateService.getModuleName() + "." + ejbComponentCreateService.getDistinctName();
-        }
-        this.timedObjectInvoker = new EntityTimedObjectInvokerImpl(this, deploymentName);
+        this.unsetEntityContext = ejbComponentCreateService.getUnsetEntityContext();
+        this.unsetEntityContextMethod = ejbComponentCreateService.getUnsetEntityContextMethod();
+
     }
 
     @Override
     protected BasicComponentInstance instantiateComponentInstance(final AtomicReference<ManagedReference> instanceReference, final Interceptor preDestroyInterceptor, final Map<Method, Interceptor> methodInterceptors, final InterceptorFactoryContext interceptorContext) {
-        final Map<Method, Interceptor> timeouts;
-        if (timeoutInterceptors != null) {
-            timeouts = new HashMap<Method, Interceptor>();
-            for (Map.Entry<Method, InterceptorFactory> entry : timeoutInterceptors.entrySet()) {
-                timeouts.put(entry.getKey(), entry.getValue().create(interceptorContext));
-            }
-        } else {
-            timeouts = Collections.emptyMap();
-        }
-        return new EntityBeanComponentInstance(this, instanceReference, preDestroyInterceptor, methodInterceptors, timeouts);
+        return new EntityBeanComponentInstance(this, instanceReference, preDestroyInterceptor, methodInterceptors);
     }
 
     protected Interceptor createInterceptor(final InterceptorFactory factory) {
         if (factory == null)
             return null;
-        final SimpleInterceptorFactoryContext context = new SimpleInterceptorFactoryContext();
+        final InterceptorFactoryContext context = new SimpleInterceptorFactoryContext();
         context.getContextData().put(Component.class, this);
         return factory.create(context);
+    }
+
+    public EntityBeanComponentInstance acquireUnAssociatedInstance() {
+        if (pool != null) {
+            return pool.get();
+        } else {
+            return factory.create();
+        }
+    }
+
+    public void releaseEntityBeanInstance(final EntityBeanComponentInstance instance) {
+        if (pool != null) {
+            pool.release(instance);
+        } else {
+            factory.destroy(instance);
+        }
     }
 
     public ReadyEntityCache getCache() {
         return cache;
     }
 
-    public Pool<EntityBeanComponentInstance> getPool() {
-        return pool;
-    }
-
     protected ReadyEntityCache createEntityCache(EntityBeanComponentCreateService ejbComponentCreateService) {
-        return new ReferenceCountingEntityCache(this);
+        if (optimisticLocking == null || !optimisticLocking) {
+            return new ReferenceCountingEntityCache(this);
+        } else {
+            return new TransactionLocalEntityCache(this);
+        }
     }
 
-    public EJBLocalObject getEjbLocalObject(final Object primaryKey) {
-        final HashMap<Object, Object> create = new HashMap<Object, Object>();
-        create.put(EntityBeanComponent.PRIMARY_KEY_CONTEXT_KEY, primaryKey);
-        return createViewInstanceProxy(getLocalClass(), create);
+
+    public EJBLocalObject getEJBLocalObject(final Object pk) throws IllegalStateException {
+        if (getEjbLocalObjectViewServiceName() == null) {
+            throw MESSAGES.beanComponentMissingEjbObject(getComponentName(), "EJBLocalObject");
+        }
+        return createViewInstanceProxy(EJBLocalObject.class, Collections.singletonMap(EntityBeanComponent.PRIMARY_KEY_CONTEXT_KEY, pk), getEjbLocalObjectViewServiceName());
     }
 
-    public EJBObject getEJBObject(final Object primaryKey) {
-        final HashMap<Object, Object> create = new HashMap<Object, Object>();
-        create.put(EntityBeanComponent.PRIMARY_KEY_CONTEXT_KEY, primaryKey);
-        return createViewInstanceProxy(getRemoteClass(), create);
+    public EJBObject getEJBObject(final Object pk) throws IllegalStateException {
+        if (getEjbObjectViewServiceName() == null) {
+            throw MESSAGES.beanComponentMissingEjbObject(getComponentName(), "EJBObject");
+        }
+        return createViewInstanceProxy(EJBObject.class, Collections.singletonMap(EntityBeanComponent.PRIMARY_KEY_CONTEXT_KEY, pk), getEjbObjectViewServiceName());
     }
 
     public Class<EJBHome> getHomeClass() {
@@ -212,8 +234,25 @@ public class EntityBeanComponent extends EJBComponent {
         return ejbPassivate;
     }
 
+    public Method getUnsetEntityContextMethod() {
+        return unsetEntityContextMethod;
+    }
+
+    public InterceptorFactory getUnsetEntityContext() {
+        return unsetEntityContext;
+    }
+
+    public Pool<EntityBeanComponentInstance> getPool() {
+        return pool;
+    }
+
     @Override
-    public TimedObjectInvoker getTimedObjectInvoker() {
-        return timedObjectInvoker;
+    public String getPoolName() {
+        return poolName;
+    }
+
+    @Override
+    public AllowedMethodsInformation getAllowedMethodsInformation() {
+        return EntityBeanAllowedMethodsInformation.INSTANCE;
     }
 }

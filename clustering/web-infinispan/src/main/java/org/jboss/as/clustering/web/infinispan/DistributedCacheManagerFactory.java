@@ -21,20 +21,33 @@
  */
 package org.jboss.as.clustering.web.infinispan;
 
-import java.io.IOException;
-import java.util.Arrays;
+import static org.jboss.as.clustering.web.infinispan.InfinispanWebMessages.MESSAGES;
+
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Map;
+import java.util.concurrent.Executors;
 
 import org.infinispan.AdvancedCache;
+import org.infinispan.Cache;
+import org.infinispan.configuration.cache.Configuration;
 import org.infinispan.manager.CacheContainer;
+import org.infinispan.manager.EmbeddedCacheManager;
+import org.jboss.as.clustering.infinispan.affinity.KeyAffinityServiceFactory;
+import org.jboss.as.clustering.infinispan.affinity.LocalKeyAffinityServiceFactory;
 import org.jboss.as.clustering.infinispan.atomic.AtomicMapCache;
 import org.jboss.as.clustering.infinispan.invoker.CacheInvoker;
 import org.jboss.as.clustering.infinispan.invoker.RetryingCacheInvoker;
+import org.jboss.as.clustering.infinispan.subsystem.AbstractCacheConfigurationService;
+import org.jboss.as.clustering.infinispan.subsystem.CacheService;
 import org.jboss.as.clustering.infinispan.subsystem.EmbeddedCacheManagerService;
 import org.jboss.as.clustering.lock.SharedLocalYieldingClusterLockManager;
+import org.jboss.as.clustering.lock.impl.SharedLocalYieldingClusterLockManagerService;
+import org.jboss.as.clustering.registry.Registry;
+import org.jboss.as.clustering.registry.RegistryService;
 import org.jboss.as.clustering.web.BatchingManager;
 import org.jboss.as.clustering.web.ClusteringNotSupportedException;
+import org.jboss.as.clustering.web.DistributedCacheManagerFactoryService;
 import org.jboss.as.clustering.web.LocalDistributableSessionManager;
 import org.jboss.as.clustering.web.OutgoingDistributableSessionData;
 import org.jboss.as.clustering.web.SessionAttributeMarshallerFactory;
@@ -42,10 +55,14 @@ import org.jboss.as.clustering.web.impl.SessionAttributeMarshallerFactoryImpl;
 import org.jboss.as.clustering.web.impl.TransactionBatchingManager;
 import org.jboss.metadata.web.jboss.JBossWebMetaData;
 import org.jboss.metadata.web.jboss.ReplicationConfig;
+import org.jboss.msc.inject.Injector;
+import org.jboss.msc.service.ServiceBuilder;
+import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.service.ServiceRegistry;
-
-import static org.jboss.as.clustering.web.infinispan.InfinispanWebMessages.MESSAGES;
+import org.jboss.msc.service.ServiceTarget;
+import org.jboss.msc.value.InjectedValue;
+import org.jboss.tm.XAResourceRecoveryRegistry;
 
 /**
  * Factory for creating an Infinispan-backed distributed cache manager.
@@ -54,70 +71,118 @@ import static org.jboss.as.clustering.web.infinispan.InfinispanWebMessages.MESSA
  */
 public class DistributedCacheManagerFactory implements org.jboss.as.clustering.web.DistributedCacheManagerFactory {
     public static final String DEFAULT_CACHE_CONTAINER = "web";
+    private static final ServiceName JVM_ROUTE_REGISTRY_SERVICE_NAME = DistributedCacheManagerFactoryService.JVM_ROUTE_REGISTRY_ENTRY_PROVIDER_SERVICE_NAME.getParent();
 
-    private ServiceNameProvider sessionCacheServiceNameProvider = new ServiceNameProvider() {
-        @Override
-        public ServiceName getServiceName(ReplicationConfig config) {
-            ServiceName baseServiceName = EmbeddedCacheManagerService.getServiceName(null);
-            String cacheName = config.getCacheName();
-            ServiceName serviceName = ServiceName.parse((cacheName != null) ? cacheName : DEFAULT_CACHE_CONTAINER);
-            if (!baseServiceName.isParentOf(serviceName)) {
-                serviceName = baseServiceName.append(serviceName);
-            }
-            return (serviceName.length() < 4) ? serviceName.append(CacheContainer.DEFAULT_CACHE_NAME) : serviceName;
-        }
-    };
-    private CacheSource sessionCacheSource = new SessionCacheSource(this.sessionCacheServiceNameProvider);
-    private ServiceNameProvider jvmRouteCacheServiceNameProvider = new ServiceNameProvider() {
-        @Override
-        public ServiceName getServiceName(ReplicationConfig config) {
-            ServiceName baseServiceName = EmbeddedCacheManagerService.getServiceName(null);
-            String cacheName = config.getCacheName();
-            ServiceName serviceName = ServiceName.parse((cacheName != null) ? cacheName : DEFAULT_CACHE_CONTAINER);
-            if (!baseServiceName.isParentOf(serviceName)) {
-                serviceName = baseServiceName.append(serviceName);
-            }
-            return (serviceName.length() < 4) ? serviceName : serviceName.getParent();
-        }
-    };
-    private CacheSource jvmRouteCacheSource = new JvmRouteCacheSource(this.jvmRouteCacheServiceNameProvider);
-    private LockManagerSource lockManagerSource = new DefaultLockManagerSource();
     private SessionAttributeStorageFactory storageFactory = new SessionAttributeStorageFactoryImpl();
     private CacheInvoker invoker = new RetryingCacheInvoker(10, 100);
     private SessionAttributeMarshallerFactory marshallerFactory = new SessionAttributeMarshallerFactoryImpl();
+    private KeyAffinityServiceFactory affinityFactory = new LocalKeyAffinityServiceFactory(Executors.newSingleThreadExecutor(), 10);
+    @SuppressWarnings("rawtypes")
+    private final InjectedValue<Registry> registry = new InjectedValue<Registry>();
+    private final InjectedValue<SharedLocalYieldingClusterLockManager> lockManager = new InjectedValue<SharedLocalYieldingClusterLockManager>();
+    @SuppressWarnings("rawtypes")
+    private final InjectedValue<Cache> cache = new InjectedValue<Cache>();
 
     @Override
-    public <T extends OutgoingDistributableSessionData> org.jboss.as.clustering.web.DistributedCacheManager<T> getDistributedCacheManager(ServiceRegistry registry, LocalDistributableSessionManager manager) throws ClusteringNotSupportedException {
-        AdvancedCache<SessionKeyImpl, Map<Object, Object>> sessionCache = this.sessionCacheSource.<SessionKeyImpl, Map<Object, Object>>getCache(registry, manager).getAdvancedCache().with(this.getClass().getClassLoader());
-        if (!sessionCache.getConfiguration().isInvocationBatchingEnabled()) {
-            throw new ClusteringNotSupportedException(MESSAGES.failedToConfigureWebApp(sessionCache.getCacheManager().getGlobalConfiguration().getCacheManagerName(), sessionCache.getName()));
+    public <T extends OutgoingDistributableSessionData> org.jboss.as.clustering.web.DistributedCacheManager<T> getDistributedCacheManager(LocalDistributableSessionManager manager) throws ClusteringNotSupportedException {
+        @SuppressWarnings("unchecked")
+        Registry<String, Void> jvmRouteRegistry = this.registry.getValue();
+        @SuppressWarnings("unchecked")
+        AdvancedCache<String, Map<Object, Object>> cache = this.cache.getValue().getAdvancedCache();
+
+        if (!cache.getCacheConfiguration().invocationBatching().enabled()) {
+            ServiceName cacheServiceName = this.getCacheServiceName(manager.getReplicationConfig());
+            throw new ClusteringNotSupportedException(MESSAGES.failedToConfigureWebApp(cacheServiceName.getParent().getSimpleName(), cacheServiceName.getSimpleName()));
         }
-        SharedLocalYieldingClusterLockManager lockManager = this.lockManagerSource.getLockManager(sessionCache);
-        BatchingManager batchingManager = new TransactionBatchingManager(sessionCache.getTransactionManager());
+
+        BatchingManager batchingManager = new TransactionBatchingManager(cache.getTransactionManager());
         SessionAttributeStorage<T> storage = this.storageFactory.createStorage(manager.getReplicationConfig().getReplicationGranularity(), this.marshallerFactory.createMarshaller(manager));
 
-        return new DistributedCacheManager<T, SessionKeyImpl>(registry, manager, new AtomicMapCache<SessionKeyImpl, Object, Object>(sessionCache), this.jvmRouteCacheSource, lockManager, storage, batchingManager, new SessionKeyFactoryImpl(manager), this.invoker);
+        return new DistributedCacheManager<T>(manager, new AtomicMapCache<String, Object, Object>(cache), jvmRouteRegistry, this.lockManager.getOptionalValue(), storage, batchingManager, this.invoker, this.affinityFactory);
     }
 
     @Override
-    public Collection<ServiceName> getDependencies(JBossWebMetaData metaData) {
-        ReplicationConfig config = metaData.getReplicationConfig();
-        if (config == null) {
-            config = new ReplicationConfig();
+    public boolean addDeploymentDependencies(ServiceName deploymentServiceName, ServiceRegistry registry, ServiceTarget target, ServiceBuilder<?> builder, JBossWebMetaData metaData) {
+        ServiceName templateCacheServiceName = this.getCacheServiceName(metaData.getReplicationConfig());
+        if (registry.getService(templateCacheServiceName) == null) {
+            return false;
         }
-        return Arrays.asList(this.sessionCacheServiceNameProvider.getServiceName(config), this.jvmRouteCacheServiceNameProvider.getServiceName(config));
+        String templateCacheName = templateCacheServiceName.getSimpleName();
+        ServiceName containerServiceName = templateCacheServiceName.getParent();
+        String containerName = containerServiceName.getSimpleName();
+        ServiceName templateCacheConfigurationServiceName = AbstractCacheConfigurationService.getServiceName(containerName, templateCacheName);
+        String cacheName = deploymentServiceName.getParent().getSimpleName() + deploymentServiceName.getSimpleName();
+        ServiceName cacheConfigurationServiceName = AbstractCacheConfigurationService.getServiceName(containerName, cacheName);
+        ServiceName cacheServiceName = CacheService.getServiceName(containerName, cacheName);
+
+        final InjectedValue<EmbeddedCacheManager> container = new InjectedValue<EmbeddedCacheManager>();
+        final InjectedValue<Configuration> config = new InjectedValue<Configuration>();
+        target.addService(cacheConfigurationServiceName, new WebSessionCacheConfigurationService(cacheName, container, config))
+                .addDependency(containerServiceName, EmbeddedCacheManager.class, container)
+                .addDependency(templateCacheConfigurationServiceName, Configuration.class, config)
+                .setInitialMode(ServiceController.Mode.ON_DEMAND)
+                .install()
+        ;
+        final InjectedValue<EmbeddedCacheManager> cacheContainer = new InjectedValue<EmbeddedCacheManager>();
+        CacheService.Dependencies dependencies = new CacheService.Dependencies() {
+            @Override
+            public EmbeddedCacheManager getCacheContainer() {
+                return cacheContainer.getValue();
+            }
+
+            @Override
+            public XAResourceRecoveryRegistry getRecoveryRegistry() {
+                return null;
+            }
+        };
+        target.addService(cacheServiceName, new CacheService<Object, Object>(cacheName, dependencies))
+                .addDependency(cacheConfigurationServiceName)
+                .addDependency(containerServiceName, EmbeddedCacheManager.class, cacheContainer)
+                .setInitialMode(ServiceController.Mode.ON_DEMAND)
+                .install()
+        ;
+        builder.addDependency(cacheServiceName, Cache.class, this.cache);
+        builder.addDependency(JVM_ROUTE_REGISTRY_SERVICE_NAME, Registry.class, this.registry);
+        builder.addDependency(SharedLocalYieldingClusterLockManagerService.getServiceName(containerName), SharedLocalYieldingClusterLockManager.class, this.lockManager);
+        return true;
     }
 
-    public void setSessionCacheSource(CacheSource source) {
-        this.sessionCacheSource = source;
+    @SuppressWarnings({ "unchecked", "rawtypes" })
+    @Override
+    public Collection<ServiceController<?>> installServices(ServiceTarget target) {
+        InjectedValue<Cache> cache = new InjectedValue<Cache>();
+        InjectedValue<Registry.RegistryEntryProvider> providerValue = new InjectedValue<Registry.RegistryEntryProvider>();
+        ServiceController<?> controller = target.addService(JVM_ROUTE_REGISTRY_SERVICE_NAME, new RegistryService(cache, providerValue))
+                .addDependency(CacheService.getServiceName(DEFAULT_CACHE_CONTAINER, null), Cache.class, cache)
+                .addDependency(DistributedCacheManagerFactoryService.JVM_ROUTE_REGISTRY_ENTRY_PROVIDER_SERVICE_NAME, Registry.RegistryEntryProvider.class, providerValue)
+                .setInitialMode(ServiceController.Mode.ON_DEMAND)
+                .install()
+        ;
+        return Collections.<ServiceController<?>>singleton(controller);
     }
 
-    public void setJvmRouteCacheSource(CacheSource source) {
-        this.jvmRouteCacheSource = source;
+    private ServiceName getCacheServiceName(ReplicationConfig config) {
+        ServiceName baseServiceName = EmbeddedCacheManagerService.getServiceName(null);
+        String cacheName = (config != null) ? config.getCacheName() : null;
+        ServiceName serviceName = ServiceName.parse((cacheName != null) ? cacheName : DEFAULT_CACHE_CONTAINER);
+        if (!baseServiceName.isParentOf(serviceName)) {
+            serviceName = baseServiceName.append(serviceName);
+        }
+        return (serviceName.length() < 4) ? serviceName.append(CacheContainer.DEFAULT_CACHE_NAME) : serviceName;
     }
 
-    public void setLockManagerSource(LockManagerSource source) {
-        this.lockManagerSource = source;
+    @SuppressWarnings("rawtypes")
+    public Injector<Registry> getRegistryInjector() {
+        return this.registry;
+    }
+
+    public Injector<SharedLocalYieldingClusterLockManager> getLockManagerInjector() {
+        return this.lockManager;
+    }
+
+    @SuppressWarnings("rawtypes")
+    public Injector<Cache> getCacheInjector() {
+        return this.cache;
     }
 
     public void setSessionAttributeMarshallerFactory(SessionAttributeMarshallerFactory marshallerFactory) {
@@ -130,83 +195,5 @@ public class DistributedCacheManagerFactory implements org.jboss.as.clustering.w
 
     public void setCacheInvoker(CacheInvoker invoker) {
         this.invoker = invoker;
-    }
-
-    private static class SessionKeyFactoryImpl implements SessionKeyFactory<SessionKeyImpl> {
-        private final LocalDistributableSessionManager manager;
-
-        public SessionKeyFactoryImpl(LocalDistributableSessionManager manager) {
-            this.manager = manager;
-        }
-
-        /**
-         * {@inheritDoc}
-         * @see org.jboss.as.clustering.web.infinispan.SessionKeyFactory#createKey(java.lang.String)
-         */
-        @Override
-        public SessionKeyImpl createKey(String sessionId) {
-            return new SessionKeyImpl(this.manager.getName(), sessionId);
-        }
-
-        /**
-         * {@inheritDoc}
-         * @see org.jboss.as.clustering.web.infinispan.SessionKeyFactory#ours(org.jboss.as.clustering.web.infinispan.SessionKey)
-         */
-        @Override
-        public boolean ours(SessionKeyImpl key) {
-            return this.manager.getName().equals(key.application);
-        }
-    }
-
-    public static class SessionKeyImpl implements SessionKey {
-        private static final long serialVersionUID = 398539176014850559L;
-
-        private final String application;
-        private final String sessionId;
-        private transient int hashCode;
-
-        public SessionKeyImpl(String application, String sessionId) {
-            this.application = application;
-            this.sessionId = sessionId;
-            this.computeHashCode();
-        }
-
-        /**
-         * {@inheritDoc}
-         * @see org.jboss.as.clustering.web.infinispan.SessionKey#getSessionId()
-         */
-        @Override
-        public String getSessionId() {
-            return this.sessionId;
-        }
-
-        @Override
-        public boolean equals(Object object) {
-            if ((object == null) || !(object instanceof SessionKeyImpl)) return false;
-
-            SessionKeyImpl key = (SessionKeyImpl) object;
-
-            return this.hashCode == key.hashCode && this.application.equals(key.application) && this.sessionId.equals(key.sessionId);
-        }
-
-        @Override
-        public int hashCode() {
-            return this.hashCode;
-        }
-
-        private void computeHashCode() {
-            this.hashCode = this.application.hashCode() ^ this.sessionId.hashCode();
-        }
-
-        @Override
-        public String toString() {
-            return String.format("%s/%s", this.application, this.sessionId);
-        }
-
-        private void readObject(java.io.ObjectInputStream in) throws IOException, ClassNotFoundException {
-            in.defaultReadObject();
-
-            this.computeHashCode();
-        }
     }
 }

@@ -24,6 +24,7 @@ package org.jboss.as.ejb3.component;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -37,6 +38,7 @@ import org.jboss.as.ee.component.BasicComponentCreateService;
 import org.jboss.as.ee.component.ComponentConfiguration;
 import org.jboss.as.ee.component.ViewConfiguration;
 import org.jboss.as.ee.component.ViewDescription;
+import org.jboss.as.ejb3.component.interceptors.ShutDownInterceptorFactory;
 import org.jboss.as.ejb3.deployment.ApplicationExceptions;
 import org.jboss.as.ejb3.remote.EJBRemoteTransactionsRepository;
 import org.jboss.as.ejb3.security.EJBSecurityMetaData;
@@ -55,6 +57,8 @@ import org.jboss.msc.value.InjectedValue;
 public class EJBComponentCreateService extends BasicComponentCreateService {
 
     private final Map<MethodTransactionAttributeKey, TransactionAttributeType> txAttrs;
+
+    private final Map<MethodTransactionAttributeKey, Integer> txTimeouts;
 
     private final TransactionManagementType transactionManagementType;
 
@@ -81,6 +85,8 @@ public class EJBComponentCreateService extends BasicComponentCreateService {
     private final String moduleName;
     private final String distinctName;
 
+    private final ShutDownInterceptorFactory shutDownInterceptorFactory;
+
     private final InjectedValue<EJBRemoteTransactionsRepository> ejbRemoteTransactionsRepository = new InjectedValue<EJBRemoteTransactionsRepository>();
 
     /**
@@ -100,8 +106,10 @@ public class EJBComponentCreateService extends BasicComponentCreateService {
         // CMTTx
         if (transactionManagementType.equals(TransactionManagementType.CONTAINER)) {
             this.txAttrs = new HashMap<MethodTransactionAttributeKey, TransactionAttributeType>();
+            this.txTimeouts = new HashMap<MethodTransactionAttributeKey, Integer>();
         } else {
             this.txAttrs = null;
+            this.txTimeouts = null;
         }
         // Setup the security metadata for the bean
         this.securityMetaData = new EJBSecurityMetaData(componentConfiguration);
@@ -109,11 +117,15 @@ public class EJBComponentCreateService extends BasicComponentCreateService {
         if (ejbComponentDescription.isTimerServiceApplicable()) {
             Map<Method, InterceptorFactory> timeoutInterceptors = new IdentityHashMap<Method, InterceptorFactory>();
             for (Method method : componentConfiguration.getDefinedComponentMethods()) {
-                timeoutInterceptors.put(method, Interceptors.getChainedInterceptorFactory(componentConfiguration.getAroundTimeoutInterceptors(method)));
+                if ((ejbComponentDescription.getTimeoutMethod() != null && ejbComponentDescription.getTimeoutMethod().equals(method)) ||
+                        ejbComponentDescription.getScheduleMethods().containsKey(method)) {
+                        final InterceptorFactory interceptorFactory = Interceptors.getChainedInterceptorFactory(componentConfiguration.getAroundTimeoutInterceptors(method));
+                        timeoutInterceptors.put(method, interceptorFactory);
+                }
             }
             this.timeoutInterceptors = timeoutInterceptors;
         } else {
-            timeoutInterceptors = null;
+            timeoutInterceptors = Collections.emptyMap();
         }
 
         List<ViewConfiguration> views = componentConfiguration.getViews();
@@ -121,19 +133,19 @@ public class EJBComponentCreateService extends BasicComponentCreateService {
             for (ViewConfiguration view : views) {
                 //TODO: Move this into a configurator
                 final EJBViewConfiguration ejbView = (EJBViewConfiguration) view;
-                    final MethodIntf viewType = ejbView.getMethodIntf();
-                    for (Method method : view.getProxyFactory().getCachedMethods()) {
-                        // TODO: proxy factory exposes non-public methods, is this a bug in the no-interface view?
-                        if (!Modifier.isPublic(method.getModifiers()))
-                            continue;
-                        final Method componentMethod = getComponentMethod(componentConfiguration, method.getName(), method.getParameterTypes());
-                        if (componentMethod != null) {
-                            this.processTxAttr(ejbComponentDescription, viewType, componentMethod);
-                        } else {
-                            this.processTxAttr(ejbComponentDescription, viewType, method);
-                        }
+                final MethodIntf viewType = ejbView.getMethodIntf();
+                for (Method method : view.getProxyFactory().getCachedMethods()) {
+                    // TODO: proxy factory exposes non-public methods, is this a bug in the no-interface view?
+                    if (!Modifier.isPublic(method.getModifiers()))
+                        continue;
+                    final Method componentMethod = getComponentMethod(componentConfiguration, method.getName(), method.getParameterTypes());
+                    if (componentMethod != null) {
+                        this.processTxAttr(ejbComponentDescription, viewType, componentMethod);
+                    } else {
+                        this.processTxAttr(ejbComponentDescription, viewType, method);
                     }
                 }
+            }
         }
 
         this.timeoutMethod = ejbComponentDescription.getTimeoutMethod();
@@ -163,6 +175,20 @@ public class EJBComponentCreateService extends BasicComponentCreateService {
         this.earApplicationName = componentConfiguration.getComponentDescription().getModuleDescription().getEarApplicationName();
         this.moduleName = componentConfiguration.getModuleName();
         this.distinctName = componentConfiguration.getComponentDescription().getModuleDescription().getDistinctName();
+        this.shutDownInterceptorFactory = ejbComponentDescription.getShutDownInterceptorFactory();
+    }
+
+    @Override
+    protected boolean requiresInterceptors(final Method method, final ComponentConfiguration componentConfiguration) {
+        if(super.requiresInterceptors(method, componentConfiguration)) {
+            return true;
+        }
+        final EJBComponentDescription ejbComponentDescription = (EJBComponentDescription)componentConfiguration.getComponentDescription();
+        if ((ejbComponentDescription.getTimeoutMethod() != null && ejbComponentDescription.getTimeoutMethod().equals(method)) ||
+                ejbComponentDescription.getScheduleMethods().containsKey(method)) {
+            return true;
+        }
+        return false;
     }
 
     private static Method getComponentMethod(final ComponentConfiguration componentConfiguration, final String name, final Class<?>[] parameterTypes) {
@@ -184,6 +210,10 @@ public class EJBComponentCreateService extends BasicComponentCreateService {
         return txAttrs;
     }
 
+    Map<MethodTransactionAttributeKey, Integer> getTxTimeouts() {
+        return txTimeouts;
+    }
+
     TransactionManagementType getTransactionManagementType() {
         return transactionManagementType;
     }
@@ -200,9 +230,13 @@ public class EJBComponentCreateService extends BasicComponentCreateService {
 
         String className = method.getDeclaringClass().getName();
         String methodName = method.getName();
-        TransactionAttributeType txAttr = ejbComponentDescription.getTransactionAttribute(methodIntf, className, methodName, toString(method.getParameterTypes()));
+        TransactionAttributeType txAttr = ejbComponentDescription.getTransactionAttributes().getAttribute(methodIntf, className, methodName, toString(method.getParameterTypes()));
         if (txAttr != TransactionAttributeType.REQUIRED) {
             txAttrs.put(new MethodTransactionAttributeKey(methodIntf, MethodIdentifier.getIdentifierForMethod(method)), txAttr);
+        }
+        Integer txTimeout = ejbComponentDescription.getTransactionTimeouts().getAttribute(methodIntf, className, methodName, toString(method.getParameterTypes()));
+        if (txTimeout != null) {
+            txTimeouts.put(new MethodTransactionAttributeKey(methodIntf, MethodIdentifier.getIdentifierForMethod(method)), txTimeout);
         }
     }
 
@@ -268,6 +302,10 @@ public class EJBComponentCreateService extends BasicComponentCreateService {
 
     public Injector<EJBRemoteTransactionsRepository> getEJBRemoteTransactionsRepositoryInjector() {
         return this.ejbRemoteTransactionsRepository;
+    }
+
+    public ShutDownInterceptorFactory getShutDownInterceptorFactory() {
+        return shutDownInterceptorFactory;
     }
 
     EJBRemoteTransactionsRepository getEJBRemoteTransactionsRepository() {

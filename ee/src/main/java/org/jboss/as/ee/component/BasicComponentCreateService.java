@@ -23,6 +23,7 @@
 package org.jboss.as.ee.component;
 
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.IdentityHashMap;
 import java.util.Map;
 
@@ -31,6 +32,7 @@ import org.jboss.as.server.deployment.DeploymentUnit;
 import org.jboss.invocation.InterceptorFactory;
 import org.jboss.invocation.Interceptors;
 import org.jboss.msc.service.Service;
+import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.service.StartContext;
 import org.jboss.msc.service.StartException;
 import org.jboss.msc.service.StopContext;
@@ -46,6 +48,7 @@ import static org.jboss.as.ee.EeMessages.MESSAGES;
 public class BasicComponentCreateService implements Service<Component> {
     private final InjectedValue<DeploymentUnit> deploymentUnit = new InjectedValue<DeploymentUnit>();
 
+    private final ServiceName serviceName;
     private final String componentName;
     private final Class<?> componentClass;
     private final InterceptorFactory postConstruct;
@@ -62,16 +65,23 @@ public class BasicComponentCreateService implements Service<Component> {
      * @param componentConfiguration the component configuration
      */
     public BasicComponentCreateService(final ComponentConfiguration componentConfiguration) {
+        serviceName = componentConfiguration.getComponentDescription().getCreateServiceName();
         componentName = componentConfiguration.getComponentName();
         postConstruct = Interceptors.getChainedInterceptorFactory(componentConfiguration.getPostConstructInterceptors());
         preDestroy = Interceptors.getChainedInterceptorFactory(componentConfiguration.getPreDestroyInterceptors());
         final IdentityHashMap<Method, InterceptorFactory> componentInterceptors = new IdentityHashMap<Method, InterceptorFactory>();
         for (Method method : componentConfiguration.getDefinedComponentMethods()) {
-            componentInterceptors.put(method, Interceptors.getChainedInterceptorFactory(componentConfiguration.getComponentInterceptors(method)));
+            if(requiresInterceptors(method, componentConfiguration)) {
+                componentInterceptors.put(method, Interceptors.getChainedInterceptorFactory(componentConfiguration.getComponentInterceptors(method)));
+            }
         }
         componentClass = componentConfiguration.getComponentClass();
         this.componentInterceptors = componentInterceptors;
         this.namespaceContextSelector = componentConfiguration.getNamespaceContextSelector();
+    }
+
+    protected boolean requiresInterceptors(final Method method, final ComponentConfiguration componentConfiguration) {
+        return Modifier.isPublic(method.getModifiers()) && componentConfiguration.getComponentDescription().isIntercepted();
     }
 
     /**
@@ -168,5 +178,9 @@ public class BasicComponentCreateService implements Service<Component> {
      */
     public NamespaceContextSelector getNamespaceContextSelector() {
         return namespaceContextSelector;
+    }
+
+    public ServiceName getServiceName() {
+        return this.serviceName;
     }
 }

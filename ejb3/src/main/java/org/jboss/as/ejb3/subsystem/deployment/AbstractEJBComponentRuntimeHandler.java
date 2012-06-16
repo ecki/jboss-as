@@ -43,17 +43,17 @@ import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.service.ServiceRegistry;
 
+import static org.jboss.as.ejb3.EjbMessages.MESSAGES;
 import static org.jboss.as.ejb3.subsystem.deployment.AbstractEJBComponentResourceDefinition.COMPONENT_CLASS_NAME;
 import static org.jboss.as.ejb3.subsystem.deployment.AbstractEJBComponentResourceDefinition.DECLARED_ROLES;
 import static org.jboss.as.ejb3.subsystem.deployment.AbstractEJBComponentResourceDefinition.POOL_AVAILABLE_COUNT;
 import static org.jboss.as.ejb3.subsystem.deployment.AbstractEJBComponentResourceDefinition.POOL_CREATE_COUNT;
 import static org.jboss.as.ejb3.subsystem.deployment.AbstractEJBComponentResourceDefinition.POOL_CURRENT_SIZE;
 import static org.jboss.as.ejb3.subsystem.deployment.AbstractEJBComponentResourceDefinition.POOL_MAX_SIZE;
+import static org.jboss.as.ejb3.subsystem.deployment.AbstractEJBComponentResourceDefinition.POOL_NAME;
 import static org.jboss.as.ejb3.subsystem.deployment.AbstractEJBComponentResourceDefinition.POOL_REMOVE_COUNT;
 import static org.jboss.as.ejb3.subsystem.deployment.AbstractEJBComponentResourceDefinition.RUN_AS_ROLE;
 import static org.jboss.as.ejb3.subsystem.deployment.AbstractEJBComponentResourceDefinition.SECURITY_DOMAIN;
-
-import static org.jboss.as.ejb3.EjbMessages.MESSAGES;
 /**
  * Base class for operation handlers that provide runtime management for {@link EJBComponent}s.
  *
@@ -130,23 +130,44 @@ public abstract class AbstractEJBComponentRuntimeHandler<T extends EJBComponent>
         } else if (componentType.hasTimer() && TimerAttributeDefinition.INSTANCE.getName().equals(attributeName)) {
             TimerAttributeDefinition.addTimers(component, context.getResult());
         } else if (hasPool && POOL_AVAILABLE_COUNT.getName().equals(attributeName)) {
-            int count = componentType.getPool(component).getAvailableCount();
-            context.getResult().set(count);
+            final Pool<?> pool = componentType.getPool(component);
+            final ModelNode result = context.getResult();
+            if (pool != null) {
+                result.set(pool.getAvailableCount());
+            }
         } else if (hasPool && POOL_CREATE_COUNT.getName().equals(attributeName)) {
-            int count = componentType.getPool(component).getCreateCount();
-            context.getResult().set(count);
+            final Pool<?> pool = componentType.getPool(component);
+            final ModelNode result = context.getResult();
+            if (pool != null) {
+                result.set(pool.getCreateCount());
+            }
+        } else if (hasPool && POOL_NAME.getName().equals(attributeName)) {
+            final String poolName = componentType.pooledComponent(component).getPoolName();
+            final ModelNode result = context.getResult();
+            if (poolName != null) {
+                result.set(poolName);
+            }
         } else if (hasPool && POOL_REMOVE_COUNT.getName().equals(attributeName)) {
-            int count = componentType.getPool(component).getRemoveCount();
-            context.getResult().set(count);
+            final Pool<?> pool = componentType.getPool(component);
+            final ModelNode result = context.getResult();
+            if (pool != null) {
+                result.set(pool.getRemoveCount());
+            }
         } else if (hasPool && POOL_CURRENT_SIZE.getName().equals(attributeName)) {
-            int size = componentType.getPool(component).getCurrentSize();
-            context.getResult().set(size);
+            final Pool<?> pool = componentType.getPool(component);
+            final ModelNode result = context.getResult();
+            if (pool != null) {
+                result.set(pool.getCurrentSize());
+            }
         } else if (hasPool && POOL_MAX_SIZE.getName().equals(attributeName)) {
-            int size = componentType.getPool(component).getMaxSize();
-            context.getResult().set(size);
+            final Pool<?> pool = componentType.getPool(component);
+            final ModelNode result = context.getResult();
+            if (pool != null) {
+                result.set(pool.getMaxSize());
+            }
         } else {
             // Bug; we were registered for an attribute but there is no code for handling it
-            throw new IllegalStateException(String.format("Unknown attribute %s", attributeName));
+            throw MESSAGES.unknownAttribute(attributeName);
         }
     }
 

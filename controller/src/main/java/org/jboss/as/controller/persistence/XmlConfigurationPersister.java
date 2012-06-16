@@ -22,6 +22,9 @@
 
 package org.jboss.as.controller.persistence;
 
+import static org.jboss.as.controller.ControllerLogger.ROOT_LOGGER;
+import static org.jboss.as.controller.ControllerMessages.MESSAGES;
+
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.Closeable;
@@ -29,7 +32,9 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import javax.xml.namespace.QName;
@@ -42,9 +47,6 @@ import org.jboss.staxmapper.XMLElementReader;
 import org.jboss.staxmapper.XMLElementWriter;
 import org.jboss.staxmapper.XMLMapper;
 
-import static org.jboss.as.controller.ControllerLogger.ROOT_LOGGER;
-import static org.jboss.as.controller.ControllerMessages.MESSAGES;
-
 /**
  * A configuration persister which uses an XML file for backing storage.
  *
@@ -55,8 +57,7 @@ public class XmlConfigurationPersister extends AbstractConfigurationPersister {
     private final File fileName;
     private final QName rootElement;
     private final XMLElementReader<List<ModelNode>> rootParser;
-    private QName additionalRootElement;
-    private XMLElementReader<List<ModelNode>> additionalParser;
+    private final Map<QName, XMLElementReader<List<ModelNode>>> additionalParsers;
 
     /**
      * Construct a new instance.
@@ -71,11 +72,13 @@ public class XmlConfigurationPersister extends AbstractConfigurationPersister {
         this.fileName = fileName;
         this.rootElement = rootElement;
         this.rootParser = rootParser;
+        additionalParsers = new HashMap<QName, XMLElementReader<List<ModelNode>>>();
     }
 
     public void registerAdditionalRootElement(final QName anotherRoot, final XMLElementReader<List<ModelNode>> parser){
-        additionalRootElement = anotherRoot;
-        additionalParser = parser;
+        synchronized (additionalParsers) {
+            additionalParsers.put(anotherRoot, parser);
+        }
     }
 
     /** {@inheritDoc} */
@@ -84,14 +87,25 @@ public class XmlConfigurationPersister extends AbstractConfigurationPersister {
         return new FilePersistenceResource(model, fileName, this);
     }
 
+    /**
+     * Unused and deprecated.
+     *
+     * @param model the model to store
+     * @param file the file to store to
+     * @throws ConfigurationPersistenceException
+     *
+     * @deprecated unused
+     */
+    @Deprecated
     protected void store(final ModelNode model, final File file) throws ConfigurationPersistenceException {
         try {
             final FileOutputStream fos = new FileOutputStream(file);
             try {
                 BufferedOutputStream output = new BufferedOutputStream(fos);
                 marshallAsXml(model, output);
+                output.flush();
+                fos.getFD().sync();
                 output.close();
-                fos.close();
             } finally {
                 safeClose(fos);
             }
@@ -105,8 +119,10 @@ public class XmlConfigurationPersister extends AbstractConfigurationPersister {
     public List<ModelNode> load() throws ConfigurationPersistenceException {
         final XMLMapper mapper = XMLMapper.Factory.create();
         mapper.registerRootElement(rootElement, rootParser);
-        if(additionalRootElement != null){
-            mapper.registerRootElement(additionalRootElement, additionalParser);
+        synchronized (additionalParsers) {
+            for (Map.Entry<QName, XMLElementReader<List<ModelNode>>> entry : additionalParsers.entrySet()) {
+                mapper.registerRootElement(entry.getKey(), entry.getValue());
+            }
         }
         final List<ModelNode> updates = new ArrayList<ModelNode>();
         try {

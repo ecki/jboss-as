@@ -21,9 +21,6 @@
  */
 package org.jboss.as.jpa.subsystem;
 
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADD;
-import static org.jboss.as.ejb3.subsystem.EJB3SubsystemModel.APPCLIENT;
-
 import java.util.List;
 import java.util.Locale;
 
@@ -45,12 +42,15 @@ import org.jboss.as.jpa.processor.PersistenceRefProcessor;
 import org.jboss.as.jpa.processor.PersistenceUnitDeploymentProcessor;
 import org.jboss.as.jpa.processor.PersistenceUnitParseProcessor;
 import org.jboss.as.jpa.service.JPAService;
+import org.jboss.as.jpa.service.JPAUserTransactionListenerService;
 import org.jboss.as.server.AbstractDeploymentChainStep;
 import org.jboss.as.server.DeploymentProcessorTarget;
 import org.jboss.as.server.deployment.Phase;
 import org.jboss.dmr.ModelNode;
 import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceTarget;
+
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADD;
 
 
 /**
@@ -77,8 +77,8 @@ class JPASubSystemAdd extends AbstractBoottimeAddStepHandler implements Descript
     private final PersistenceUnitRegistryImpl persistenceUnitRegistry;
 
     public JPASubSystemAdd(final PersistenceUnitRegistryImpl persistenceUnitRegistry) {
-        modelValidator.registerValidator(CommonAttributes.DEFAULT_DATASOURCE, new StringLengthValidator(0, Integer.MAX_VALUE, false, true));
-        runtimeValidator.registerValidator(CommonAttributes.DEFAULT_DATASOURCE, new StringLengthValidator(0, Integer.MAX_VALUE, false, false));
+        modelValidator.registerValidator(CommonAttributes.DEFAULT_DATASOURCE, new StringLengthValidator(0, Integer.MAX_VALUE, true, true));
+        runtimeValidator.registerValidator(CommonAttributes.DEFAULT_DATASOURCE, new StringLengthValidator(0, Integer.MAX_VALUE, true, false));
         this.persistenceUnitRegistry = persistenceUnitRegistry;
     }
 
@@ -86,9 +86,6 @@ class JPASubSystemAdd extends AbstractBoottimeAddStepHandler implements Descript
     protected void populateModel(ModelNode operation, ModelNode model) throws OperationFailedException {
         modelValidator.validate(operation);
         final ModelNode defaultDSNode = operation.require(CommonAttributes.DEFAULT_DATASOURCE);
-        if (operation.hasDefined(APPCLIENT)) {
-            model.get(APPCLIENT).set(operation.get(APPCLIENT));
-        }
         model.get(CommonAttributes.DEFAULT_DATASOURCE).set(defaultDSNode);
     }
 
@@ -96,7 +93,6 @@ class JPASubSystemAdd extends AbstractBoottimeAddStepHandler implements Descript
         OperationFailedException {
 
         runtimeValidator.validate(operation.resolve());
-        final boolean appclient = model.hasDefined(APPCLIENT) && model.get(APPCLIENT).asBoolean();
         context.addStep(new AbstractDeploymentChainStep() {
             protected void execute(DeploymentProcessorTarget processorTarget) {
 
@@ -105,21 +101,21 @@ class JPASubSystemAdd extends AbstractBoottimeAddStepHandler implements Descript
                     PersistenceProviderResolverImpl.getInstance());
 
                 // handles parsing of persistence.xml
-                processorTarget.addDeploymentProcessor(Phase.PARSE, Phase.PARSE_PERSISTENCE_UNIT, new PersistenceUnitParseProcessor());
+                processorTarget.addDeploymentProcessor(JPAExtension.SUBSYSTEM_NAME, Phase.PARSE, Phase.PARSE_PERSISTENCE_UNIT, new PersistenceUnitParseProcessor());
                 // handles persistence unit / context annotations in components
-                processorTarget.addDeploymentProcessor(Phase.PARSE, Phase.PARSE_PERSISTENCE_ANNOTATION, new JPAAnnotationParseProcessor());
+                processorTarget.addDeploymentProcessor(JPAExtension.SUBSYSTEM_NAME, Phase.DEPENDENCIES, Phase.DEPENDENCIES_PERSISTENCE_ANNOTATION, new JPAAnnotationParseProcessor());
                 // injects JPA dependencies into an application
-                processorTarget.addDeploymentProcessor(Phase.DEPENDENCIES, Phase.DEPENDENCIES_JPA, new JPADependencyProcessor());
+                processorTarget.addDeploymentProcessor(JPAExtension.SUBSYSTEM_NAME, Phase.DEPENDENCIES, Phase.DEPENDENCIES_JPA, new JPADependencyProcessor());
                 // handles persistence unit / context references from deployment descriptors
-                processorTarget.addDeploymentProcessor(Phase.POST_MODULE, Phase.POST_MODULE_PERSISTENCE_REF, new PersistenceRefProcessor());
+                processorTarget.addDeploymentProcessor(JPAExtension.SUBSYSTEM_NAME, Phase.POST_MODULE, Phase.POST_MODULE_PERSISTENCE_REF, new PersistenceRefProcessor());
                 // handle ClassFileTransformer
-                processorTarget.addDeploymentProcessor(Phase.POST_MODULE, Phase.POST_MODULE_PERSISTENCE_CLASS_FILE_TRANSFORMER, new JPAClassFileTransformerProcessor());
+                processorTarget.addDeploymentProcessor(JPAExtension.SUBSYSTEM_NAME, Phase.POST_MODULE, Phase.POST_MODULE_PERSISTENCE_CLASS_FILE_TRANSFORMER, new JPAClassFileTransformerProcessor());
                 // registers listeners/interceptors on session beans
-                processorTarget.addDeploymentProcessor(Phase.INSTALL, Phase.INSTALL_JPA_INTERCEPTORS, new JPAInterceptorProcessor());
+                processorTarget.addDeploymentProcessor(JPAExtension.SUBSYSTEM_NAME, Phase.INSTALL, Phase.INSTALL_JPA_INTERCEPTORS, new JPAInterceptorProcessor());
                 // handles deploying a persistence provider
-                processorTarget.addDeploymentProcessor(Phase.INSTALL, Phase.INSTALL_PERSISTENCE_PROVIDER, new PersistenceProviderProcessor());
+                processorTarget.addDeploymentProcessor(JPAExtension.SUBSYSTEM_NAME, Phase.INSTALL, Phase.INSTALL_PERSISTENCE_PROVIDER, new PersistenceProviderProcessor());
                 // handles pu deployment (starts pu service)
-                processorTarget.addDeploymentProcessor(Phase.INSTALL, Phase.INSTALL_PERSISTENTUNIT, new PersistenceUnitDeploymentProcessor(persistenceUnitRegistry));
+                processorTarget.addDeploymentProcessor(JPAExtension.SUBSYSTEM_NAME, Phase.INSTALL, Phase.INSTALL_PERSISTENTUNIT, new PersistenceUnitDeploymentProcessor(persistenceUnitRegistry));
             }
         }, OperationContext.Stage.RUNTIME);
 
@@ -127,6 +123,7 @@ class JPASubSystemAdd extends AbstractBoottimeAddStepHandler implements Descript
         final String dataSourceName = defaultDSNode.resolve().asString();
         final ServiceTarget target = context.getServiceTarget();
         newControllers.add(JPAService.addService(target, dataSourceName, verificationHandler));
+        newControllers.add(JPAUserTransactionListenerService.addService(target, verificationHandler));
     }
 
     @Override

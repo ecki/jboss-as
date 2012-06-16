@@ -22,24 +22,40 @@
 
 package org.jboss.as.test.integration.ejb.async;
 
-import javax.ejb.AsyncResult;
-import javax.ejb.Asynchronous;
-import javax.ejb.Stateless;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
+import javax.annotation.Resource;
+import javax.ejb.AsyncResult;
+import javax.ejb.Asynchronous;
+import javax.ejb.EJB;
+import javax.ejb.LocalBean;
+import javax.ejb.SessionContext;
+import javax.ejb.Stateless;
+import javax.inject.Inject;
+
+
 /**
- * stateful session bean
+ * Stateless session bean invoked asynchronously.
  */
 @Stateless
 @Asynchronous
-public class AsyncBean {
-
+@LocalBean
+public class AsyncBean implements AsyncBeanCancelRemoteInterface {
     public static volatile boolean voidMethodCalled = false;
     public static volatile boolean futureMethodCalled = false;
 
-    public void asyncMethod(CountDownLatch latch,CountDownLatch latch2) throws InterruptedException {
+    @Inject
+    private RequestScopedBean requestScopedBean;
+    
+    @Resource
+    SessionContext ctx;
+    
+    @EJB
+    AsyncBeanSynchronizeSingletonRemote synchronizeBean;
+
+    public void asyncMethod(CountDownLatch latch, CountDownLatch latch2) throws InterruptedException {
         latch.await(5, TimeUnit.SECONDS);
         voidMethodCalled = true;
         latch2.countDown();
@@ -51,4 +67,41 @@ public class AsyncBean {
         return new AsyncResult<Boolean>(true);
     }
 
+    public Future<Integer> testRequestScopeActive(CountDownLatch latch) throws InterruptedException {
+        latch.await(5, TimeUnit.SECONDS);
+        requestScopedBean.setState(20);
+        return new AsyncResult<Integer>(requestScopedBean.getState());
+    }
+
+    public Future<String> asyncCancelMethod(CountDownLatch latch, CountDownLatch latch2) throws InterruptedException {
+        String result;
+        result = ctx.wasCancelCalled() ? "true" : "false";
+        
+        latch.countDown();
+        latch2.await(5, TimeUnit.SECONDS);
+        
+        result += ";";
+        result += ctx.wasCancelCalled() ? "true" : "false";
+        return new AsyncResult<String>(result);
+    }
+    
+    public Future<String> asyncRemoteCancelMethod() throws InterruptedException {
+        String result = "";
+        result = ctx.wasCancelCalled() ? "true" : "false";
+        
+        synchronizeBean.latchCountDown();
+        synchronizeBean.latch2AwaitSeconds(5);
+        
+        result += ";";
+
+        result += ctx.wasCancelCalled() ? "true" : "false";
+        return new AsyncResult<String>(result);
+    }
+    
+    public Future<String> asyncMethodWithException(boolean isException) {
+        if(isException) {
+            throw new IllegalArgumentException(); //some exception is thrown
+        }
+        return new AsyncResult<String>("Hi");
+    }
 }

@@ -21,6 +21,9 @@
  */
 package org.jboss.as.test.integration.management.cli;
 
+import org.jboss.as.test.integration.management.base.AbstractCliTestBase;
+
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import java.io.File;
@@ -90,13 +93,13 @@ public class BatchTestCase extends AbstractCliTestBase {
         warFiles[2] = new File(tempDir + File.separator + "deployment2.war");
         new ZipExporterImpl(wars[2]).exportTo(warFiles[2], true);
 
-        AbstractCliTestBase.before();
+        AbstractCliTestBase.initCLI();
     }
 
     @AfterClass
     public static void after() throws Exception {
         for (File warFile : warFiles) warFile.delete();
-        AbstractCliTestBase.after();
+        AbstractCliTestBase.closeCLI();
     }
 
     @Test
@@ -105,16 +108,16 @@ public class BatchTestCase extends AbstractCliTestBase {
         // test a batch with two deployments
 
         cli.sendLine("batch");
-        cli.sendLine("deploy " + warFiles[0].getAbsolutePath(), true);
-        cli.sendLine("deploy " + warFiles[1].getAbsolutePath(), true);
+        cli.sendLine("deploy " + warFiles[0].getAbsolutePath());
+        cli.sendLine("deploy " + warFiles[1].getAbsolutePath());
 
         // check none of the archives are deployed yet
-        assertUndeployed(getBaseURL(url) + "deployment0/SimpleServlet");
-        assertUndeployed(getBaseURL(url) + "deployment1/SimpleServlet");
+        assertTrue(checkUndeployed(getBaseURL(url) + "deployment0/SimpleServlet"));
+        assertTrue(checkUndeployed(getBaseURL(url) + "deployment1/SimpleServlet"));
 
         cli.sendLine("run-batch");
 
-        String line = cli.readLine(WAIT_TIMEOUT * 5);
+        String line = cli.readOutput();
         assertTrue(line.contains("The batch executed successfully"));
 
         // check that now both are deployed
@@ -137,8 +140,8 @@ public class BatchTestCase extends AbstractCliTestBase {
 
         cli.sendLine("run-batch");
         // check that both undeployed
-        assertUndeployed(getBaseURL(url) + "deployment0/SimpleServlet");
-        assertUndeployed(getBaseURL(url) + "deployment1/SimpleServlet");
+        assertTrue(checkUndeployed(getBaseURL(url) + "deployment0/SimpleServlet"));
+        assertTrue(checkUndeployed(getBaseURL(url) + "deployment1/SimpleServlet"));
     }
 
     @Test
@@ -146,33 +149,33 @@ public class BatchTestCase extends AbstractCliTestBase {
 
         // test rollback of a batch with corrupted deployment
         cli.sendLine("batch");
-        cli.sendLine("deploy " + warFiles[0].getAbsolutePath(), true);
-        cli.sendLine("deploy " + warFiles[2].getAbsolutePath(), true);
+        cli.sendLine("deploy " + warFiles[0].getAbsolutePath());
+        cli.sendLine("deploy " + warFiles[2].getAbsolutePath());
 
         // check none of the archives are deployed yet
-        assertUndeployed(getBaseURL(url) + "deployment0/SimpleServlet");
-        assertUndeployed(getBaseURL(url) + "deployment2/SimpleServlet");
+        assertTrue(checkUndeployed(getBaseURL(url) + "deployment0/SimpleServlet"));
+        assertTrue(checkUndeployed(getBaseURL(url) + "deployment2/SimpleServlet"));
 
         // this should fail
-        cli.sendLine("run-batch");
+        cli.sendLine("run-batch", true);
 
-        String line = cli.readLine(WAIT_TIMEOUT);
+        String line = cli.readOutput();
         assertTrue("Batch did not fail.", line.contains("Failed to execute batch"));
 
         // check that still none of the archives are deployed
-        assertUndeployed(getBaseURL(url) + "deployment0/SimpleServlet");
-        assertUndeployed(getBaseURL(url) + "deployment2/SimpleServlet");
+        assertTrue(checkUndeployed(getBaseURL(url) + "deployment0/SimpleServlet"));
+        assertTrue(checkUndeployed(getBaseURL(url) + "deployment2/SimpleServlet"));
 
         cli.sendLine("discard-batch");
 
         // check that the rollback was clean and we can redeploy correct artifact
-        cli.sendLine("deploy " + warFiles[0].getAbsolutePath(), true);
+        cli.sendLine("deploy " + warFiles[0].getAbsolutePath());
         //line = cli.readLine(1000);
         //assertTrue("Deployment failed: " + line, line.indexOf("deployed successfully") >= 0);
         String response = HttpRequest.get(getBaseURL(url) + "deployment0/SimpleServlet", 1000, 10, TimeUnit.SECONDS);
         assertTrue("Invalid response: " + response, response.indexOf("SimpleServlet") >=0);
         // undeploy
         cli.sendLine("undeploy deployment0.war");
-        assertUndeployed(getBaseURL(url) + "deployment0/SimpleServlet");
+        assertTrue(checkUndeployed(getBaseURL(url) + "deployment0/SimpleServlet"));
     }
 }

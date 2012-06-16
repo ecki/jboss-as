@@ -22,10 +22,11 @@
 
 package org.jboss.as.messaging.jms;
 
+import org.hornetq.core.security.HornetQPrincipal;
 import org.hornetq.core.server.HornetQServer;
 import org.hornetq.jms.server.JMSServerManager;
 import org.hornetq.jms.server.impl.JMSServerManagerImpl;
-import org.jboss.as.messaging.MessagingServices;
+import org.jboss.as.messaging.HornetQDefaultCredentials;
 import org.jboss.msc.service.Service;
 import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceController.Mode;
@@ -70,6 +71,11 @@ public class JMSService implements Service<JMSServerManager> {
                 final ClassLoader loader = getClass().getClassLoader();
                 SecurityActions.setContextClassLoader(loader);
                 jmsServer.start();
+
+                // FIXME - this check is a work-around for AS7-3658
+                if (!hornetQServer.getValue().getConfiguration().isBackup()) {
+                    hornetQServer.getValue().getRemotingService().allowInvmSecurityOverride(new HornetQPrincipal(HornetQDefaultCredentials.getUsername(), HornetQDefaultCredentials.getPassword()));
+                }
             } finally {
                 SecurityActions.setContextClassLoader(null);
             }

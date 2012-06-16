@@ -22,17 +22,21 @@
 
 package org.jboss.as.controller.registry;
 
+import static org.jboss.as.controller.ControllerMessages.MESSAGES;
+
 import java.util.EnumSet;
 
 import org.jboss.as.controller.AttributeDefinition;
+import org.jboss.as.controller.OperationDefinition;
 import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.PathAddress;
 import org.jboss.as.controller.PathElement;
 import org.jboss.as.controller.ProxyController;
 import org.jboss.as.controller.ResourceDefinition;
 import org.jboss.as.controller.descriptions.DescriptionProvider;
-
-import static org.jboss.as.controller.ControllerMessages.MESSAGES;
+import org.jboss.as.controller.descriptions.OverrideDescriptionProvider;
+import org.jboss.as.controller.descriptions.ResourceDescriptionResolver;
+import org.jboss.dmr.ModelType;
 
 /**
  * A registration for a management resource which consists of a resource description plus registered operation handlers.
@@ -42,13 +46,23 @@ import static org.jboss.as.controller.ControllerMessages.MESSAGES;
 public interface ManagementResourceRegistration extends ImmutableManagementResourceRegistration {
 
     /**
+     * Get a specifically named resource that overrides this {@link PathElement#WILDCARD_VALUE wildcard registration}
+     * by adding additional attributes, operations or child types.
+     *
+     * @param name the specific name of the resource. Cannot be {@code null} or {@link PathElement#WILDCARD_VALUE}
+     *
+     * @return the resource registration, <code>null</code> if there is none
+     */
+
+    ManagementResourceRegistration getOverrideModel(String name);
+    /**
      * Get a sub model registration.
      * <p>This method overrides the superinterface method of the same name in order to require
      * that the returned registration be mutable.
      * </p>
      *
      * @param address the address, relative to this node
-     * @return the node registration, <code>null</code> if there is none
+     * @return the resource registration, <code>null</code> if there is none
      */
     @Override
     ManagementResourceRegistration getSubModel(PathAddress address);
@@ -59,11 +73,13 @@ public interface ManagementResourceRegistration extends ImmutableManagementResou
      * @param address the address of the submodel (may include a wildcard)
      * @param descriptionProvider source for descriptive information describing this
      *                            portion of the model (must not be {@code null})
-     * @return a model node registration which may be used to add operations
+     * @return a resource registration which may be used to add attributes, operations and sub-models
      *
      * @throws IllegalArgumentException if a submodel is already registered at {@code address}
      * @throws IllegalStateException if {@link #isRuntimeOnly()} returns {@code true}
+     * @deprecated use {@link ManagementResourceRegistration#registerSubModel(org.jboss.as.controller.ResourceDefinition)}
      */
+    @Deprecated
     ManagementResourceRegistration registerSubModel(PathElement address, DescriptionProvider descriptionProvider);
 
     /**
@@ -74,7 +90,7 @@ public interface ManagementResourceRegistration extends ImmutableManagementResou
      *
      * @param resourceDefinition source for descriptive information describing this
      *                            portion of the model (must not be {@code null})
-     * @return a model node registration which may be used to add operations
+     * @return a resource registration which may be used to add attributes, operations and sub-models
      *
      * @throws IllegalArgumentException if a submodel is already registered at {@code address}
      * @throws IllegalStateException if {@link #isRuntimeOnly()} returns {@code true}
@@ -82,18 +98,53 @@ public interface ManagementResourceRegistration extends ImmutableManagementResou
     ManagementResourceRegistration registerSubModel(ResourceDefinition resourceDefinition);
 
     /**
-     * Register the existence of an addressable sub-node of this model node.
+     * Unregister the existence of an addressable sub-resource of this resource.
      *
-     * @param address the address of the submodel (may include a wildcard)
-     * @param subModel registry for the submodel. Must have been created by the same {@link Factory} that
-     *                 created this ManagementResourceRegistration
-     *
-     * @throws IllegalArgumentException if a submodel is already registered at {@code address} or if
-     *              {@code subModel} was created by a different {@link Factory} than the creator of
-     *              this object
+     * @param address the child of this registry that should no longer be available
      */
-    @Deprecated
-    void registerSubModel(PathElement address, ManagementResourceRegistration subModel);
+    void unregisterSubModel(PathElement address);
+
+    /**
+     * Gets whether this registration will always throw an exception if
+     * {@link #registerOverrideModel(String, OverrideDescriptionProvider)} is invoked. An exception will always
+     * be thrown for root resource registrations, {@link PathElement#WILDCARD_VALUE non-wildcard registrations}, or
+     * {@link #isRemote() remote registrations}.
+     *
+     * @return {@code true} if an exception will not always be thrown; {@code false} if it will
+     */
+    boolean isAllowsOverride();
+
+
+    /**
+     * Sets whether this model node only exists in the runtime and has no representation in the
+     * persistent configuration model.
+     *
+     * @param runtimeOnly {@code true} if the model node will have no representation in the
+     * persistent configuration model; {@code false} otherwise
+     */
+    void setRuntimeOnly(final boolean runtimeOnly);
+
+    /**
+     * Register a specifically named resource that overrides this {@link PathElement#WILDCARD_VALUE wildcard registration}
+     * by adding additional attributes, operations or child types.
+     *
+     * @param name the specific name of the resource. Cannot be {@code null} or {@link PathElement#WILDCARD_VALUE}
+     * @param descriptionProvider provider for descriptions of the additional attributes or child types
+     *
+     * @return a resource registration which may be used to add attributes, operations and sub-models
+     *
+     * @throws IllegalArgumentException if either parameter is null or if there is already a registration under {@code name}
+     * @throws IllegalStateException if {@link #isRuntimeOnly()} returns {@code true} or if {@link #isAllowsOverride()} returns false
+     */
+    ManagementResourceRegistration registerOverrideModel(final String name, final OverrideDescriptionProvider descriptionProvider);
+
+    /**
+     * Unregister a specifically named resource that overrides a {@link PathElement#WILDCARD_VALUE wildcard registration}
+     * by adding additional attributes, operations or child types.
+     *
+     * @param name the specific name of the resource. Cannot be {@code null} or {@link PathElement#WILDCARD_VALUE}
+     */
+    void unregisterOverrideModel(final String name);
 
     /**
      * Register an operation handler for this resource.
@@ -139,6 +190,19 @@ public interface ManagementResourceRegistration extends ImmutableManagementResou
      */
     void registerOperationHandler(String operationName, OperationStepHandler handler, DescriptionProvider descriptionProvider, boolean inherited, OperationEntry.EntryType entryType);
 
+
+    /**
+     * Register an operation handler for this resource.
+     *
+     * @param operationName the operation name
+     * @param handler the operation handler
+     * @param descriptionProvider the description provider for this operation
+     * @param inherited {@code true} if the operation is inherited to child nodes, {@code false} otherwise
+     * @param flags operational modifier flags for this operation (e.g. read-only)
+     * @throws IllegalArgumentException if either parameter is {@code null}
+     */
+    void registerOperationHandler(String operationName, OperationStepHandler handler, DescriptionProvider descriptionProvider, boolean inherited, EnumSet<OperationEntry.Flag> flags);
+
     /**
      * Register an operation handler for this resource.
      *
@@ -152,6 +216,31 @@ public interface ManagementResourceRegistration extends ImmutableManagementResou
      */
     void registerOperationHandler(String operationName, OperationStepHandler handler, DescriptionProvider descriptionProvider, boolean inherited, OperationEntry.EntryType entryType, EnumSet<OperationEntry.Flag> flags);
 
+    /**
+     * Register an operation handler for this resource.
+     *
+     * @param definition the definition of operation
+     * @param handler    the operation handler
+     */
+    void registerOperationHandler(OperationDefinition definition, OperationStepHandler handler);
+
+    /**
+     * Register an operation handler for this resource.
+     *
+     * @param definition the definition of operation
+     * @param handler    the operation handler
+     * @param inherited  {@code true} if the operation is inherited to child nodes, {@code false} otherwise
+     */
+    void registerOperationHandler(OperationDefinition definition, OperationStepHandler handler, boolean inherited);
+
+    /**
+     * Unregister an operation handler for this resource.
+     *
+     * @param operationName       the operation name
+     * @throws IllegalArgumentException if operationName is not registered
+     */
+    void unregisterOperationHandler(final String operationName);
+
 
     /**
      * Records that the given attribute can be both read from and written to, and
@@ -163,7 +252,9 @@ public interface ManagementResourceRegistration extends ImmutableManagementResou
      * @param writeHandler the handler for attribute writes. Cannot be {@code null}
      * @param storage the storage type for this attribute
      * @throws IllegalArgumentException if {@code attributeName} or {@code writeHandler} are {@code null}
+     * @deprecated use {@link ManagementResourceRegistration#registerReadWriteAttribute(org.jboss.as.controller.AttributeDefinition, org.jboss.as.controller.OperationStepHandler, org.jboss.as.controller.OperationStepHandler)}
      */
+    @Deprecated
     void registerReadWriteAttribute(String attributeName, OperationStepHandler readHandler, OperationStepHandler writeHandler, AttributeAccess.Storage storage);
 
     /**
@@ -178,7 +269,9 @@ public interface ManagementResourceRegistration extends ImmutableManagementResou
      * @param writeHandler the handler for attribute writes. Cannot be {@code null}
      * @param flags additional flags describing this attribute
      * @throws IllegalArgumentException if {@code attributeName} or {@code writeHandler} are {@code null}
+     * @deprecated use {@link ManagementResourceRegistration#registerReadWriteAttribute(org.jboss.as.controller.AttributeDefinition, org.jboss.as.controller.OperationStepHandler, org.jboss.as.controller.OperationStepHandler)}
      */
+     @Deprecated
     void registerReadWriteAttribute(String attributeName, OperationStepHandler readHandler, OperationStepHandler writeHandler,
                                     EnumSet<AttributeAccess.Flag> flags);
 
@@ -207,7 +300,9 @@ public interface ManagementResourceRegistration extends ImmutableManagementResou
      *                    in which case the default handling is used
      * @param storage the storage type for this attribute
      * @throws IllegalArgumentException if {@code attributeName} is {@code null}
+     * @deprecated use {@link ManagementResourceRegistration#registerReadOnlyAttribute(org.jboss.as.controller.AttributeDefinition, org.jboss.as.controller.OperationStepHandler)}
      */
+    @Deprecated
     void registerReadOnlyAttribute(String attributeName, OperationStepHandler readHandler, AttributeAccess.Storage storage);
 
     /**
@@ -221,7 +316,9 @@ public interface ManagementResourceRegistration extends ImmutableManagementResou
      *                    in which case the default handling is used
      * @param flags additional flags describing this attribute
      * @throws IllegalArgumentException if {@code attributeName} is {@code null}
-     */
+     * @deprecated use {@link ManagementResourceRegistration#registerReadOnlyAttribute(org.jboss.as.controller.AttributeDefinition, org.jboss.as.controller.OperationStepHandler)}
+      */
+    @Deprecated
     void registerReadOnlyAttribute(String attributeName, OperationStepHandler readHandler, EnumSet<AttributeAccess.Flag> flags);
 
     /**
@@ -245,7 +342,9 @@ public interface ManagementResourceRegistration extends ImmutableManagementResou
      * @param metricHandler the handler for attribute reads. Cannot be {@code null}
      *
      * @throws IllegalArgumentException if {@code attributeName} or {@code metricHandler} are {@code null}
+     * @deprecated use {@link ManagementResourceRegistration#registerMetric(org.jboss.as.controller.AttributeDefinition, org.jboss.as.controller.OperationStepHandler)}
      */
+    @Deprecated
     void registerMetric(String attributeName, OperationStepHandler metricHandler);
 
     /**
@@ -266,8 +365,18 @@ public interface ManagementResourceRegistration extends ImmutableManagementResou
      * @param flags additional flags describing this attribute
      *
      * @throws IllegalArgumentException if {@code attributeName} or {@code metricHandler} are {@code null}
+     * @deprecated use {@link ManagementResourceRegistration#registerMetric(org.jboss.as.controller.AttributeDefinition, org.jboss.as.controller.OperationStepHandler)}
      */
     void registerMetric(String attributeName, OperationStepHandler metricHandler, EnumSet<AttributeAccess.Flag> flags);
+
+
+    /**
+     * Remove that the given attribute if present.
+     *
+     * @param attributeName the name of the attribute. Cannot be {@code null}
+     *
+     */
+    void unregisterAttribute(String attributeName);
 
     /**
      * Register a proxy controller.
@@ -284,7 +393,7 @@ public interface ManagementResourceRegistration extends ImmutableManagementResou
      */
     void unregisterProxyController(PathElement address);
 
-
+    //String getValueString();
 
     /**
      * A factory for creating a new, root model node registration.
@@ -325,6 +434,11 @@ public interface ManagementResourceRegistration extends ImmutableManagementResou
                 public void registerAttributes(ManagementResourceRegistration resourceRegistration) {
                     //  no-op
                 }
+
+                @Override
+                public void registerChildren(ManagementResourceRegistration resourceRegistration) {
+                    //  no-op
+                }
             };
             return new ConcreteResourceRegistration(null, null, rootResourceDefinition, false);
         }
@@ -339,7 +453,11 @@ public interface ManagementResourceRegistration extends ImmutableManagementResou
             if (resourceDefinition == null) {
                 throw MESSAGES.nullVar("rootModelDescriptionProviderFactory");
             }
-            return new ConcreteResourceRegistration(null, null, resourceDefinition, false);
+            ConcreteResourceRegistration resourceRegistration = new ConcreteResourceRegistration(null, null, resourceDefinition, false);
+            resourceDefinition.registerAttributes(resourceRegistration);
+            resourceDefinition.registerOperations(resourceRegistration);
+            resourceDefinition.registerChildren(resourceRegistration);
+            return resourceRegistration;
         }
     }
 }

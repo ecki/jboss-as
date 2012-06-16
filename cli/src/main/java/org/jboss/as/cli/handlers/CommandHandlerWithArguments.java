@@ -21,13 +21,16 @@
  */
 package org.jboss.as.cli.handlers;
 
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.List;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 
 import org.jboss.as.cli.CommandArgument;
 import org.jboss.as.cli.CommandContext;
+import org.jboss.as.cli.CommandFormatException;
 import org.jboss.as.cli.CommandHandler;
 
 
@@ -37,47 +40,54 @@ import org.jboss.as.cli.CommandHandler;
  */
 public abstract class CommandHandlerWithArguments implements CommandHandler {
 
-    //private Set<String> argumentNames = Collections.emptySet();
-    //private int maxArgumentIndex = -1;
-    private List<CommandArgument> args = Collections.emptyList();
+    private int maxArgumentIndex = -1;
+    private Map<String, CommandArgument> args = Collections.emptyMap();
 
     public void addArgument(CommandArgument arg) {
-/*        if(arg.getIndex() > -1) {
+        if(arg.getIndex() > -1) {
             maxArgumentIndex = arg.getIndex() > maxArgumentIndex ? arg.getIndex() : maxArgumentIndex;
         }
-*/
+
         if(arg.getFullName() == null) {
             throw new IllegalArgumentException("Full name can't be null");
         }
-/*        if(argumentNames.isEmpty()) {
-            argumentNames = new HashSet<String>();
-        }
-        argumentNames.add(arg.getFullName());
-        if(arg.getShortName() != null) {
-            argumentNames.add(arg.getShortName());
-        }
-*/
         if(args.isEmpty()) {
-            args = new ArrayList<CommandArgument>();
+            args = new HashMap<String, CommandArgument>();
         }
-        args.add(arg);
-        //argCompleter.addArgument(arg);
+        args.put(arg.getFullName(), arg);
     }
 
     @Override
-    public boolean hasArgument(String name) {
-        //return argumentNames.contains(name);
-        throw new UnsupportedOperationException("not used yet");
+    public CommandArgument getArgument(CommandContext ctx, String name) {
+        return args.get(name);
     }
 
     @Override
-    public boolean hasArgument(int index) {
+    public boolean hasArgument(CommandContext ctx, String name) {
+        return args.containsKey(name);
+    }
+
+    @Override
+    public boolean hasArgument(CommandContext ctx, int index) {
         //return index <= maxArgumentIndex;
         throw new UnsupportedOperationException("not used yet");
     }
 
     @Override
     public Collection<CommandArgument> getArguments(CommandContext ctx) {
-        return this.args;
+        return this.args.values();
+    }
+
+    protected void recognizeArguments(CommandContext ctx) throws CommandFormatException {
+        final Set<String> specifiedNames = ctx.getParsedCommandLine().getPropertyNames();
+        if(!args.keySet().containsAll(specifiedNames)) {
+            Collection<String> unrecognized = new HashSet<String>(specifiedNames);
+            unrecognized.removeAll(args.keySet());
+            throw new CommandFormatException("Unrecognized arguments: " + unrecognized);
+        }
+        if(ctx.getParsedCommandLine().getOtherProperties().size() -1 > this.maxArgumentIndex) {
+            throw new CommandFormatException("The command accepts " + (this.maxArgumentIndex + 1) + " unnamed argument(s) but received: "
+                    + ctx.getParsedCommandLine().getOtherProperties());
+        }
     }
 }

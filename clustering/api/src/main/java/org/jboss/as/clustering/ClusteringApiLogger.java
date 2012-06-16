@@ -22,16 +22,16 @@
 
 package org.jboss.as.clustering;
 
+import static org.jboss.logging.Logger.Level.ERROR;
+import static org.jboss.logging.Logger.Level.WARN;
+
+import java.io.Serializable;
+
 import org.jboss.logging.BasicLogger;
 import org.jboss.logging.LogMessage;
 import org.jboss.logging.Logger;
 import org.jboss.logging.Message;
 import org.jboss.logging.MessageLogger;
-
-import java.io.Serializable;
-
-import static org.jboss.logging.Logger.Level.ERROR;
-import static org.jboss.logging.Logger.Level.WARN;
 
 /**
  * Date: 26.08.2011
@@ -55,7 +55,7 @@ public interface ClusteringApiLogger extends BasicLogger {
      * @param categoryName the category name.
      */
     @LogMessage(level = ERROR)
-    @Message(id = 10240, value = "Caught InterruptedException; Failing request by %s to lock %s")
+    @Message(id = 10200, value = "Caught InterruptedException; Failing request by %s to lock %s")
     void caughtInterruptedException(Object caller, Serializable categoryName);
 
 
@@ -63,6 +63,6 @@ public interface ClusteringApiLogger extends BasicLogger {
      * Logs a warning message indicating a call to {@code remoteLock} was called from itself.
      */
     @LogMessage(level = WARN)
-    @Message(id = 10241, value = "Received remoteLock call from self")
+    @Message(id = 10201, value = "Received remoteLock call from self")
     void receivedRemoteLockFromSelf();
 }

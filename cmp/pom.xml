@@ -31,7 +31,7 @@
     <parent>
         <groupId>org.jboss.as</groupId>
         <artifactId>jboss-as-parent</artifactId>
-        <version>7.1.0.CR1-SNAPSHOT</version>
+        <version>7.2.0.Alpha1-SNAPSHOT</version>
     </parent>
 
     <artifactId>jboss-as-cmp</artifactId>
@@ -45,20 +45,9 @@
                 <artifactId>javacc-maven-plugin</artifactId>
                 <executions>
                     <execution>
-                        <id>jjtree-jbossql</id>
+                        <id>jjtree-javacc-jbossql</id>
                         <goals>
-                            <goal>jjtree</goal>
-                        </goals>
-                        <configuration>
-                            <includes>
-                                <include>org/jboss/as/cmp/ejbql/JBossQLParser.jjt</include>
-                            </includes>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <id>jjtree-ejbql</id>
-                        <goals>
-                            <goal>jjtree</goal>
+                            <goal>jjtree-javacc</goal>
                         </goals>
                         <configuration>
                             <includes>
@@ -67,12 +56,33 @@
                         </configuration>
                     </execution>
                     <execution>
-                        <id>javacc</id>
+                        <id>jjtree-javacc-ejbql</id>
                         <goals>
-                            <goal>javacc</goal>
+                            <goal>jjtree-javacc</goal>
                         </goals>
                         <configuration>
-                            <sourceDirectory>${project.build.directory}/generated-sources/jjtree/</sourceDirectory>
+                            <includes>
+                                <include>org/jboss/as/cmp/ejbql/JBossQLParser.jjt</include>
+                            </includes>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>add-source</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>add-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>${project.build.directory}/generated-sources/javacc</source>
+                                <source>${project.build.directory}/generated-sources/jjtree</source>
+                            </sources>
                         </configuration>
                     </execution>
                 </executions>
@@ -145,12 +155,6 @@
         <dependency>
             <groupId>org.jboss.metadata</groupId>
             <artifactId>jboss-metadata-ejb</artifactId>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.jboss</groupId>
-                    <artifactId>jbossxb</artifactId>
-                </exclusion>
-            </exclusions>
         </dependency>
 
         <dependency>

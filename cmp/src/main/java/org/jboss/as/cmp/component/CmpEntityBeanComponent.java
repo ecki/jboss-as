@@ -26,19 +26,22 @@ import java.lang.reflect.Method;
 import java.rmi.RemoteException;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+
 import javax.ejb.EJBException;
 import javax.ejb.EJBLocalHome;
 import javax.transaction.Transaction;
+
+import org.jboss.as.cmp.CmpMessages;
 import org.jboss.as.cmp.TransactionEntityMap;
 import org.jboss.as.cmp.context.CmpEntityBeanContext;
 import org.jboss.as.cmp.jdbc.JDBCEntityPersistenceStore;
 import org.jboss.as.cmp.jdbc.bridge.CMRMessage;
 import org.jboss.as.ee.component.BasicComponentInstance;
 import org.jboss.as.ee.component.Component;
+import org.jboss.as.ejb3.component.allowedmethods.AllowedMethodsInformation;
 import org.jboss.as.ejb3.component.entity.EntityBeanComponent;
 import org.jboss.as.ejb3.component.entity.EntityBeanComponentCreateService;
 import org.jboss.as.ejb3.component.entity.entitycache.ReadyEntityCache;
@@ -57,6 +60,7 @@ public class CmpEntityBeanComponent extends EntityBeanComponent {
 
     private final Value<JDBCEntityPersistenceStore> storeManager;
     private final InterceptorFactory relationInterceptorFactory;
+    private final boolean cmp10;
     private boolean ejbStoreForClean;
 
     private final TransactionEntityMap transactionEntityMap;
@@ -68,35 +72,25 @@ public class CmpEntityBeanComponent extends EntityBeanComponent {
 
         this.relationInterceptorFactory = ejbComponentCreateService.getRelationInterceptorFactory();
         this.transactionEntityMap = ejbComponentCreateService.getTransactionEntityMap();
+        this.cmp10 = ejbComponentCreateService.getEntityMetaData().isCMP1x();
     }
 
     protected BasicComponentInstance instantiateComponentInstance(final AtomicReference<ManagedReference> instanceReference, final Interceptor preDestroyInterceptor, final Map<Method, Interceptor> methodInterceptors, final InterceptorFactoryContext interceptorContext) {
-        final SimpleInterceptorFactoryContext factoryContext = new SimpleInterceptorFactoryContext();
-        factoryContext.getContextData().put(Component.class, this);
-        final Interceptor interceptor = relationInterceptorFactory.create(factoryContext);
-
-        final Map<Method, Interceptor> timeouts;
-        if (timeoutInterceptors != null) {
-            timeouts = new HashMap<Method, Interceptor>();
-            for (Map.Entry<Method, InterceptorFactory> entry : timeoutInterceptors.entrySet()) {
-                timeouts.put(entry.getKey(), entry.getValue().create(interceptorContext));
-            }
-        } else {
-            timeouts = Collections.emptyMap();
-        }
-
-        return new CmpEntityBeanComponentInstance(this, instanceReference, preDestroyInterceptor, methodInterceptors, timeouts, interceptor);
+        final InterceptorFactoryContext context = new SimpleInterceptorFactoryContext();
+        context.getContextData().put(Component.class, this);
+        final Interceptor interceptor = relationInterceptorFactory.create(context);
+        return new CmpEntityBeanComponentInstance(this, instanceReference, preDestroyInterceptor, methodInterceptors, interceptor);
     }
 
     public void start() {
         super.start();
         if (storeManager == null || storeManager.getValue() == null) {
-            throw new IllegalStateException("Store manager not set");
+            throw CmpMessages.MESSAGES.notStoreMangerForComponent(getComponentName());
         }
     }
 
     public Collection<Object> getEntityLocalCollection(List<Object> idList) {
-        return null;  // TODO: jeb - This should return proxy instances to local entities
+        return null;
     }
 
     public void synchronizeEntitiesWithinTransaction(Transaction transaction) {
@@ -173,7 +167,7 @@ public class CmpEntityBeanComponent extends EntityBeanComponent {
             throw (EJBException) e;
         } else {
             // Wrap runtime exceptions
-            throw new EJBException((Exception) e);
+            throw new EJBException(e);
         }
     }
 
@@ -187,5 +181,13 @@ public class CmpEntityBeanComponent extends EntityBeanComponent {
         } else {
             return new TransactionLocalEntityCache(this);
         }
+    }
+
+    @Override
+    public AllowedMethodsInformation getAllowedMethodsInformation() {
+        if(cmp10) {
+            return Cmp10AllowedMethodsInformation.INSTANCE;
+        }
+        return CmpAllowedMethodsInformation.INSTANCE;
     }
 }

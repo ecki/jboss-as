@@ -40,10 +40,12 @@ import static org.jboss.as.domain.http.server.Constants.OK;
 import static org.jboss.as.domain.http.server.Constants.OPTIONS;
 import static org.jboss.as.domain.http.server.Constants.ORIGIN;
 import static org.jboss.as.domain.http.server.Constants.POST;
+import static org.jboss.as.domain.http.server.Constants.RETRY_AFTER;
+import static org.jboss.as.domain.http.server.Constants.SERVICE_UNAVAILABLE;
 import static org.jboss.as.domain.http.server.Constants.TEXT_HTML;
+import static org.jboss.as.domain.http.server.Constants.UNSUPPORTED_MEDIA_TYPE;
 import static org.jboss.as.domain.http.server.Constants.US_ASCII;
 import static org.jboss.as.domain.http.server.Constants.UTF_8;
-import static org.jboss.as.domain.http.server.ErrorHandler.ERROR_CONTEXT;
 import static org.jboss.as.domain.http.server.HttpServerLogger.ROOT_LOGGER;
 import static org.jboss.as.domain.http.server.HttpServerMessages.MESSAGES;
 
@@ -58,25 +60,29 @@ import java.net.URLDecoder;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.jboss.as.controller.ControlledProcessState;
+import org.jboss.as.controller.ControlledProcessStateService;
 import org.jboss.as.controller.client.ModelControllerClient;
 import org.jboss.as.controller.client.OperationBuilder;
 import org.jboss.as.domain.http.server.multipart.BoundaryDelimitedInputStream;
 import org.jboss.as.domain.http.server.multipart.MimeHeaderParser;
-import org.jboss.as.domain.http.server.security.BasicAuthenticator;
-import org.jboss.as.domain.http.server.security.DigestAuthenticator;
+import org.jboss.as.domain.http.server.security.SubjectAssociationHandler;
+import org.jboss.as.domain.management.AuthenticationMechanism;
 import org.jboss.as.domain.management.SecurityRealm;
-import org.jboss.as.domain.management.security.DomainCallbackHandler;
+import org.jboss.com.sun.net.httpserver.Authenticator;
+import org.jboss.com.sun.net.httpserver.Filter;
 import org.jboss.com.sun.net.httpserver.Headers;
 import org.jboss.com.sun.net.httpserver.HttpContext;
 import org.jboss.com.sun.net.httpserver.HttpExchange;
 import org.jboss.com.sun.net.httpserver.HttpServer;
 import org.jboss.dmr.ModelNode;
-import org.jboss.sasl.callback.DigestHashCallback;
 
 /**
  * An embedded web server that provides a JSON over HTTP API to the domain management model.
@@ -118,13 +124,32 @@ class DomainApiHandler implements ManagementHttpHandler {
         }
     }
 
+    private final Authenticator authenticator;
+    private final ControlledProcessStateService controlledProcessStateService;
     private ModelControllerClient modelController;
 
-    DomainApiHandler(ModelControllerClient modelController) {
+
+    DomainApiHandler(final ModelControllerClient modelController, final Authenticator authenticator,
+                     final ControlledProcessStateService controlledProcessStateService) {
         this.modelController = modelController;
+        this.authenticator = authenticator;
+        this.controlledProcessStateService = controlledProcessStateService;
     }
 
-    public void handle(HttpExchange http) throws IOException {
+    private void doHandle(HttpExchange http) throws IOException {
+
+        // AS7-2284 If we are starting or stopping, tell caller the service is unavailable and to try again
+        // later. If "stopping" it's either a reload, in which case trying again will eventually succeed,
+        // or it's a true process stop eventually the server will have stopped.
+        @SuppressWarnings("deprecation")
+        ControlledProcessState.State currentState = controlledProcessStateService.getCurrentState();
+        if (currentState == ControlledProcessState.State.STARTING
+                || currentState == ControlledProcessState.State.STOPPING) {
+            http.getResponseHeaders().add(RETRY_AFTER, "2"); //  2 secs is just a guesstimate
+            http.sendResponseHeaders(SERVICE_UNAVAILABLE, -1);
+            return;
+        }
+
         /**
          *  Request Verification - before the request is handled a set of checks are performed for
          *  CSRF and XSS
@@ -136,6 +161,7 @@ class DomainApiHandler implements ManagementHttpHandler {
         final String requestMethod = http.getRequestMethod();
         if (OPTIONS.equals(requestMethod)) {
             drain(http);
+            ROOT_LOGGER.debug("Request rejected due to 'OPTIONS' method which is not supported.");
             http.sendResponseHeaders(METHOD_NOT_ALLOWED, -1);
 
             return;
@@ -152,11 +178,13 @@ class DomainApiHandler implements ManagementHttpHandler {
             String origin = headers.getFirst(ORIGIN);
             String host = headers.getFirst(HOST);
             String protocol = http.getHttpContext().getServer() instanceof HttpServer ? HTTP : HTTPS;
+            //This browser set header should not need IPv6 escaping
             String allowedOrigin = protocol + "://" + host;
 
             // This will reject multi-origin Origin headers due to the exact match.
             if (origin.equals(allowedOrigin) == false) {
                 drain(http);
+                ROOT_LOGGER.debug("Request rejected due to HOST/ORIGIN mis-match.");
                 http.sendResponseHeaders(FORBIDDEN, -1);
 
                 return;
@@ -181,7 +209,12 @@ class DomainApiHandler implements ManagementHttpHandler {
             String contentType = extractContentType(headers.getFirst(CONTENT_TYPE));
             if (!(APPLICATION_JSON.equals(contentType) || APPLICATION_DMR_ENCODED.equals(contentType))) {
                 drain(http);
-                http.sendResponseHeaders(FORBIDDEN, -1);
+                // RFC 2616: 14.11 Content-Encoding
+                // If the content-coding of an entity in a request message is not
+                // acceptable to the origin server, the server SHOULD respond with a
+                // status code of 415 (Unsupported Media Type).
+                ROOT_LOGGER.debug("Request rejected due to unsupported media type - should be one of (application/json,application/dmr-encoded).");
+                sendResponse(http, UNSUPPORTED_MEDIA_TYPE, contentType + "\n");
 
                 return;
             }
@@ -192,8 +225,22 @@ class DomainApiHandler implements ManagementHttpHandler {
         processRequest(http);
     }
 
+    @Override
+    public void handle(HttpExchange exchange) throws IOException {
+        // make sure we send something back
+        try {
+            doHandle(exchange);
+        } catch (Exception e) {
+            sendResponse(exchange, INTERNAL_SERVER_ERROR, e.getMessage() + "\n");
+        }
+    }
+
     private void drain(HttpExchange exchange) throws IOException {
-        exchange.getRequestBody().close();
+        try {
+            exchange.getRequestBody().close();
+        } catch (IOException e) {
+            // ignore
+        }
     }
 
     private String extractContentType(final String fullContentType) {
@@ -226,8 +273,7 @@ class DomainApiHandler implements ManagementHttpHandler {
         } catch (Throwable t) {
             // TODO Consider draining input stream
             ROOT_LOGGER.uploadError(t);
-            http.sendResponseHeaders(INTERNAL_SERVER_ERROR, -1);
-
+            sendError(http,false,t);
             return;
         }
 
@@ -247,6 +293,7 @@ class DomainApiHandler implements ManagementHttpHandler {
 
         boolean isGet = GET.equals(requestMethod);
         if (!isGet && !POST.equals(requestMethod)) {
+            ROOT_LOGGER.debug("Request rejected as method not one of (GET,POST).");
             http.sendResponseHeaders(METHOD_NOT_ALLOWED, -1);
 
             return;
@@ -262,10 +309,9 @@ class DomainApiHandler implements ManagementHttpHandler {
 
         try {
             dmr = isGet ? convertGetRequest(request) : convertPostRequest(http.getRequestBody(), encode);
-        } catch (IllegalArgumentException iae) {
+        } catch (Exception iae) {
             ROOT_LOGGER.debugf("Unable to construct ModelNode '%s'", iae.getMessage());
-            http.sendResponseHeaders(INTERNAL_SERVER_ERROR, -1);
-
+            sendError(http,isGet,iae);
             return;
         }
 
@@ -273,8 +319,7 @@ class DomainApiHandler implements ManagementHttpHandler {
             response = modelController.execute(new OperationBuilder(dmr).build());
         } catch (Throwable t) {
             ROOT_LOGGER.modelRequestError(t);
-            http.sendResponseHeaders(INTERNAL_SERVER_ERROR, -1);
-
+            sendError(http,isGet,t);
             return;
         }
 
@@ -284,6 +329,23 @@ class DomainApiHandler implements ManagementHttpHandler {
 
         boolean pretty = dmr.hasDefined("json.pretty") && dmr.get("json.pretty").asBoolean();
         writeResponse(http, isGet, pretty, response, status, encode);
+    }
+
+    private void sendError(final HttpExchange http, boolean isGet, Throwable t) throws IOException {
+        ModelNode response = new ModelNode();
+        response.set(t.getMessage());
+        writeResponse(http, isGet, true, response, INTERNAL_SERVER_ERROR, false);
+    }
+
+    private void sendResponse(final HttpExchange exchange, final int responseCode, final String body) throws IOException {
+        exchange.sendResponseHeaders(responseCode, 0);
+        final PrintWriter out = new PrintWriter(exchange.getResponseBody());
+        try {
+            out.print(body);
+            out.flush();
+        } finally {
+            safeClose(out);
+        }
     }
 
      private void writeResponse(final HttpExchange http, boolean isGet, boolean pretty, ModelNode response, int status,
@@ -333,7 +395,6 @@ class DomainApiHandler implements ManagementHttpHandler {
 
     private static final class SeekResult {
         BoundaryDelimitedInputStream stream;
-        String fileName;
     }
 
     /**
@@ -374,7 +435,6 @@ class DomainApiHandler implements ManagementHttpHandler {
                 matcher = DISPOSITION_FILE.matcher(disposition);
                 if (matcher.matches()) {
                     SeekResult seek = new SeekResult();
-                    seek.fileName = matcher.group(1);
                     seek.stream = stream;
 
                     return seek;
@@ -417,7 +477,7 @@ class DomainApiHandler implements ManagementHttpHandler {
             String value = entry.getValue();
             if ("operation".equals(key)) {
                 try {
-                    operation = GetOperation.valueOf(value.toUpperCase().replace('-', '_'));
+                    operation = GetOperation.valueOf(value.toUpperCase(Locale.ENGLISH).replace('-', '_'));
                     value = operation.realOperation();
                 } catch (Exception e) {
                     throw MESSAGES.invalidOperation(e, value);
@@ -506,32 +566,23 @@ class DomainApiHandler implements ManagementHttpHandler {
     }
 
     public void start(HttpServer httpServer, SecurityRealm securityRealm) {
-        HttpContext context = httpServer.createContext(DOMAIN_API_CONTEXT, this);
-        if (securityRealm != null) {
-            DomainCallbackHandler callbackHandler = securityRealm.getCallbackHandler();
-            Class[] supportedCallbacks = callbackHandler.getSupportedCallbacks();
-            if (DigestAuthenticator.requiredCallbacksSupported(supportedCallbacks)) {
-                context.setAuthenticator(new DigestAuthenticator(callbackHandler, securityRealm.getName(), contains(DigestHashCallback.class, supportedCallbacks)));
-            } else if (BasicAuthenticator.requiredCallbacksSupported(supportedCallbacks)) {
-                context.setAuthenticator(new BasicAuthenticator(callbackHandler, securityRealm.getName()));
+        // The SubjectAssociationHandler wraps all calls to this HttpHandler to ensure the Subject has been associated
+        // with the security context.
+        HttpContext context = httpServer.createContext(DOMAIN_API_CONTEXT, new SubjectAssociationHandler(this));
+        // Once there is a trust store we can no longer rely on users being defined so skip
+        // any redirects.
+        if (authenticator != null) {
+            context.setAuthenticator(authenticator);
+            List<Filter> filters = context.getFilters();
+            if (securityRealm.getSupportedAuthenticationMechanisms().contains(AuthenticationMechanism.CLIENT_CERT) == false) {
+                filters.add(new RealmReadinessFilter(securityRealm, ErrorHandler.getRealmRedirect()));
             }
-            context.getFilters().add(new RealmReadinessFilter(callbackHandler, ERROR_CONTEXT));
         }
     }
 
     public void stop(HttpServer httpServer) {
         httpServer.removeContext(DOMAIN_API_CONTEXT);
         modelController = null;
-    }
-
-    // TODO - This still needs cleaning up to use collections so we can remove the array iteration.
-    private static boolean contains(Class clazz, Class[] classes) {
-        for (Class current : classes) {
-            if (current.equals(clazz)) {
-                return true;
-            }
-        }
-        return false;
     }
 
 }

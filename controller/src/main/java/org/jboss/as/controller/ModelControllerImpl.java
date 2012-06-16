@@ -22,12 +22,15 @@
 
 package org.jboss.as.controller;
 
+import static org.jboss.as.controller.ControllerLogger.MGMT_OP_LOGGER;
 import static org.jboss.as.controller.ControllerLogger.ROOT_LOGGER;
 import static org.jboss.as.controller.ControllerMessages.MESSAGES;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ALLOW_RESOURCE_SERVICE_RESTART;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.CANCELLED;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OPERATION_HEADERS;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OUTCOME;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PROCESS_STATE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RESPONSE_HEADERS;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ROLLBACK_ON_RUNTIME_FAILURE;
@@ -48,8 +51,8 @@ import org.jboss.as.controller.client.ModelControllerClient;
 import org.jboss.as.controller.client.Operation;
 import org.jboss.as.controller.client.OperationAttachments;
 import org.jboss.as.controller.client.OperationMessageHandler;
-import org.jboss.as.controller.operations.common.ExtensionAddHandler;
-import org.jboss.as.controller.operations.common.ParallelExtensionAddHandler;
+import org.jboss.as.controller.extension.ExtensionAddHandler;
+import org.jboss.as.controller.extension.ParallelExtensionAddHandler;
 import org.jboss.as.controller.operations.common.Util;
 import org.jboss.as.controller.persistence.ConfigurationPersistenceException;
 import org.jboss.as.controller.persistence.ConfigurationPersister;
@@ -76,7 +79,8 @@ class ModelControllerImpl implements ModelController {
     private final ContainerStateMonitor stateMonitor;
     private final RootResource model = new RootResource();
     private final ConfigurationPersister persister;
-    private final OperationContext.Type controllerType;
+    private final ProcessType processType;
+    private final RunningModeControl runningModeControl;
     private final AtomicBoolean bootingFlag = new AtomicBoolean(true);
     private final OperationStepHandler prepareStep;
     private final ControlledProcessState processState;
@@ -84,7 +88,8 @@ class ModelControllerImpl implements ModelController {
     private final ExpressionResolver expressionResolver;
 
     ModelControllerImpl(final ServiceRegistry serviceRegistry, final ServiceTarget serviceTarget, final ManagementResourceRegistration rootRegistration,
-                        final ContainerStateMonitor stateMonitor, final ConfigurationPersister persister, final OperationContext.Type controllerType,
+                        final ContainerStateMonitor stateMonitor, final ConfigurationPersister persister,
+                        final ProcessType processType, final RunningModeControl runningModeControl,
                         final OperationStepHandler prepareStep, final ControlledProcessState processState, final ExecutorService executorService,
                         final ExpressionResolver expressionResolver) {
         this.serviceRegistry = serviceRegistry;
@@ -92,7 +97,8 @@ class ModelControllerImpl implements ModelController {
         this.rootRegistration = rootRegistration;
         this.stateMonitor = stateMonitor;
         this.persister = persister;
-        this.controllerType = controllerType;
+        this.processType = processType;
+        this.runningModeControl = runningModeControl;
         this.prepareStep = prepareStep == null ? new DefaultPrepareStepHandler() : prepareStep;
         this.processState = processState;
         this.serviceTarget.addListener(ServiceListener.Inheritance.ALL, stateMonitor);
@@ -100,7 +106,12 @@ class ModelControllerImpl implements ModelController {
         this.expressionResolver = expressionResolver;
     }
 
+
     public ModelNode execute(final ModelNode operation, final OperationMessageHandler handler, final OperationTransactionControl control, final OperationAttachments attachments) {
+        return internalExecute(operation, handler, control, attachments, prepareStep);
+    }
+
+    protected ModelNode internalExecute(final ModelNode operation, final OperationMessageHandler handler, final OperationTransactionControl control, final OperationAttachments attachments, final OperationStepHandler prepareStep) {
         final ModelNode headers = operation.has(OPERATION_HEADERS) ? operation.get(OPERATION_HEADERS) : null;
         final boolean rollbackOnFailure = headers == null || !headers.hasDefined(ROLLBACK_ON_RUNTIME_FAILURE) || headers.get(ROLLBACK_ON_RUNTIME_FAILURE).asBoolean();
         final EnumSet<OperationContextImpl.ContextFlag> contextFlags = rollbackOnFailure ? EnumSet.of(OperationContextImpl.ContextFlag.ROLLBACK_ON_FAIL) : EnumSet.noneOf(OperationContextImpl.ContextFlag.class);
@@ -108,39 +119,46 @@ class ModelControllerImpl implements ModelController {
         if (restartResourceServices) {
             contextFlags.add(OperationContextImpl.ContextFlag.ALLOW_RESOURCE_SERVICE_RESTART);
         }
-        OperationContextImpl context = new OperationContextImpl(this, controllerType, contextFlags, handler, attachments, model, control, processState, bootingFlag.get());
+        OperationContextImpl context = new OperationContextImpl(this, processType, runningModeControl.getRunningMode(), contextFlags, handler, attachments, model, control, processState, bootingFlag.get());
         ModelNode response = new ModelNode();
         context.addStep(response, operation, prepareStep, OperationContext.Stage.MODEL);
 
         context.completeStep();
 
-        ControlledProcessState.State state = processState.getState();
-        switch (state) {
-            case RELOAD_REQUIRED:
-            case RESTART_REQUIRED:
-                response.get(RESPONSE_HEADERS, PROCESS_STATE).set(state.toString());
-                break;
-            default:
-                break;
+        if (!response.hasDefined(RESPONSE_HEADERS) || !response.get(RESPONSE_HEADERS).hasDefined(PROCESS_STATE)) {
+            ControlledProcessState.State state = processState.getState();
+            switch (state) {
+                case RELOAD_REQUIRED:
+                case RESTART_REQUIRED:
+                    response.get(RESPONSE_HEADERS, PROCESS_STATE).set(state.toString());
+                    break;
+                default:
+                    break;
+            }
         }
         return response;
     }
 
-    void boot(final List<ModelNode> bootList, final OperationMessageHandler handler, final OperationTransactionControl control) {
+    boolean boot(final List<ModelNode> bootList, final OperationMessageHandler handler, final OperationTransactionControl control,
+              final boolean rollbackOnRuntimeFailure) {
 
-        final OperationContextImpl context = new OperationContextImpl(this, controllerType, EnumSet.noneOf(OperationContextImpl.ContextFlag.class),
-                handler, null, model, control, processState, bootingFlag.get());
+        EnumSet<OperationContextImpl.ContextFlag> contextFlags = rollbackOnRuntimeFailure
+                ? EnumSet.of(OperationContextImpl.ContextFlag.ROLLBACK_ON_FAIL)
+                : EnumSet.noneOf(OperationContextImpl.ContextFlag.class);
+        final OperationContextImpl context = new OperationContextImpl(this, processType, runningModeControl.getRunningMode(),
+                contextFlags, handler, null, model, control, processState, bootingFlag.get());
 
         // Add to the context all ops prior to the first ExtensionAddHandler as well as all ExtensionAddHandlers; save the rest.
         // This gets extensions registered before proceeding to other ops that count on these registrations
         List<ParsedBootOp> postExtensionOps = organizeBootOperations(bootList, context);
 
         // Run the steps up to the last ExtensionAddHandler
-        if (context.completeStep() == OperationContext.ResultAction.KEEP && postExtensionOps != null) {
+        OperationContext.ResultAction resultAction = context.completeStep();
+        if (resultAction == OperationContext.ResultAction.KEEP && postExtensionOps != null) {
 
             // Success. Now any extension handlers are registered. Continue with remaining ops
-            final OperationContextImpl postExtContext = new OperationContextImpl(this, controllerType, EnumSet.noneOf(OperationContextImpl.ContextFlag.class),
-                    handler, null, model, control, processState, bootingFlag.get());
+            final OperationContextImpl postExtContext = new OperationContextImpl(this, processType, runningModeControl.getRunningMode(),
+                    contextFlags, handler, null, model, control, processState, bootingFlag.get());
 
             for (ParsedBootOp parsedOp : postExtensionOps) {
                 final OperationStepHandler stepHandler = parsedOp.handler == null ? rootRegistration.getOperationHandler(parsedOp.address, parsedOp.operationName) : parsedOp.handler;
@@ -154,8 +172,10 @@ class ModelControllerImpl implements ModelController {
                 }
             }
 
-            postExtContext.completeStep();
+            resultAction = postExtContext.completeStep();
         }
+
+        return  resultAction == OperationContext.ResultAction.KEEP;
     }
 
     /**
@@ -186,7 +206,7 @@ class ModelControllerImpl implements ModelController {
         boolean sawExtensionAdd = false;
         List<ParsedBootOp> postExtensionOps = null;
         ParallelExtensionAddHandler parallelExtensionAddHandler = executorService == null ? null : new ParallelExtensionAddHandler(executorService);
-        ParallelBootOperationStepHandler parallelSubsystemHandler = (executorService != null && controllerType == OperationContext.Type.SERVER)
+        ParallelBootOperationStepHandler parallelSubsystemHandler = (executorService != null && processType.isServer() && runningModeControl.getRunningMode() == RunningMode.NORMAL)
                 ? new ParallelBootOperationStepHandler(executorService, rootRegistration, processState) : null;
         boolean registeredParallelSubsystemHandler = false;
         int subsystemIndex = 0;
@@ -317,24 +337,51 @@ class ModelControllerImpl implements ModelController {
                     }
 
                     public void asyncCancel(final boolean interruptionDesired) {
-                        Thread thread = opThread.get();
-                        if (thread != null) {
+                        Thread thread = opThread.getAndSet(Thread.currentThread());
+                        if (thread == null) {
+                            setCancelled();
+                        } else {
+                            // Interrupt the request execution
                             thread.interrupt();
+                            // Wait for the cancellation to clear opThread
+                            boolean interrupted = false;
+                            synchronized (opThread) {
+                                while (opThread.get() != null) {
+                                    try {
+                                        opThread.wait();
+                                    } catch (InterruptedException ie) {
+                                        interrupted = true;
+                                    }
+                                }
+                            }
+                            setCancelled();
+                            if (interrupted) {
+                                Thread.currentThread().interrupt();
+                            }
                         }
                     }
 
                     void handleResult(final ModelNode result) {
-                        setResult(result);
+                        if (result != null && result.hasDefined(OUTCOME) && CANCELLED.equals(result.get(OUTCOME).asString())) {
+                            setCancelled();
+                        } else {
+                            setResult(result);
+                        }
                     }
                 }
                 final OpTask opTask = new OpTask();
                 executor.execute(new Runnable() {
                     public void run() {
-                        opThread.set(Thread.currentThread());
                         try {
-                            opTask.handleResult(ModelControllerImpl.this.execute(operation, messageHandler, OperationTransactionControl.COMMIT, attachments));
+                            if (opThread.compareAndSet(null, Thread.currentThread())) {
+                                ModelNode response = ModelControllerImpl.this.execute(operation, messageHandler, OperationTransactionControl.COMMIT, attachments);
+                                opTask.handleResult(response);
+                            }
                         } finally {
-                            opThread.set(null);
+                            synchronized (opThread) {
+                                opThread.set(null);
+                                opThread.notifyAll();
+                            }
                         }
                     }
                 });
@@ -412,8 +459,8 @@ class ModelControllerImpl implements ModelController {
 
         @Override
         public void execute(OperationContext context, ModelNode operation) throws OperationFailedException {
-            if (ROOT_LOGGER.isTraceEnabled()) {
-                ROOT_LOGGER.trace("Executing " + operation.get(OP) + " " + operation.get(OP_ADDR));
+            if (MGMT_OP_LOGGER.isTraceEnabled()) {
+                MGMT_OP_LOGGER.trace("Executing " + operation.get(OP) + " " + operation.get(OP_ADDR));
             }
             final PathAddress address = PathAddress.pathAddress(operation.get(OP_ADDR));
             final String operationName =  operation.require(OP).asString();

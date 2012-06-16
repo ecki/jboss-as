@@ -22,17 +22,21 @@
 
 package org.jboss.as.web;
 
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.NAME;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
-
 import org.apache.catalina.connector.Connector;
 import org.apache.coyote.RequestGroupInfo;
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.PathAddress;
+import org.jboss.as.controller.SimpleAttributeDefinition;
+import org.jboss.as.controller.SimpleAttributeDefinitionBuilder;
 import org.jboss.dmr.ModelNode;
+import org.jboss.dmr.ModelType;
 import org.jboss.msc.service.ServiceController;
+
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.NAME;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
+import static org.jboss.as.web.WebMessages.MESSAGES;
 
 /**
  * @author Emanuel Muckenhuber
@@ -41,12 +45,48 @@ class WebConnectorMetrics implements OperationStepHandler {
 
     static WebConnectorMetrics INSTANCE = new WebConnectorMetrics();
 
-    static final String[] NO_LOCATION = new String[0];
-    static final String[] ATTRIBUTES = new String[] {Constants.BYTES_SENT, Constants.BYTES_RECEIVED, Constants.PROCESSING_TIME, Constants.ERROR_COUNT, Constants.MAX_TIME, Constants.REQUEST_COUNT};
+    protected static final SimpleAttributeDefinition BYTES_SENT =
+            new SimpleAttributeDefinitionBuilder(Constants.BYTES_SENT, ModelType.INT, true)
+                    .setStorageRuntime()
+                    .build();
+
+    protected static final SimpleAttributeDefinition BYTES_RECEIVED =
+            new SimpleAttributeDefinitionBuilder(Constants.BYTES_RECEIVED, ModelType.INT, true)
+                    .setStorageRuntime()
+                    .build();
+    protected static final SimpleAttributeDefinition PROCESSING_TIME =
+            new SimpleAttributeDefinitionBuilder(Constants.PROCESSING_TIME, ModelType.INT, true)
+                    .setStorageRuntime()
+                    .build();
+    protected static final SimpleAttributeDefinition ERROR_COUNT =
+            new SimpleAttributeDefinitionBuilder(Constants.ERROR_COUNT, ModelType.INT, true)
+                    .setStorageRuntime()
+                    .build();
+
+    protected static final SimpleAttributeDefinition MAX_TIME =
+            new SimpleAttributeDefinitionBuilder(Constants.MAX_TIME, ModelType.INT, true)
+                    .setStorageRuntime()
+                    .build();
+    protected static final SimpleAttributeDefinition REQUEST_COUNT =
+            new SimpleAttributeDefinitionBuilder(Constants.REQUEST_COUNT, ModelType.INT, true)
+                    .setStorageRuntime()
+                    .build();
+
+
+    @Deprecated
+    static final String[] ATTRIBUTES_OLD = {Constants.BYTES_SENT, Constants.BYTES_RECEIVED, Constants.PROCESSING_TIME, Constants.ERROR_COUNT, Constants.MAX_TIME, Constants.REQUEST_COUNT};
+    static final SimpleAttributeDefinition[] ATTRIBUTES = {
+            BYTES_SENT,
+            BYTES_RECEIVED,
+            PROCESSING_TIME,
+            ERROR_COUNT,
+            MAX_TIME,
+            REQUEST_COUNT
+    };
 
     @Override
     public void execute(OperationContext context, ModelNode operation) throws OperationFailedException {
-        if (context.getType() == OperationContext.Type.SERVER) {
+        if (context.isNormalServer()) {
             context.addStep(new OperationStepHandler() {
                 @Override
                 public void execute(OperationContext context, ModelNode operation) throws OperationFailedException {
@@ -77,17 +117,17 @@ class WebConnectorMetrics implements OperationStepHandler {
                                 }
                             }
                         } catch (Exception e) {
-                            throw new OperationFailedException(new ModelNode().set("failed to get metrics" + e.getMessage()));
+                            throw new OperationFailedException(new ModelNode().set(MESSAGES.failedToGetMetrics(e.getMessage())));
                         }
                     } else {
-                        context.getResult().set("no metrics available");
+                        context.getResult().set(MESSAGES.noMetricsAvailable());
                     }
-                    context.completeStep();
+                    context.completeStep(OperationContext.RollbackHandler.NOOP_ROLLBACK_HANDLER);
                 }
             }, OperationContext.Stage.RUNTIME);
         } else {
-            context.getResult().set("no metrics available");
+            context.getResult().set(MESSAGES.noMetricsAvailable());
         }
-        context.completeStep();
+        context.completeStep(OperationContext.RollbackHandler.NOOP_ROLLBACK_HANDLER);
     }
 }

@@ -52,13 +52,21 @@ public class EJB3SubsystemRootResourceDefinition extends SimpleResourceDefinitio
                     .setAllowExpression(true).build();
     public static final SimpleAttributeDefinition DEFAULT_RESOURCE_ADAPTER_NAME =
             new SimpleAttributeDefinitionBuilder(EJB3SubsystemModel.DEFAULT_RESOURCE_ADAPTER_NAME, ModelType.STRING, true)
+                    .setDefaultValue(new ModelNode().set("hornetq-ra"))
                     .setAllowExpression(true).build();
+    public static final SimpleAttributeDefinition DEFAULT_ENTITY_BEAN_INSTANCE_POOL =
+            new SimpleAttributeDefinitionBuilder(EJB3SubsystemModel.DEFAULT_ENTITY_BEAN_INSTANCE_POOL, ModelType.STRING, true)
+                    .setAllowExpression(true).build();
+    public static final SimpleAttributeDefinition DEFAULT_ENTITY_BEAN_OPTIMISTIC_LOCKING =
+            new SimpleAttributeDefinitionBuilder(EJB3SubsystemModel.DEFAULT_ENTITY_BEAN_OPTIMISTIC_LOCKING, ModelType.BOOLEAN, true)
+                    .setAllowExpression(true).build();
+
     public static final SimpleAttributeDefinition DEFAULT_STATEFUL_BEAN_ACCESS_TIMEOUT =
             new SimpleAttributeDefinitionBuilder(EJB3SubsystemModel.DEFAULT_STATEFUL_BEAN_ACCESS_TIMEOUT, ModelType.LONG, true)
                     .setXmlName(EJB3SubsystemXMLAttribute.DEFAULT_ACCESS_TIMEOUT.getLocalName())
                     .setDefaultValue(new ModelNode().set(5000)) // TODO: this should come from component description
                     .setAllowExpression(true) // we allow expression for setting a timeout value
-                    .setValidator(new LongRangeValidator(1, Integer.MAX_VALUE, false, false))
+                    .setValidator(new LongRangeValidator(1, Integer.MAX_VALUE, true, true))
                     .setFlags(AttributeAccess.Flag.RESTART_NONE)
                     .build();
 
@@ -67,8 +75,32 @@ public class EJB3SubsystemRootResourceDefinition extends SimpleResourceDefinitio
                     .setXmlName(EJB3SubsystemXMLAttribute.DEFAULT_ACCESS_TIMEOUT.getLocalName())
                     .setDefaultValue(new ModelNode().set(5000)) // TODO: this should come from component description
                     .setAllowExpression(true) // we allow expression for setting a timeout value
-                    .setValidator(new LongRangeValidator(1, Integer.MAX_VALUE, false, false))
+                    .setValidator(new LongRangeValidator(1, Integer.MAX_VALUE, true, true))
                     .setFlags(AttributeAccess.Flag.RESTART_NONE)
+                    .build();
+    public static final SimpleAttributeDefinition DEFAULT_SFSB_CACHE =
+            new SimpleAttributeDefinitionBuilder(EJB3SubsystemModel.DEFAULT_SFSB_CACHE, ModelType.STRING, true)
+                    .setAllowExpression(true)
+                    .build();
+    public static final SimpleAttributeDefinition DEFAULT_CLUSTERED_SFSB_CACHE =
+            new SimpleAttributeDefinitionBuilder(EJB3SubsystemModel.DEFAULT_CLUSTERED_SFSB_CACHE, ModelType.STRING, true)
+                    .setAllowExpression(true)
+                    .setAllowNull(true)
+                    .build();
+
+    public static final SimpleAttributeDefinition ENABLE_STATISTICS =
+            new SimpleAttributeDefinitionBuilder(EJB3SubsystemModel.ENABLE_STATISTICS, ModelType.BOOLEAN, true)
+                    .build();
+
+    public static final SimpleAttributeDefinition DEFAULT_DISTINCT_NAME =
+            new SimpleAttributeDefinitionBuilder(EJB3SubsystemModel.DEFAULT_DISTINCT_NAME, ModelType.STRING, true)
+                    .setAllowExpression(true)
+                    .build();
+
+    public static final SimpleAttributeDefinition PASS_BY_VALUE =
+            new SimpleAttributeDefinitionBuilder(EJB3SubsystemModel.IN_VM_REMOTE_INTERFACE_INVOCATION_PASS_BY_VALUE, ModelType.BOOLEAN, true)
+                    .setAllowExpression(true)
+                    .setDefaultValue(new ModelNode().set("true"))
                     .build();
 
 
@@ -79,12 +111,34 @@ public class EJB3SubsystemRootResourceDefinition extends SimpleResourceDefinitio
                 OperationEntry.Flag.RESTART_ALL_SERVICES, OperationEntry.Flag.RESTART_ALL_SERVICES);
     }
 
+    static final SimpleAttributeDefinition[] ATTRIBUTES = {
+            DEFAULT_CLUSTERED_SFSB_CACHE,
+            DEFAULT_ENTITY_BEAN_INSTANCE_POOL,
+            DEFAULT_ENTITY_BEAN_OPTIMISTIC_LOCKING,
+            DEFAULT_MDB_INSTANCE_POOL,
+            DEFAULT_RESOURCE_ADAPTER_NAME,
+            DEFAULT_SFSB_CACHE,
+            DEFAULT_SINGLETON_BEAN_ACCESS_TIMEOUT,
+            DEFAULT_SLSB_INSTANCE_POOL,
+            DEFAULT_STATEFUL_BEAN_ACCESS_TIMEOUT,
+            ENABLE_STATISTICS,
+            PASS_BY_VALUE,
+            DEFAULT_DISTINCT_NAME
+    };
+
     @Override
     public void registerAttributes(ManagementResourceRegistration resourceRegistration) {
+        resourceRegistration.registerReadWriteAttribute(DEFAULT_SFSB_CACHE, null, EJB3SubsystemDefaultCacheWriteHandler.SFSB_CACHE);
+        resourceRegistration.registerReadWriteAttribute(DEFAULT_CLUSTERED_SFSB_CACHE, null, EJB3SubsystemDefaultCacheWriteHandler.CLUSTERED_SFSB_CACHE);
         resourceRegistration.registerReadWriteAttribute(DEFAULT_SLSB_INSTANCE_POOL, null, EJB3SubsystemDefaultPoolWriteHandler.SLSB_POOL);
         resourceRegistration.registerReadWriteAttribute(DEFAULT_MDB_INSTANCE_POOL, null, EJB3SubsystemDefaultPoolWriteHandler.MDB_POOL);
+        resourceRegistration.registerReadWriteAttribute(DEFAULT_ENTITY_BEAN_INSTANCE_POOL, null, EJB3SubsystemDefaultPoolWriteHandler.ENTITY_BEAN_POOL);
+        resourceRegistration.registerReadWriteAttribute(DEFAULT_ENTITY_BEAN_OPTIMISTIC_LOCKING, null, EJB3SubsystemDefaultEntityBeanOptimisticLockingWriteHandler.INSTANCE);
         resourceRegistration.registerReadWriteAttribute(DEFAULT_RESOURCE_ADAPTER_NAME, null, DefaultResourceAdapterWriteHandler.INSTANCE);
         resourceRegistration.registerReadWriteAttribute(DEFAULT_SINGLETON_BEAN_ACCESS_TIMEOUT, null, DefaultSingletonBeanAccessTimeoutWriteHandler.INSTANCE);
         resourceRegistration.registerReadWriteAttribute(DEFAULT_STATEFUL_BEAN_ACCESS_TIMEOUT, null, DefaultStatefulBeanAccessTimeoutWriteHandler.INSTANCE);
+        resourceRegistration.registerReadWriteAttribute(ENABLE_STATISTICS, null, EnableStatisticsWriteHandler.INSTANCE);
+        resourceRegistration.registerReadWriteAttribute(PASS_BY_VALUE, null, EJBRemoteInvocationPassByValueWriteHandler.INSTANCE);
+        resourceRegistration.registerReadWriteAttribute(DEFAULT_DISTINCT_NAME, null, EJBDefaultDistinctNameWriteHandler.INSTANCE);
     }
 }

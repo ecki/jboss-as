@@ -23,22 +23,18 @@ package org.jboss.as.subsystem.test;
 
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADD;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.DEFAULT_INTERFACE;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.FIXED_PORT;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.HOST;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.INET_ADDRESS;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.INTERFACE;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.MULTICAST_ADDRESS;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.MULTICAST_PORT;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PATH;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PORT;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PORT_OFFSET;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RELATIVE_TO;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SOCKET_BINDING;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SOCKET_BINDING_GROUP;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SYSTEM_PROPERTY;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.VALUE;
-import static org.jboss.as.controller.descriptions.common.PathDescription.RELATIVE_TO;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -59,22 +55,12 @@ import org.jboss.as.controller.registry.AttributeAccess;
 import org.jboss.as.controller.registry.ManagementResourceRegistration;
 import org.jboss.as.controller.registry.Resource;
 import org.jboss.as.controller.resource.SocketBindingGroupResourceDefinition;
+import org.jboss.as.controller.services.path.PathManager;
+import org.jboss.as.controller.services.path.PathManagerService;
+import org.jboss.as.controller.services.path.PathResourceDefinition;
 import org.jboss.as.server.controller.descriptions.ServerDescriptionProviders;
-import org.jboss.as.server.operations.SpecifiedPathAddHandler;
-import org.jboss.as.server.operations.SpecifiedPathRemoveHandler;
-import org.jboss.as.server.services.net.BindingAddHandler;
-import org.jboss.as.server.services.net.BindingFixedPortHandler;
 import org.jboss.as.server.services.net.BindingGroupAddHandler;
-import org.jboss.as.server.services.net.BindingGroupDefaultInterfaceHandler;
-import org.jboss.as.server.services.net.BindingGroupPortOffsetHandler;
-import org.jboss.as.server.services.net.BindingInterfaceHandler;
-import org.jboss.as.server.services.net.BindingMetricHandlers;
-import org.jboss.as.server.services.net.BindingMulticastAddressHandler;
-import org.jboss.as.server.services.net.BindingMulticastPortHandler;
-import org.jboss.as.server.services.net.BindingPortHandler;
-import org.jboss.as.server.services.net.BindingRemoveHandler;
 import org.jboss.as.server.services.net.LocalDestinationOutboundSocketBindingResourceDefinition;
-import org.jboss.as.server.services.net.OutboundSocketBindingResourceDefinition;
 import org.jboss.as.server.services.net.RemoteDestinationOutboundSocketBindingResourceDefinition;
 import org.jboss.as.server.services.net.SocketBindingResourceDefinition;
 import org.jboss.as.server.services.net.SpecifiedInterfaceAddHandler;
@@ -95,6 +81,11 @@ public class ControllerInitializer {
     protected final Map<String, Integer> socketBindings = new HashMap<String, Integer>();
     protected final Map<String, OutboundSocketBinding> outboundSocketBindings = new HashMap<String, OutboundSocketBinding>();
     protected final Map<String, PathInfo> paths = new HashMap<String, PathInfo>();
+    private volatile PathManagerService pathManager;
+
+    void setPathManger(PathManagerService pathManager) {
+        this.pathManager = pathManager;
+    }
 
     /**
      * Adds a system property to the model.
@@ -244,7 +235,7 @@ public class ControllerInitializer {
         ManagementResourceRegistration interfaces = rootRegistration.registerSubModel(PathElement.pathElement(INTERFACE), CommonProviders.SPECIFIED_INTERFACE_PROVIDER);
         interfaces.registerOperationHandler(SpecifiedInterfaceAddHandler.OPERATION_NAME, SpecifiedInterfaceAddHandler.INSTANCE, SpecifiedInterfaceAddHandler.INSTANCE, false);
         interfaces.registerOperationHandler(SpecifiedInterfaceRemoveHandler.OPERATION_NAME, SpecifiedInterfaceRemoveHandler.INSTANCE, SpecifiedInterfaceRemoveHandler.INSTANCE, false);
-        InterfaceCriteriaWriteHandler.register(interfaces);
+        InterfaceCriteriaWriteHandler.UPDATE_RUNTIME.register(interfaces);
 
         // Sockets
         ManagementResourceRegistration socketGroup = rootRegistration.registerSubModel(new SocketBindingGroupResourceDefinition(BindingGroupAddHandler.INSTANCE, SocketBindingGroupRemoveHandler.INSTANCE, false));
@@ -267,9 +258,7 @@ public class ControllerInitializer {
             return;
         }
         rootResource.getModel().get(PATH);
-        ManagementResourceRegistration paths = rootRegistration.registerSubModel(PathElement.pathElement(PATH), CommonProviders.SPECIFIED_PATH_PROVIDER);
-        paths.registerOperationHandler(SpecifiedPathAddHandler.OPERATION_NAME, SpecifiedPathAddHandler.INSTANCE, SpecifiedPathAddHandler.INSTANCE, false);
-        paths.registerOperationHandler(SpecifiedPathRemoveHandler.OPERATION_NAME, SpecifiedPathRemoveHandler.INSTANCE, SpecifiedPathRemoveHandler.INSTANCE, false);
+        ManagementResourceRegistration paths = rootRegistration.registerSubModel(PathResourceDefinition.createSpecified(pathManager));
     }
 
     /**

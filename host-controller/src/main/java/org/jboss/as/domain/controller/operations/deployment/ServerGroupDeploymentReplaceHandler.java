@@ -19,6 +19,8 @@
 package org.jboss.as.domain.controller.operations.deployment;
 
 import java.util.Locale;
+import java.util.NoSuchElementException;
+
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.OperationFailedException;
@@ -32,12 +34,13 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.HAS
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.NAME;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.REPLACE_DEPLOYMENT;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.TO_REPLACE;
+import static org.jboss.as.domain.controller.DomainControllerMessages.MESSAGES;
 import org.jboss.as.controller.descriptions.common.DeploymentDescription;
 import org.jboss.as.controller.operations.common.Util;
 import org.jboss.as.controller.operations.validation.ParametersValidator;
 import org.jboss.as.controller.operations.validation.StringLengthValidator;
 import org.jboss.as.controller.registry.Resource;
-import org.jboss.as.domain.controller.FileRepository;
+import org.jboss.as.repository.HostFileRepository;
 import org.jboss.dmr.ModelNode;
 
 /**
@@ -53,12 +56,12 @@ public class ServerGroupDeploymentReplaceHandler implements OperationStepHandler
         return Util.getEmptyOperation(OPERATION_NAME, address);
     }
 
-    private final FileRepository fileRepository;
+    private final HostFileRepository fileRepository;
     private final ParametersValidator validator = new ParametersValidator();
 
-    public ServerGroupDeploymentReplaceHandler(final FileRepository fileRepository) {
+    public ServerGroupDeploymentReplaceHandler(final HostFileRepository fileRepository) {
         if (fileRepository == null) {
-            throw new IllegalArgumentException("fileRepository is null");
+            throw MESSAGES.nullVar("fileRepository");
         }
         this.fileRepository = fileRepository;
         this.validator.registerValidator(NAME, new StringLengthValidator(1));
@@ -67,7 +70,7 @@ public class ServerGroupDeploymentReplaceHandler implements OperationStepHandler
 
     @Override
     public ModelNode getModelDescription(Locale locale) {
-        return DeploymentDescription.getDeployDeploymentOperation(locale);
+        return DeploymentDescription.getReplaceDeploymentOperation(locale);
     }
 
     public void execute(OperationContext context, ModelNode operation) throws OperationFailedException {
@@ -77,10 +80,8 @@ public class ServerGroupDeploymentReplaceHandler implements OperationStepHandler
         String toReplace = operation.require(TO_REPLACE).asString();
 
         if (name.equals(toReplace)) {
-            throw operationFailed(String.format("Cannot use %s with the same value for parameters %s and %s. " +
-                    "Use %s to redeploy the same content or %s to replace content with a new version with the same name.",
-                    OPERATION_NAME, NAME, TO_REPLACE, ServerGroupDeploymentRedeployHandler.OPERATION_NAME,
-                    DeploymentFullReplaceHandler.OPERATION_NAME));
+            throw operationFailed(MESSAGES.cannotUseSameValueForParameters(OPERATION_NAME, NAME, TO_REPLACE,
+                    ServerGroupDeploymentRedeployHandler.OPERATION_NAME, DeploymentFullReplaceHandler.OPERATION_NAME));
         }
 
         final PathElement deploymentPath = PathElement.pathElement(DEPLOYMENT, name);
@@ -89,9 +90,9 @@ public class ServerGroupDeploymentReplaceHandler implements OperationStepHandler
         Resource domainDeployment;
         try {
             // check if the domain deployment exists
-            domainDeployment = context.getRootResource().requireChild(deploymentPath);
-        } catch (Exception e) {
-            throw operationFailed(String.format("No deployment with name %s found", name));
+            domainDeployment = context.readResourceFromRoot(PathAddress.EMPTY_ADDRESS.append(deploymentPath));
+        } catch (NoSuchElementException e) {
+            throw operationFailed(MESSAGES.noDeploymentContentWithName(name));
         }
 
         final ModelNode deployment = domainDeployment.getModel();
@@ -105,7 +106,7 @@ public class ServerGroupDeploymentReplaceHandler implements OperationStepHandler
 
         final Resource serverGroup = context.readResourceForUpdate(PathAddress.EMPTY_ADDRESS);
         if (! serverGroup.hasChild(replacePath)) {
-            throw operationFailed(String.format("No deployment with name %s found", toReplace));
+            throw operationFailed(MESSAGES.noDeploymentContentWithName(toReplace));
         }
         final Resource replaceResource = context.readResourceForUpdate(PathAddress.EMPTY_ADDRESS.append(replacePath));
         //
@@ -119,7 +120,7 @@ public class ServerGroupDeploymentReplaceHandler implements OperationStepHandler
         } else {
             deploymentResource = context.readResourceForUpdate(PathAddress.EMPTY_ADDRESS.append(deploymentPath));
             if(deploymentResource.getModel().get(ENABLED).asBoolean()) {
-                throw operationFailed(String.format("Deployment %s is already started", toReplace));
+                throw operationFailed(MESSAGES.deploymentAlreadyStarted(toReplace));
             }
         }
         //

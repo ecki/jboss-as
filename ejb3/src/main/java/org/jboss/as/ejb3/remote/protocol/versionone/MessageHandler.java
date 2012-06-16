@@ -22,7 +22,6 @@
 
 package org.jboss.as.ejb3.remote.protocol.versionone;
 
-import org.jboss.remoting3.Channel;
 import org.jboss.remoting3.MessageInputStream;
 
 import java.io.IOException;
@@ -32,6 +31,6 @@ import java.io.IOException;
  */
 interface MessageHandler {
 
-    void processMessage(final Channel channel, final MessageInputStream messageInputStream) throws IOException;
+    void processMessage(final ChannelAssociation channelAssociation, final MessageInputStream messageInputStream) throws IOException;
 
 }

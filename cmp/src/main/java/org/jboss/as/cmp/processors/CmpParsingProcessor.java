@@ -22,6 +22,7 @@
 
 package org.jboss.as.cmp.processors;
 
+import org.jboss.as.cmp.CmpMessages;
 import org.jboss.as.cmp.jdbc.metadata.JDBCApplicationMetaData;
 import org.jboss.as.cmp.jdbc.metadata.parser.JDBCMetaDataParser;
 import org.jboss.as.ejb3.deployment.EjbDeploymentAttachmentKeys;
@@ -30,7 +31,7 @@ import org.jboss.as.server.deployment.DeploymentUnit;
 import org.jboss.as.server.deployment.DeploymentUnitProcessingException;
 import org.jboss.as.server.deployment.DeploymentUnitProcessor;
 import org.jboss.metadata.ejb.spec.EjbJarMetaData;
-import org.jboss.metadata.parser.util.NoopXmlResolver;
+import org.jboss.metadata.parser.util.NoopXMLResolver;
 import org.jboss.modules.Module;
 import org.jboss.vfs.VFSUtils;
 import org.jboss.vfs.VirtualFile;
@@ -51,13 +52,13 @@ public class CmpParsingProcessor implements DeploymentUnitProcessor {
         }
         final EjbJarMetaData jarMetaData = deploymentUnit.getAttachment(EjbDeploymentAttachmentKeys.EJB_JAR_METADATA);
         if (jarMetaData == null || jarMetaData.getEnterpriseBeans() == null) {
-            throw new IllegalStateException("Deployment " + deploymentUnit + " illegally marked as a CMP deployment");
+            throw CmpMessages.MESSAGES.invalidCmpDeployment(deploymentUnit);
         }
 
         final Module module = deploymentUnit.getAttachment(org.jboss.as.server.deployment.Attachments.MODULE);
 
         final XMLInputFactory inputFactory = XMLInputFactory.newInstance();
-        inputFactory.setXMLResolver(NoopXmlResolver.create());
+        inputFactory.setXMLResolver(NoopXMLResolver.create());
         XMLStreamReader xmlReader = null;
 
 
@@ -71,7 +72,7 @@ public class CmpParsingProcessor implements DeploymentUnitProcessor {
             xmlReader = inputFactory.createXMLStreamReader(inputStream);
             jdbcMetaData = JDBCMetaDataParser.parse(xmlReader, jdbcMetaData);
         } catch (Exception e) {
-            throw new DeploymentUnitProcessingException("Failed to parse 'standardjbosscmp-jdbc.xml'", e);
+            throw CmpMessages.MESSAGES.failedToParse("standardjbosscmp-jdbc.xml", e);
         } finally {
             VFSUtils.safeClose(inputStream);
         }
@@ -87,7 +88,7 @@ public class CmpParsingProcessor implements DeploymentUnitProcessor {
                 xmlReader = inputFactory.createXMLStreamReader(inputStream);
                 jdbcMetaData = JDBCMetaDataParser.parse(xmlReader, jdbcMetaData);
             } catch (Exception e) {
-                throw new DeploymentUnitProcessingException("Failed to parse jbosscmp-jdbc.xml: " + descriptor.getPathName(), e);
+                throw CmpMessages.MESSAGES.failedToParse("jbosscmp-jdbc.xml", e);
             } finally {
                 VFSUtils.safeClose(inputStream);
             }

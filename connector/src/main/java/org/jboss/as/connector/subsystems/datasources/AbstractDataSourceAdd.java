@@ -22,41 +22,37 @@
 
 package org.jboss.as.connector.subsystems.datasources;
 
-import static org.jboss.as.connector.ConnectorLogger.SUBSYSTEM_DATASOURCES_LOGGER;
-import static org.jboss.as.connector.subsystems.datasources.Constants.DATASOURCE_DRIVER;
-import static org.jboss.as.connector.subsystems.datasources.Constants.ENABLED;
-import static org.jboss.as.connector.subsystems.datasources.Constants.JNDINAME;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
-
 import java.sql.Driver;
 import java.util.List;
 
-import javax.sql.DataSource;
-
-import org.jboss.as.connector.ConnectorServices;
-import org.jboss.as.connector.registry.DriverRegistry;
+import org.jboss.as.connector.util.ConnectorServices;
+import org.jboss.as.connector.services.driver.registry.DriverRegistry;
 import org.jboss.as.controller.AbstractAddStepHandler;
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.PathAddress;
 import org.jboss.as.controller.ServiceVerificationHandler;
 import org.jboss.as.controller.SimpleAttributeDefinition;
-import org.jboss.as.naming.ManagedReferenceFactory;
-import org.jboss.as.naming.ServiceBasedNamingStore;
-import org.jboss.as.naming.deployment.ContextNames;
-import org.jboss.as.naming.service.BinderService;
+import org.jboss.as.controller.registry.ManagementResourceRegistration;
 import org.jboss.as.naming.service.NamingService;
 import org.jboss.as.security.service.SubjectFactoryService;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.Property;
+import org.jboss.jca.core.api.connectionmanager.ccm.CachedConnectionManager;
 import org.jboss.jca.core.api.management.ManagementRepository;
 import org.jboss.jca.core.spi.transaction.TransactionIntegration;
-import org.jboss.msc.service.AbstractServiceListener;
 import org.jboss.msc.service.ServiceBuilder;
 import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceName;
+import org.jboss.msc.service.ServiceRegistry;
 import org.jboss.msc.service.ServiceTarget;
 import org.jboss.security.SubjectFactory;
+
+import static org.jboss.as.connector.logging.ConnectorMessages.MESSAGES;
+import static org.jboss.as.connector.subsystems.datasources.Constants.DATASOURCE_DRIVER;
+import static org.jboss.as.connector.subsystems.datasources.Constants.ENABLED;
+import static org.jboss.as.connector.subsystems.datasources.Constants.JNDINAME;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
 
 /**
  * Abstract operation handler responsible for adding a DataSource.
@@ -65,40 +61,56 @@ import org.jboss.security.SubjectFactory;
  */
 public abstract class AbstractDataSourceAdd extends AbstractAddStepHandler {
 
-    protected void performRuntime(OperationContext context, ModelNode operation, ModelNode model, final ServiceVerificationHandler verificationHandler, final List<ServiceController<?>> controllers) throws OperationFailedException {
-
+    protected void performRuntime(final OperationContext context, ModelNode operation, ModelNode model, final ServiceVerificationHandler verificationHandler, final List<ServiceController<?>> controllers) throws OperationFailedException {
         final ModelNode address = operation.require(OP_ADDR);
         final String dsName = PathAddress.pathAddress(address).getLastElement().getValue();
-        final String jndiName = operation.hasDefined(JNDINAME.getName()) ? operation.get(JNDINAME.getName()).asString() : dsName;
-
+        final String jndiName = model.get(JNDINAME.getName()).asString();
 
         final ServiceTarget serviceTarget = context.getServiceTarget();
 
         boolean enabled = false;
                 //!operation.hasDefined(ENABLED.getName()) || operation.get(ENABLED.getName()).asBoolean();
 
-        ModelNode node = operation.require(DATASOURCE_DRIVER.getName());
+        ModelNode node = DATASOURCE_DRIVER.resolveModelAttribute(context, model);
 
 
         AbstractDataSourceService dataSourceService = createDataSourceService(dsName);
+
+        final ManagementResourceRegistration registration = context.getResourceRegistrationForUpdate();
 
         final ServiceName dataSourceServiceName = AbstractDataSourceService.SERVICE_NAME_BASE.append(jndiName);
         final ServiceBuilder<?> dataSourceServiceBuilder = serviceTarget
                 .addService(dataSourceServiceName, dataSourceService)
                 .addDependency(ConnectorServices.TRANSACTION_INTEGRATION_SERVICE, TransactionIntegration.class,
                         dataSourceService.getTransactionIntegrationInjector())
-                .addDependency(ConnectorServices.MANAGEMENT_REPOSISTORY_SERVICE, ManagementRepository.class,
-                        dataSourceService.getmanagementRepositoryInjector())
+                .addDependency(ConnectorServices.MANAGEMENT_REPOSITORY_SERVICE, ManagementRepository.class,
+                        dataSourceService.getManagementRepositoryInjector())
                 .addDependency(SubjectFactoryService.SERVICE_NAME, SubjectFactory.class,
                         dataSourceService.getSubjectFactoryInjector())
                 .addDependency(ConnectorServices.JDBC_DRIVER_REGISTRY_SERVICE, DriverRegistry.class,
-                        dataSourceService.getDriverRegistryInjector()).addDependency(NamingService.SERVICE_NAME);
+                        dataSourceService.getDriverRegistryInjector())
+                .addDependency(ConnectorServices.CCM_SERVICE, CachedConnectionManager.class,
+                        dataSourceService.getCcmInjector())
+                .addDependency(ConnectorServices.IDLE_REMOVER_SERVICE)
+                .addDependency(ConnectorServices.CONNECTION_VALIDATOR_SERVICE)
+                .addDependency(NamingService.SERVICE_NAME);
 
+        dataSourceServiceBuilder.addListener(new DataSourceStatisticsListener(registration, dsName));
         startConfigAndAddDependency(dataSourceServiceBuilder, dataSourceService, dsName, serviceTarget, operation, verificationHandler);
 
         final String driverName = node.asString();
         final ServiceName driverServiceName = ServiceName.JBOSS.append("jdbc-driver", driverName.replaceAll("\\.", "_"));
-        if (driverServiceName != null) {
+        if (!context.isBooting()) {
+            final ServiceRegistry registry = context.getServiceRegistry(true);
+            final ServiceController<?> dataSourceController = registry.getService(driverServiceName);
+
+            if (driverServiceName != null && dataSourceController != null) {
+                dataSourceServiceBuilder.addDependency(driverServiceName, Driver.class,
+                        dataSourceService.getDriverInjector());
+            } else {
+                throw new OperationFailedException(MESSAGES.driverNotPresent(driverName));
+            }
+        } else {
             dataSourceServiceBuilder.addDependency(driverServiceName, Driver.class,
                     dataSourceService.getDriverInjector());
         }
@@ -140,7 +152,7 @@ public abstract class AbstractDataSourceAdd extends AbstractAddStepHandler {
         for (final SimpleAttributeDefinition attribute : attributes) {
             attribute.validateAndSet(operation, modelNode);
         }
-        //modelNode.get(ENABLED.getName()).set(false);
+
 
     }
 

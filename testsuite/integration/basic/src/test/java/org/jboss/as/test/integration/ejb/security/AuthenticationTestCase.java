@@ -21,13 +21,6 @@
  */
 package org.jboss.as.test.integration.ejb.security;
 
-import static java.util.concurrent.TimeUnit.SECONDS;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-
 import java.io.IOException;
 import java.security.Principal;
 import java.util.logging.Logger;
@@ -38,17 +31,30 @@ import javax.security.auth.login.LoginContext;
 
 import org.jboss.arquillian.container.test.api.Deployment;
 import org.jboss.arquillian.junit.Arquillian;
+import org.jboss.arquillian.test.api.ArquillianResource;
+import org.jboss.as.arquillian.api.ServerSetup;
+import org.jboss.as.arquillian.container.ManagementClient;
 import org.jboss.as.test.integration.common.HttpRequest;
 import org.jboss.as.test.integration.ejb.security.authentication.EntryBean;
 import org.jboss.as.test.integration.ejb.security.base.WhoAmIBean;
+import org.jboss.as.test.integration.security.common.AbstractSecurityDomainSetup;
+import org.jboss.as.test.shared.integration.ejb.security.Util;
 import org.jboss.security.client.SecurityClient;
 import org.jboss.security.client.SecurityClientFactory;
 import org.jboss.shrinkwrap.api.Archive;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
+import org.jboss.shrinkwrap.api.asset.StringAsset;
 import org.jboss.shrinkwrap.api.spec.WebArchive;
 import org.jboss.util.Base64;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+
+import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 /**
  * Test case to hold the authentication scenarios, these range from calling a servlet which calls a bean to calling a bean which
@@ -58,8 +64,12 @@ import org.junit.runner.RunWith;
  * @author <a href="mailto:darran.lofthouse@jboss.com">Darran Lofthouse</a>
  */
 @RunWith(Arquillian.class)
-public class AuthenticationTestCase extends SecurityTest {
+@ServerSetup({EjbSecurityDomainSetup.class})
+public class AuthenticationTestCase {
     private static final Logger log = Logger.getLogger(AuthenticationTestCase.class.getName());
+
+    @ArquillianResource
+    private ManagementClient managementClient;
 
     /*
      * Authentication Scenarios
@@ -75,24 +85,17 @@ public class AuthenticationTestCase extends SecurityTest {
 
     @Deployment
     public static Archive<?> deployment() {
-        // FIXME hack to get things prepared before the deployment happens
-        try {
-            // create required security domains
-            createSecurityDomain();
-        } catch (Exception e) {
-            // ignore
-        }
-
         // using JavaArchive doesn't work, because of a bug in Arquillian, it only deploys wars properly
         final WebArchive war = ShrinkWrap.create(WebArchive.class, "ejb3security.war")
                 .addPackage(WhoAmIBean.class.getPackage()).addPackage(EntryBean.class.getPackage())
                 .addPackage(HttpRequest.class.getPackage()).addClass(WhoAmI.class).addClass(Util.class).addClass(Entry.class)
-                .addClass(WhoAmIServlet.class).addClass(AuthenticationTestCase.class).addClass(Base64.class)
-                .addClass(SecurityTest.class).addAsResource("ejb3/security/users.properties", "users.properties")
+                .addClasses(WhoAmIServlet.class, AuthenticationTestCase.class, Base64.class)
+                .addClasses(AbstractSecurityDomainSetup.class, EjbSecurityDomainSetup.class)
+                .addAsResource("ejb3/security/users.properties", "users.properties")
                 .addAsResource("ejb3/security/roles.properties", "roles.properties")
                 .addAsWebInfResource("ejb3/security/web.xml", "web.xml")
                 .addAsWebInfResource("ejb3/security/jboss-web.xml", "jboss-web.xml")
-                .addAsManifestResource("web-secure-programmatic-login.war/MANIFEST.MF", "MANIFEST.MF");
+                .addAsManifestResource(new StringAsset("Manifest-Version: 1.0\nDependencies: org.jboss.as.controller-client,org.jboss.dmr\n"), "MANIFEST.MF");
         log.info(war.toString(true));
         return war;
     }
@@ -207,30 +210,28 @@ public class AuthenticationTestCase extends SecurityTest {
 
     @Test
     public void testAuthentication_ViaServlet() throws Exception {
-        final String result = HttpRequest.get("http://localhost:8080/ejb3security/whoAmI?method=whoAmI", "user1", "password1",
+        final String result = HttpRequest.get(managementClient.getWebUri() + "/ejb3security/whoAmI?method=whoAmI", "user1", "password1",
                 10, SECONDS);
         assertEquals("user1", result);
     }
 
     @Test
     public void testAuthentication_ReAuth_ViaServlet() throws Exception {
-        final String result = HttpRequest.get(
-                "http://localhost:8080/ejb3security/whoAmI?method=whoAmI&username=user2&password=password2", "user1",
+        final String result = HttpRequest.get(managementClient.getWebUri() + "/ejb3security/whoAmI?method=whoAmI&username=user2&password=password2", "user1",
                 "password1", 10, SECONDS);
         assertEquals("user2", result);
     }
 
     @Test
     public void testAuthentication_TwoBeans_ViaServlet() throws Exception {
-        final String result = HttpRequest.get("http://localhost:8080/ejb3security/whoAmI?method=doubleWhoAmI", "user1",
+        final String result = HttpRequest.get(managementClient.getWebUri() + "/ejb3security/whoAmI?method=doubleWhoAmI", "user1",
                 "password1", 10, SECONDS);
         assertEquals("user1,user1", result);
     }
 
     @Test
     public void testAuthentication_TwoBeans_ReAuth_ViaServlet() throws Exception {
-        final String result = HttpRequest.get(
-                "http://localhost:8080/ejb3security/whoAmI?method=doubleWhoAmI&username=user2&password=password2", "user1",
+        final String result = HttpRequest.get(managementClient.getWebUri() + "/ejb3security/whoAmI?method=doubleWhoAmI&username=user2&password=password2", "user1",
                 "password1", 10, SECONDS);
         assertEquals("user1,user2", result);
     }
@@ -238,8 +239,7 @@ public class AuthenticationTestCase extends SecurityTest {
     @Test
     public void testAuthentication_TwoBeans_ReAuth__BadPwd_ViaServlet() throws Exception {
         try {
-            HttpRequest.get(
-                    "http://localhost:8080/ejb3security/whoAmI?method=doubleWhoAmI&username=user2&password=bad_password",
+            HttpRequest.get(managementClient.getWebUri() + "/ejb3security/whoAmI?method=doubleWhoAmI&username=user2&password=bad_password",
                     "user1", "password1", 10, SECONDS);
             fail("Expected IOException");
         } catch (IOException e) {
@@ -310,42 +310,39 @@ public class AuthenticationTestCase extends SecurityTest {
 
     @Test
     public void testICIR_ViaServlet() throws Exception {
-        String result = HttpRequest.get("http://localhost:8080/ejb3security/whoAmI?method=doIHaveRole&role=Users", "user1",
+        String result = HttpRequest.get(managementClient.getWebUri() + "/ejb3security/whoAmI?method=doIHaveRole&role=Users", "user1",
                 "password1", 10, SECONDS);
         assertEquals("true", result);
-        result = HttpRequest.get("http://localhost:8080/ejb3security/whoAmI?method=doIHaveRole&role=Role1", "user1",
+        result = HttpRequest.get(managementClient.getWebUri() + "/ejb3security/whoAmI?method=doIHaveRole&role=Role1", "user1",
                 "password1", 10, SECONDS);
         assertEquals("true", result);
-        result = HttpRequest.get("http://localhost:8080/ejb3security/whoAmI?method=doIHaveRole&role=Role2", "user1",
+        result = HttpRequest.get(managementClient.getWebUri() + "/ejb3security/whoAmI?method=doIHaveRole&role=Role2", "user1",
                 "password1", 10, SECONDS);
         assertEquals("false", result);
     }
 
     @Test
     public void testICIR_ReAuth_ViaServlet() throws Exception {
-        String result = HttpRequest.get(
-                "http://localhost:8080/ejb3security/whoAmI?method=doIHaveRole&role=Users&username=user2&password=password2",
+        String result = HttpRequest.get(managementClient.getWebUri() + "/ejb3security/whoAmI?method=doIHaveRole&role=Users&username=user2&password=password2",
                 "user1", "password1", 10, SECONDS);
         assertEquals("true", result);
-        result = HttpRequest.get(
-                "http://localhost:8080/ejb3security/whoAmI?method=doIHaveRole&role=Role1&username=user2&password=password2",
+        result = HttpRequest.get(managementClient.getWebUri() + "/ejb3security/whoAmI?method=doIHaveRole&role=Role1&username=user2&password=password2",
                 "user1", "password1", 10, SECONDS);
         assertEquals("false", result);
-        result = HttpRequest.get(
-                "http://localhost:8080/ejb3security/whoAmI?method=doIHaveRole&role=Role2&username=user2&password=password2",
+        result = HttpRequest.get(managementClient.getWebUri() + "/ejb3security/whoAmI?method=doIHaveRole&role=Role2&username=user2&password=password2",
                 "user1", "password1", 10, SECONDS);
         assertEquals("true", result);
     }
 
     @Test
     public void testICIR_TwoBeans_ViaServlet() throws Exception {
-        String result = HttpRequest.get("http://localhost:8080/ejb3security/whoAmI?method=doubleDoIHaveRole&role=Users",
+        String result = HttpRequest.get(managementClient.getWebUri() + "/ejb3security/whoAmI?method=doubleDoIHaveRole&role=Users",
                 "user1", "password1", 10, SECONDS);
         assertEquals("true,true", result);
-        result = HttpRequest.get("http://localhost:8080/ejb3security/whoAmI?method=doubleDoIHaveRole&role=Role1", "user1",
+        result = HttpRequest.get(managementClient.getWebUri() + "/ejb3security/whoAmI?method=doubleDoIHaveRole&role=Role1", "user1",
                 "password1", 10, SECONDS);
         assertEquals("true,true", result);
-        result = HttpRequest.get("http://localhost:8080/ejb3security/whoAmI?method=doubleDoIHaveRole&role=Role2", "user1",
+        result = HttpRequest.get(managementClient.getWebUri() + "/ejb3security/whoAmI?method=doubleDoIHaveRole&role=Role2", "user1",
                 "password1", 10, SECONDS);
         assertEquals("false,false", result);
     }
@@ -353,15 +350,15 @@ public class AuthenticationTestCase extends SecurityTest {
     @Test
     public void testICIR_TwoBeans_ReAuth_ViaServlet() throws Exception {
         String result = HttpRequest
-                .get("http://localhost:8080/ejb3security/whoAmI?method=doubleDoIHaveRole&role=Users&username=user2&password=password2",
+                .get(managementClient.getWebUri() + "/ejb3security/whoAmI?method=doubleDoIHaveRole&role=Users&username=user2&password=password2",
                         "user1", "password1", 10, SECONDS);
         assertEquals("true,true", result);
         result = HttpRequest
-                .get("http://localhost:8080/ejb3security/whoAmI?method=doubleDoIHaveRole&role=Role1&username=user2&password=password2",
+                .get(managementClient.getWebUri() + "/ejb3security/whoAmI?method=doubleDoIHaveRole&role=Role1&username=user2&password=password2",
                         "user1", "password1", 10, SECONDS);
         assertEquals("true,false", result);
         result = HttpRequest
-                .get("http://localhost:8080/ejb3security/whoAmI?method=doubleDoIHaveRole&role=Role2&username=user2&password=password2",
+                .get(managementClient.getWebUri() + "/ejb3security/whoAmI?method=doubleDoIHaveRole&role=Role2&username=user2&password=password2",
                         "user1", "password1", 10, SECONDS);
         assertEquals("false,true", result);
     }

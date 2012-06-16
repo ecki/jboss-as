@@ -7,6 +7,8 @@ import java.io.Serializable;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * A criteria used to determine what IP address to use for an interface.
@@ -16,21 +18,23 @@ import java.net.SocketException;
 public interface InterfaceCriteria extends Serializable {
 
     /**
-     * Gets whether the given network interface and address are acceptable for
-     * use. Acceptance is indicated by returning the address which should be
-     * used for binding against
-     * the network interface, typically this is the input address. For those
-     * criteria which override the bind address, the overriden address should
-     * be returned.
+     * Gets which of the available network interfaces and addresses are acceptable for
+     * use. Acceptance is indicated by including a network interface and the acceptable addresses associated
+     * with it in a map. The map may include more than one entry, and the set of addresses for any given
+     * entry may include more than one value. For those criteria which override the configured addresses (e.g.
+     * {@link LoopbackAddressInterfaceCriteria}, the override
+     * address should be returned in the set associated with the relevant interface.
      *
-     * @param networkInterface the network interface. Cannot be <code>null</code>
-     * @param address an address that is associated with <code>networkInterface</code>.
-     * Cannot be <code>null</code>
-     * @return <code>InetAddress</code> the non-null address to bind to if the
-     * criteria is met, null if the criteria does not apply
+     * @param candidates map of candidate interfaces and addresses. This map may include all known interfaces and
+     *                   addresses or the system, or a subset of them that were acceptable to other criteria.
+     *
+     * @return map of accepted network interfaces to their acceptable addresses. Cannot return {@code null}; an
+     *         empty map should be returned if no acceptable items are found. The set of addresses stored as
+     *         values in the map should not be {@code null} or empty; no key for an interface should be stored
+     *         if no addresses are acceptable. A criteria that only cares about the network interface should
+     *         return a map including all provided candidate addresses for that interface.
      *
      * @throws SocketException
      */
-
-    InetAddress isAcceptable(NetworkInterface networkInterface, InetAddress address) throws SocketException;
+    Map<NetworkInterface, Set<InetAddress>> getAcceptableAddresses(final Map<NetworkInterface, Set<InetAddress>> candidates) throws SocketException;
 }

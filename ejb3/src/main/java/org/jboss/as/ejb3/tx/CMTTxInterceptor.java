@@ -21,11 +21,20 @@
  */
 package org.jboss.as.ejb3.tx;
 
-import java.rmi.RemoteException;
-import java.util.Random;
+import org.jboss.as.ee.component.Component;
+import org.jboss.as.ejb3.EjbLogger;
+import org.jboss.as.ejb3.component.EJBComponent;
+import org.jboss.as.ejb3.component.MethodIntf;
+import org.jboss.as.ejb3.component.MethodIntfHelper;
+import org.jboss.invocation.ImmediateInterceptorFactory;
+import org.jboss.invocation.Interceptor;
+import org.jboss.invocation.InterceptorContext;
+import org.jboss.invocation.InterceptorFactory;
+import org.jboss.logging.Logger;
+import org.jboss.tm.TransactionTimeoutConfiguration;
+import org.jboss.util.deadlock.ApplicationDeadlockException;
 
 import javax.ejb.EJBException;
-import javax.ejb.EJBTransactionRequiredException;
 import javax.ejb.EJBTransactionRolledbackException;
 import javax.ejb.NoSuchEJBException;
 import javax.ejb.TransactionAttributeType;
@@ -36,18 +45,8 @@ import javax.transaction.Status;
 import javax.transaction.SystemException;
 import javax.transaction.Transaction;
 import javax.transaction.TransactionManager;
-
-import org.jboss.as.ee.component.Component;
-import org.jboss.as.ee.component.ComponentView;
-import org.jboss.as.ejb3.component.EJBComponent;
-import org.jboss.as.ejb3.component.MethodIntf;
-import org.jboss.invocation.ImmediateInterceptorFactory;
-import org.jboss.invocation.Interceptor;
-import org.jboss.invocation.InterceptorContext;
-import org.jboss.invocation.InterceptorFactory;
-import org.jboss.logging.Logger;
-import org.jboss.tm.TransactionTimeoutConfiguration;
-import org.jboss.util.deadlock.ApplicationDeadlockException;
+import java.rmi.RemoteException;
+import java.util.Random;
 
 /**
  * Ensure the correct exceptions are thrown based on both caller
@@ -79,7 +78,7 @@ public class CMTTxInterceptor implements Interceptor {
     protected void endTransaction(TransactionManager tm, Transaction tx) {
         try {
             if (tx != tm.getTransaction()) {
-                throw new IllegalStateException("Wrong tx on thread: expected " + tx + ", actual " + tm.getTransaction());
+                throw EjbLogger.EJB3_LOGGER.wrongTxOnThread(tx, tm.getTransaction());
             }
 
             if (tx.getStatus() == Status.STATUS_MARKED_ROLLBACK) {
@@ -176,20 +175,9 @@ public class CMTTxInterceptor implements Interceptor {
 
     public Object processInvocation(InterceptorContext invocation) throws Exception {
         final EJBComponent component = (EJBComponent) invocation.getPrivateData(Component.class);
-
-        //for timer invocations there is no view, so the methodInf is attached directly
-        //to the context. Otherwise we retrive it from the invoked view
-        MethodIntf methodIntf = invocation.getPrivateData(MethodIntf.class);
-        if (methodIntf == null) {
-            final ComponentView componentView = invocation.getPrivateData(ComponentView.class);
-            if (componentView != null) {
-                methodIntf = componentView.getPrivateData(MethodIntf.class);
-            } else {
-                methodIntf = MethodIntf.BEAN;
-            }
-        }
-
+        final MethodIntf methodIntf = MethodIntfHelper.of(invocation);
         final TransactionAttributeType attr = component.getTransactionAttributeType(methodIntf, invocation.getMethod());
+        final int timeoutInSeconds = component.getTransactionTimeout(methodIntf, invocation.getMethod());
         switch (attr) {
             case MANDATORY:
                 return mandatory(invocation, component);
@@ -198,13 +186,13 @@ public class CMTTxInterceptor implements Interceptor {
             case NOT_SUPPORTED:
                 return notSupported(invocation, component);
             case REQUIRED:
-                return required(invocation, component);
+                return required(invocation, component, timeoutInSeconds);
             case REQUIRES_NEW:
-                return requiresNew(invocation, component);
+                return requiresNew(invocation, component, timeoutInSeconds);
             case SUPPORTS:
                 return supports(invocation, component);
             default:
-                throw new IllegalStateException("Unexpected tx attribute " + attr + " on " + invocation);
+                throw EjbLogger.EJB3_LOGGER.unknownTxAttributeOnInvocation(attr, invocation);
         }
     }
 
@@ -263,7 +251,7 @@ public class CMTTxInterceptor implements Interceptor {
         final TransactionManager tm = component.getTransactionManager();
         Transaction tx = tm.getTransaction();
         if (tx == null) {
-            throw new EJBTransactionRequiredException("Transaction is required for invocation: " + invocation);
+            throw EjbLogger.EJB3_LOGGER.txRequiredForInvocation(invocation);
         }
         return invokeInCallerTx(invocation, tx, component);
     }
@@ -271,7 +259,7 @@ public class CMTTxInterceptor implements Interceptor {
     protected Object never(InterceptorContext invocation, final EJBComponent component) throws Exception {
         final TransactionManager tm = component.getTransactionManager();
         if (tm.getTransaction() != null) {
-            throw new EJBException("Transaction present on server in Never call (EJB3 13.6.2.6)");
+            throw EjbLogger.EJB3_LOGGER.txPresentForNeverTxAttribute();
         }
         return invokeInNoTx(invocation);
     }
@@ -300,10 +288,9 @@ public class CMTTxInterceptor implements Interceptor {
         }
     }
 
-    protected Object required(final InterceptorContext invocation, final EJBComponent component) throws Exception {
+    protected Object required(final InterceptorContext invocation, final EJBComponent component, final int timeout) throws Exception {
         final TransactionManager tm = component.getTransactionManager();
         final int oldTimeout = getCurrentTransactionTimeout(component);
-        final int timeout = component.getTransactionTimeout(invocation.getMethod());
 
         try {
             if (timeout != -1) {
@@ -324,10 +311,9 @@ public class CMTTxInterceptor implements Interceptor {
         }
     }
 
-    protected Object requiresNew(InterceptorContext invocation, final EJBComponent component) throws Exception {
+    protected Object requiresNew(InterceptorContext invocation, final EJBComponent component, final int timeout) throws Exception {
         final TransactionManager tm = component.getTransactionManager();
         int oldTimeout = getCurrentTransactionTimeout(component);
-        int timeout = component.getTransactionTimeout(invocation.getMethod());
 
         try {
             if (timeout != -1 && tm != null) {
@@ -363,9 +349,9 @@ public class CMTTxInterceptor implements Interceptor {
         try {
             tx.setRollbackOnly();
         } catch (SystemException ex) {
-            log.error("SystemException while setting transaction for rollback only", ex);
+            EjbLogger.EJB3_LOGGER.failedToSetRollbackOnly(ex);
         } catch (IllegalStateException ex) {
-            log.error("IllegalStateException while setting transaction for rollback only", ex);
+            EjbLogger.EJB3_LOGGER.failedToSetRollbackOnly(ex);
         }
     }
 

@@ -27,6 +27,8 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SUBSYSTEM;
 
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 
 import org.jboss.as.clustering.subsystem.ClusteringSubsystemTest;
@@ -37,24 +39,44 @@ import org.jboss.as.subsystem.test.ModelDescriptionValidator.ValidationConfigura
 import org.jboss.dmr.ModelNode;
 import org.junit.Assert;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+import org.junit.runners.Parameterized.Parameters;
 
 /**
  *
  * @author <a href="kabir.khan@jboss.com">Kabir Khan</a>
  */
-//@Ignore
+@RunWith(value = Parameterized.class)
 public class InfinispanSubsystemTestCase extends ClusteringSubsystemTest {
 
-    public InfinispanSubsystemTestCase() {
-        super(InfinispanExtension.SUBSYSTEM_NAME, new InfinispanExtension(), "subsystem-infinispan.xml");
+    String xmlFile = null ;
+    int operations = 0 ;
+
+    public InfinispanSubsystemTestCase(String xmlFile, int operations) {
+        super(InfinispanExtension.SUBSYSTEM_NAME, new InfinispanExtension(), xmlFile);
+        this.xmlFile = xmlFile ;
+        this.operations = operations ;
     }
+
+    @Parameters
+    public static Collection<Object[]> data() {
+      Object[][] data = new Object[][] { { "subsystem-infinispan_1_0.xml", 31 },
+                                         { "subsystem-infinispan_1_1.xml", 31 },
+                                         { "subsystem-infinispan_1_2.xml", 35 },
+                                         { "subsystem-infinispan_1_3.xml", 35 },
+                                         { "subsystem-infinispan_1_4.xml", 73 },
+                                       };
+      return Arrays.asList(data);
+    }
+
 
     @Override
     protected ValidationConfiguration getModelValidationConfiguration() {
-        //TODO fix validation https://issues.jboss.org/browse/AS7-1788
-        return null;
+        // use this configuration to report any exceptional cases for DescriptionProviders
+        return new ValidationConfiguration();
     }
-    
+
     /**
      * Tests that the xml is parsed into the correct operations
      */
@@ -63,8 +85,16 @@ public class InfinispanSubsystemTestCase extends ClusteringSubsystemTest {
        // Parse the subsystem xml into operations
        List<ModelNode> operations = super.parse(getSubsystemXml());
 
+       // print the operations
+       /*
+       System.out.println("List of operations");
+       for (ModelNode op : operations) {
+           System.out.println("operation = " + op.toString());
+       }
+       */
        // Check that we have the expected number of operations
-       Assert.assertEquals(3, operations.size());
+       // one for each resource instance
+       Assert.assertEquals(this.operations, operations.size());
 
        // Check that each operation has the correct content
        ModelNode addSubsystem = operations.get(0);
@@ -86,6 +116,9 @@ public class InfinispanSubsystemTestCase extends ClusteringSubsystemTest {
 
        // Read the whole model and make sure it looks as expected
        ModelNode model = services.readWholeModel();
+
+       // System.out.println("model = " + model.asString());
+
        Assert.assertTrue(model.get(SUBSYSTEM).hasDefined(getMainSubsystemName()));
     }
 
@@ -102,6 +135,7 @@ public class InfinispanSubsystemTestCase extends ClusteringSubsystemTest {
        // Get the model and the persisted xml from the first controller
        ModelNode modelA = servicesA.readWholeModel();
        String marshalled = servicesA.getPersistedSubsystemXml();
+
        // Install the persisted xml from the first controller into a second controller
        KernelServices servicesB = super.installInController(marshalled);
        ModelNode modelB = servicesB.readWholeModel();

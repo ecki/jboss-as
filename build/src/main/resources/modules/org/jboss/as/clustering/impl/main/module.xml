@@ -23,6 +23,9 @@
   -->
 
 <module xmlns="urn:jboss:module:1.1" name="org.jboss.as.clustering.impl">
+    <properties>
+        <property name="jboss.api" value="private"/>
+    </properties>
 
     <resources>
         <!-- Insert resources here -->
@@ -31,10 +34,12 @@
     <dependencies>
         <module name="org.jboss.as.clustering.api"/>
         <module name="org.jboss.as.clustering.common"/>
-        <module name="org.jboss.as.clustering.jgroups"/>
+        <module name="org.jboss.as.server"/>
         <module name="org.jboss.logging"/>
         <module name="org.jboss.marshalling"/>
         <module name="org.jboss.marshalling.river" services="import"/>
+        <module name="org.jboss.modules"/>
+        <module name="org.jboss.msc"/>
         <module name="org.jgroups"/>
     </dependencies>
 </module>

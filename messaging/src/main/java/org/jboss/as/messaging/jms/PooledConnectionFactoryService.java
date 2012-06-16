@@ -22,21 +22,23 @@
 
 package org.jboss.as.messaging.jms;
 
+import org.hornetq.api.core.DiscoveryGroupConfiguration;
 import org.hornetq.api.core.TransportConfiguration;
 import org.hornetq.core.server.HornetQServer;
-import org.jboss.as.connector.ConnectorServices;
-import org.jboss.as.connector.registry.ResourceAdapterDeploymentRegistry;
-import org.jboss.as.connector.services.ResourceAdapterActivatorService;
+import org.jboss.as.connector.util.ConnectorServices;
+import org.jboss.as.connector.services.mdr.AS7MetadataRepository;
+import org.jboss.as.connector.services.resourceadapters.deployment.registry.ResourceAdapterDeploymentRegistry;
+import org.jboss.as.connector.services.resourceadapters.ResourceAdapterActivatorService;
 import org.jboss.as.connector.subsystems.jca.JcaSubsystemConfiguration;
 import org.jboss.as.naming.service.NamingService;
 import org.jboss.as.network.SocketBinding;
 import org.jboss.as.security.service.SubjectFactoryService;
 import org.jboss.as.txn.service.TxnServices;
 import org.jboss.jca.common.api.metadata.common.CommonAdminObject;
-import org.jboss.jca.common.api.metadata.common.CommonConnDef;
 import org.jboss.jca.common.api.metadata.common.FlushStrategy;
 import org.jboss.jca.common.api.metadata.common.Recovery;
 import org.jboss.jca.common.api.metadata.common.TransactionSupportEnum;
+import org.jboss.jca.common.api.metadata.common.v10.CommonConnDef;
 import org.jboss.jca.common.api.metadata.ironjacamar.IronJacamar;
 import org.jboss.jca.common.api.metadata.ra.AdminObject;
 import org.jboss.jca.common.api.metadata.ra.AuthenticationMechanism;
@@ -53,16 +55,15 @@ import org.jboss.jca.common.api.metadata.ra.RequiredConfigProperty;
 import org.jboss.jca.common.api.metadata.ra.ResourceAdapter1516;
 import org.jboss.jca.common.api.metadata.ra.SecurityPermission;
 import org.jboss.jca.common.api.metadata.ra.XsdString;
-import org.jboss.jca.common.api.metadata.ra.ra16.ConfigProperty16;
-import org.jboss.jca.common.api.metadata.ra.ra16.Connector16;
+import org.jboss.jca.common.api.metadata.ra.ra15.Connector15;
 import org.jboss.jca.common.api.validator.ValidateException;
-import org.jboss.jca.common.metadata.common.CommonConnDefImpl;
 import org.jboss.jca.common.metadata.common.CommonPoolImpl;
 import org.jboss.jca.common.metadata.common.CommonSecurityImpl;
 import org.jboss.jca.common.metadata.common.CommonTimeOutImpl;
 import org.jboss.jca.common.metadata.common.CommonValidationImpl;
 import org.jboss.jca.common.metadata.common.CredentialImpl;
-import org.jboss.jca.common.metadata.ironjacamar.IronJacamarImpl;
+import org.jboss.jca.common.metadata.common.v10.CommonConnDefImpl;
+import org.jboss.jca.common.metadata.ironjacamar.v10.IronJacamarImpl;
 import org.jboss.jca.common.metadata.ra.common.AuthenticationMechanismImpl;
 import org.jboss.jca.common.metadata.ra.common.ConfigPropertyImpl;
 import org.jboss.jca.common.metadata.ra.common.ConnectionDefinitionImpl;
@@ -71,12 +72,10 @@ import org.jboss.jca.common.metadata.ra.common.MessageAdapterImpl;
 import org.jboss.jca.common.metadata.ra.common.MessageListenerImpl;
 import org.jboss.jca.common.metadata.ra.common.OutboundResourceAdapterImpl;
 import org.jboss.jca.common.metadata.ra.common.ResourceAdapter1516Impl;
-import org.jboss.jca.common.metadata.ra.ra16.Activationspec16Impl;
-import org.jboss.jca.common.metadata.ra.ra16.ConfigProperty16Impl;
-import org.jboss.jca.common.metadata.ra.ra16.Connector16Impl;
+import org.jboss.jca.common.metadata.ra.ra15.Activationspec15Impl;
+import org.jboss.jca.common.metadata.ra.ra15.Connector15Impl;
 import org.jboss.jca.core.api.connectionmanager.ccm.CachedConnectionManager;
 import org.jboss.jca.core.api.management.ManagementRepository;
-import org.jboss.jca.core.spi.mdr.MetadataRepository;
 import org.jboss.jca.core.spi.rar.ResourceAdapterRepository;
 import org.jboss.jca.core.spi.transaction.TransactionIntegration;
 import org.jboss.msc.inject.Injector;
@@ -106,6 +105,7 @@ import static org.jboss.as.messaging.MessagingMessages.MESSAGES;
  * A service which translates a pooled connection factory into a resource adapter driven connection pool
  *
  * @author <a href="mailto:andy.taylor@jboss.com">Andy Taylor</a>
+ * @author <a href="mailto:jbertram@redhat.com">Justin Bertram</a>
  * @author Jason T. Greene
  *         Date: 5/13/11
  *         Time: 2:21 PM
@@ -115,7 +115,7 @@ public class PooledConnectionFactoryService implements Service<Void> {
     private static final List<LocalizedXsdString> EMPTY_LOCL = Collections.emptyList();
     private static final String CONNECTOR_CLASSNAME = "ConnectorClassName";
     private static final String CONNECTION_PARAMETERS = "ConnectionParameters";
-    private static final String HQ_ACTIVIATION = "org.hornetq.ra.inflow.HornetQActivationSpec";
+    private static final String HQ_ACTIVATION = "org.hornetq.ra.inflow.HornetQActivationSpec";
     private static final String HQ_CONN_DEF = "HornetQConnectionDefinition";
     private static final String HQ_ADAPTER = "org.hornetq.ra.HornetQResourceAdapter";
     private static final String RAMANAGED_CONN_FACTORY = "org.hornetq.ra.HornetQRAManagedConnectionFactory";
@@ -127,13 +127,19 @@ public class PooledConnectionFactoryService implements Service<Void> {
     private static final String JMS_QUEUE = "javax.jms.Queue";
     private static final String STRING_TYPE = "java.lang.String";
     private static final String INTEGER_TYPE = "java.lang.Integer";
+    private static final String LONG_TYPE = "java.lang.Long";
     private static final String SESSION_DEFAULT_TYPE = "SessionDefaultType";
     private static final String TRY_LOCK = "UseTryLock";
     private static final String JMS_MESSAGE_LISTENER = "javax.jms.MessageListener";
+    private static final String DEFAULT_MAX_RECONNECTS = "5";
+    private static final String GROUP_ADDRESS = "discoveryAddress";
+    private static final String DISCOVERY_INITIAL_WAIT_TIMEOUT = "discoveryInitialWaitTimeout";
+    private static final String GROUP_PORT = "discoveryPort";
+    private static final String REFRESH_TIMEOUT = "discoveryRefreshTimeout";
 
     private static final Collection<String> JMS_ACTIVATION_CONFIG_PROPERTIES = new HashSet<String>();
 
-    {
+   {
         // All the activation-config-properties that are mandated to be supported by the RA, as per EJB3.1 spec,
         // section 5.4.15 through 5.4.17
 
@@ -145,19 +151,25 @@ public class PooledConnectionFactoryService implements Service<Void> {
 
     private Injector<Object> transactionManager = new InjectedValue<Object>();
     private List<String> connectors;
+    private String discoveryGroupName;
     private List<PooledConnectionFactoryConfigProperties> adapterParams;
     private String name;
     private Map<String, SocketBinding> socketBindings = new HashMap<String, SocketBinding>();
     private InjectedValue<HornetQServer> hornetQService = new InjectedValue<HornetQServer>();
     private String jndiName;
     private String txSupport;
+    private int minPoolSize;
+    private int maxPoolSize;
 
-    public PooledConnectionFactoryService(String name, List<String> connectors, List<PooledConnectionFactoryConfigProperties> adapterParams, String jndiName, String txSupport) {
+   public PooledConnectionFactoryService(String name, List<String> connectors, String discoveryGroupName, List<PooledConnectionFactoryConfigProperties> adapterParams, String jndiName, String txSupport, int minPoolSize, int maxPoolSize) {
         this.name = name;
         this.connectors = connectors;
+        this.discoveryGroupName = discoveryGroupName;
         this.adapterParams = adapterParams;
         this.jndiName = jndiName;
         this.txSupport = txSupport;
+        this.minPoolSize = minPoolSize;
+        this.maxPoolSize = maxPoolSize;
     }
 
 
@@ -172,7 +184,7 @@ public class PooledConnectionFactoryService implements Service<Void> {
             createService(serviceTarget, context.getController().getServiceContainer());
         }
         catch (Exception e) {
-            throw new StartException(MESSAGES.failedToCreate("resource adapter"), e);
+            throw MESSAGES.failedToCreate(e, "resource adapter");
         }
 
     }
@@ -180,7 +192,7 @@ public class PooledConnectionFactoryService implements Service<Void> {
     private void createService(ServiceTarget serviceTarget, ServiceContainer container) throws Exception {
         InputStream is = null;
         InputStream isIj = null;
-        List<ConfigProperty16> properties = new ArrayList<ConfigProperty16>();
+        List<ConfigProperty> properties = new ArrayList<ConfigProperty>();
         try {
             StringBuilder connectorClassname = new StringBuilder();
             StringBuilder connectorParams = new StringBuilder();
@@ -206,25 +218,44 @@ public class PooledConnectionFactoryService implements Service<Void> {
             }
 
             if (connectorClassname.length() > 0) {
-                properties.add(simpleProperty(CONNECTOR_CLASSNAME, STRING_TYPE, connectorClassname.toString()));
+                properties.add(simpleProperty15(CONNECTOR_CLASSNAME, STRING_TYPE, connectorClassname.toString()));
             }
             if (connectorParams.length() > 0) {
-                properties.add(simpleProperty(CONNECTION_PARAMETERS, STRING_TYPE, connectorParams.toString()));
+                properties.add(simpleProperty15(CONNECTION_PARAMETERS, STRING_TYPE, connectorParams.toString()));
             }
+
+            if(discoveryGroupName != null) {
+                DiscoveryGroupConfiguration discoveryGroupConfiguration = hornetQService.getValue().getConfiguration().getDiscoveryGroupConfigurations().get(discoveryGroupName);
+                properties.add(simpleProperty15(GROUP_ADDRESS, STRING_TYPE, discoveryGroupConfiguration.getGroupAddress()));
+                properties.add(simpleProperty15(DISCOVERY_INITIAL_WAIT_TIMEOUT, LONG_TYPE, "" + discoveryGroupConfiguration.getDiscoveryInitialWaitTimeout()));
+                properties.add(simpleProperty15(GROUP_PORT, INTEGER_TYPE, "" + discoveryGroupConfiguration.getGroupPort()));
+                properties.add(simpleProperty15(REFRESH_TIMEOUT, LONG_TYPE, "" + discoveryGroupConfiguration.getRefreshTimeout()));
+            }
+
+            boolean hasReconnect = false;
+            final String reconnectName = JMSServices.RECONNECT_ATTEMPTS_METHOD;
             for (PooledConnectionFactoryConfigProperties adapterParam : adapterParams) {
-                properties.add(simpleProperty(adapterParam.getName(), adapterParam.getType(), adapterParam.getValue()));
+                hasReconnect |= reconnectName.equals(adapterParam.getName());
+
+                properties.add(simpleProperty15(adapterParam.getName(), adapterParam.getType(), adapterParam.getValue()));
+            }
+
+            // The default -1, which will hang forever until a server appears
+            if (!hasReconnect) {
+                properties.add(simpleProperty15(reconnectName, Integer.class.getName(), DEFAULT_MAX_RECONNECTS));
             }
 
             TransactionManagerLocator.container = container;
-            properties.add(simpleProperty("TransactionManagerLocatorClass", STRING_TYPE, TransactionManagerLocator.class.getName()));
-            properties.add(simpleProperty("TransactionManagerLocatorMethod", STRING_TYPE, "getTransactionManager"));
+            AS7RecoveryRegistry.container = container;
+            properties.add(simpleProperty15("TransactionManagerLocatorClass", STRING_TYPE, TransactionManagerLocator.class.getName()));
+            properties.add(simpleProperty15("TransactionManagerLocatorMethod", STRING_TYPE, "getTransactionManager"));
 
             OutboundResourceAdapter outbound = createOutbound();
             InboundResourceAdapter inbound = createInbound();
-            ResourceAdapter1516 ra = createResourceAdapter(properties, outbound, inbound);
-            Connector16 cmd = createConnector(ra);
+            ResourceAdapter1516 ra = createResourceAdapter15(properties, outbound, inbound);
+            Connector15 cmd = createConnector15(ra);
 
-            CommonConnDef common = createConnDef(jndiName);
+            CommonConnDef common = createConnDef(jndiName, minPoolSize, maxPoolSize);
             IronJacamar ijmd = createIron(common, txSupport);
 
             ResourceAdapterActivatorService activator = new ResourceAdapterActivatorService(cmd, ijmd,
@@ -232,11 +263,11 @@ public class PooledConnectionFactoryService implements Service<Void> {
 
             serviceTarget
                     .addService(ConnectorServices.RESOURCE_ADAPTER_ACTIVATOR_SERVICE.append(name), activator)
-                    .addDependency(ConnectorServices.IRONJACAMAR_MDR, MetadataRepository.class,
+                    .addDependency(ConnectorServices.IRONJACAMAR_MDR, AS7MetadataRepository.class,
                             activator.getMdrInjector())
-                    .addDependency(ConnectorServices.RA_REPOSISTORY_SERVICE, ResourceAdapterRepository.class,
+                    .addDependency(ConnectorServices.RA_REPOSITORY_SERVICE, ResourceAdapterRepository.class,
                             activator.getRaRepositoryInjector())
-                    .addDependency(ConnectorServices.MANAGEMENT_REPOSISTORY_SERVICE, ManagementRepository.class,
+                    .addDependency(ConnectorServices.MANAGEMENT_REPOSITORY_SERVICE, ManagementRepository.class,
                             activator.getManagementRepositoryInjector())
                     .addDependency(ConnectorServices.RESOURCE_ADAPTER_REGISTRY_SERVICE,
                             ResourceAdapterDeploymentRegistry.class, activator.getRegistryInjector())
@@ -274,8 +305,10 @@ public class PooledConnectionFactoryService implements Service<Void> {
         return new IronJacamarImpl(transactionSupport, Collections.<String, String>emptyMap(), Collections.<CommonAdminObject>emptyList(), definitions, Collections.<String>emptyList(), null);
     }
 
-    private static CommonConnDef createConnDef(String jndiName) throws ValidateException {
-        CommonPoolImpl pool = new CommonPoolImpl(null, null, false, false, FlushStrategy.FAILING_CONNECTION_ONLY);
+    private static CommonConnDef createConnDef(String jndiName, int minPoolSize, int maxPoolSize) throws ValidateException {
+        Integer minSize = (minPoolSize == -1) ? null : minPoolSize;
+        Integer maxSize = (maxPoolSize == -1) ? null : maxPoolSize;
+        CommonPoolImpl pool = new CommonPoolImpl(minSize, maxSize, false, false, FlushStrategy.FAILING_CONNECTION_ONLY);
         CommonTimeOutImpl timeOut = new CommonTimeOutImpl(null, null, null, null, null);
         CommonSecurityImpl security = null;
         Recovery recovery = new Recovery(new CredentialImpl(null, null, null), null, Boolean.FALSE);
@@ -283,11 +316,11 @@ public class PooledConnectionFactoryService implements Service<Void> {
         return new CommonConnDefImpl(Collections.<String, String>emptyMap(), RAMANAGED_CONN_FACTORY, jndiName, HQ_CONN_DEF, true, true, true, pool, timeOut, validation, security, recovery);
     }
 
-    private static Connector16Impl createConnector(ResourceAdapter1516 ra) {
-        return new Connector16Impl(null, str("Red Hat"), str("JMS 1.1 Server"), str("1.0"), null, ra, Collections.<String>emptyList(), false, EMPTY_LOCL, EMPTY_LOCL, Collections.<Icon>emptyList(), null);
+    private static Connector15Impl createConnector15(ResourceAdapter1516 ra) {
+        return new Connector15Impl(str("Red Hat"), str("JMS 1.1 Server"), str("1.0"), null, ra, EMPTY_LOCL, EMPTY_LOCL, Collections.<Icon>emptyList(), null);
     }
 
-    private ResourceAdapter1516Impl createResourceAdapter(List<ConfigProperty16> properties, OutboundResourceAdapter outbound, InboundResourceAdapter inbound) {
+    private ResourceAdapter1516Impl createResourceAdapter15(List<ConfigProperty> properties, OutboundResourceAdapter outbound, InboundResourceAdapter inbound) {
         return new ResourceAdapter1516Impl(HQ_ADAPTER, properties, outbound, inbound, Collections.<AdminObject>emptyList(), Collections.<SecurityPermission>emptyList(), null);
     }
 
@@ -300,8 +333,8 @@ public class PooledConnectionFactoryService implements Service<Void> {
             final ConfigProperty configProp = new ConfigPropertyImpl(EMPTY_LOCL, str(activationConfigProp), str(STRING_TYPE), null, null);
             jmsActivationConfigProps.add(configProp);
         }
-        Activationspec16Impl activation = new Activationspec16Impl(str(HQ_ACTIVIATION), destination, jmsActivationConfigProps, null);
-        List<MessageListener> messageListeners = Collections.<MessageListener>singletonList(new MessageListenerImpl(str(JMS_MESSAGE_LISTENER), activation, null));
+        Activationspec15Impl activation15 = new Activationspec15Impl(str(HQ_ACTIVATION), destination, null);
+        List<MessageListener> messageListeners = Collections.<MessageListener>singletonList(new MessageListenerImpl(str(JMS_MESSAGE_LISTENER), activation15, null));
         Messageadapter message = new MessageAdapterImpl(messageListeners, null);
 
         return new InboundResourceAdapterImpl(message, null);
@@ -309,9 +342,9 @@ public class PooledConnectionFactoryService implements Service<Void> {
 
     private static OutboundResourceAdapter createOutbound() {
         List<ConnectionDefinition> definitions = new ArrayList<ConnectionDefinition>();
-        List<ConfigProperty16> props = new ArrayList<ConfigProperty16>();
-        props.add(simpleProperty(SESSION_DEFAULT_TYPE, STRING_TYPE, JMS_QUEUE));
-        props.add(simpleProperty(TRY_LOCK, INTEGER_TYPE, "0"));
+        List<ConfigProperty> props = new ArrayList<ConfigProperty>();
+        props.add(simpleProperty15(SESSION_DEFAULT_TYPE, STRING_TYPE, JMS_QUEUE));
+        props.add(simpleProperty15(TRY_LOCK, INTEGER_TYPE, "0"));
         definitions.add(new ConnectionDefinitionImpl(str(RAMANAGED_CONN_FACTORY), props, str(RA_CONN_FACTORY), str(RA_CONN_FACTORY_IMPL), str(JMS_SESSION), str(HQ_SESSION), null));
 
         AuthenticationMechanism basicPassword = new AuthenticationMechanismImpl(Collections.<LocalizedXsdString>emptyList(), str(BASIC_PASS), CredentialInterfaceEnum.PasswordCredential, null);
@@ -322,8 +355,8 @@ public class PooledConnectionFactoryService implements Service<Void> {
         return new XsdString(str, null);
     }
 
-    private static ConfigProperty16 simpleProperty(String name, String type, String value) {
-        return new ConfigProperty16Impl(EMPTY_LOCL, str(name), str(type), str(value), Boolean.FALSE, Boolean.FALSE, Boolean.FALSE, null, null);
+    private static ConfigProperty simpleProperty15(String name, String type, String value) {
+        return new ConfigPropertyImpl(EMPTY_LOCL, str(name), str(type), str(value), null);
     }
 
 

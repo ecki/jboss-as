@@ -29,6 +29,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.jboss.as.cmp.CmpMessages;
+import static org.jboss.as.cmp.CmpMessages.MESSAGES;
 import org.jboss.as.cmp.bridge.CMPFieldBridge;
 import org.jboss.as.cmp.ejbql.ASTAbs;
 import org.jboss.as.cmp.ejbql.ASTAbstractSchema;
@@ -147,7 +149,7 @@ public final class JDBCEJBQLCompiler extends BasicVisitor implements QLCompiler 
         // reset all state variables
         reset();
 
-        // set input arguemts
+        // set input arguments
         this.returnType = returnType;
         this.parameterTypes = parameterTypes;
         this.readAhead = metadata.getReadAhead();
@@ -157,7 +159,7 @@ public final class JDBCEJBQLCompiler extends BasicVisitor implements QLCompiler 
         EJBQLParser parser = new EJBQLParser(new StringReader(SQLUtil.EMPTY_STRING));
 
         try {
-            // parse the ejbql into an abstract sytax tree
+            // parse the ejbql into an abstract syntax tree
             ASTEJBQL ejbqlNode;
             ejbqlNode = parser.parse(catalog, parameterTypes, ejbql);
 
@@ -182,7 +184,7 @@ public final class JDBCEJBQLCompiler extends BasicVisitor implements QLCompiler 
         // reset all state variables
         reset();
 
-        // set input arguemts
+        // set input arguments
         this.returnType = returnType;
         this.parameterTypes = parameterTypes;
         this.readAhead = metadata.getReadAhead();
@@ -192,7 +194,7 @@ public final class JDBCEJBQLCompiler extends BasicVisitor implements QLCompiler 
         JBossQLParser parser = new JBossQLParser(new StringReader(SQLUtil.EMPTY_STRING));
 
         try {
-            // parse the ejbql into an abstract sytax tree
+            // parse the ejbql into an abstract syntax tree
             ASTEJBQL ejbqlNode;
             ejbqlNode = parser.parse(catalog, parameterTypes, ejbql);
 
@@ -295,8 +297,7 @@ public final class JDBCEJBQLCompiler extends BasicVisitor implements QLCompiler 
     }
 
     public Object visit(SimpleNode node, Object data) {
-        throw new RuntimeException("Internal error: Found unknown node type in " +
-                "EJB-QL abstract syntax tree: node=" + node);
+        throw CmpMessages.MESSAGES.unknownNodeType(node);
     }
 
     private void setTypeFactory(JDBCTypeFactory typeFactory) {
@@ -332,10 +333,7 @@ public final class JDBCEJBQLCompiler extends BasicVisitor implements QLCompiler 
                                 !remoteClass.isAssignableFrom(parameterType)
                 )) {
 
-            throw new IllegalStateException("Only like types can be " +
-                    "compared: from entity=" +
-                    entity.getEntityName() +
-                    " to parameter type=" + parameterType);
+            throw CmpMessages.MESSAGES.onlyLikeTypesCanBeCompared(entity.getEntityName(), parameterType.getName());
         }
     }
 
@@ -374,10 +372,7 @@ public final class JDBCEJBQLCompiler extends BasicVisitor implements QLCompiler 
 
             // can only compare like kind entities
             if (!fromEntity.equals(toEntity)) {
-                throw new IllegalStateException("Only like types can be " +
-                        "compared: from entity=" +
-                        fromEntity.getEntityName() +
-                        " to entity=" + toEntity.getEntityName());
+                throw CmpMessages.MESSAGES.onlyLikeTypesCanBeCompared(fromEntity.getEntityName(), toEntity.getEntityName());
             }
 
             SQLUtil.getSelfCompareWhereClause(fromEntity.getPrimaryKeyFields(), fromAlias, toAlias, buf);
@@ -391,7 +386,7 @@ public final class JDBCEJBQLCompiler extends BasicVisitor implements QLCompiler 
 
     private void existsClause(ASTPath path, StringBuffer buf, boolean not) {
         if (!path.isCMRField()) {
-            throw new IllegalArgumentException("path must be a cmr field");
+            throw MESSAGES.pathMustBeCmrField();
         }
 
         JDBCCMRFieldBridge cmrField = (JDBCCMRFieldBridge) path.getCMRField();
@@ -744,10 +739,10 @@ public final class JDBCEJBQLCompiler extends BasicVisitor implements QLCompiler 
                 String childAlias = (String) entry.getKey();
                 ASTPath path = (ASTPath) entry.getValue();
 
-                // join the memeber path
+                // join the member path
                 createThetaJoin(path, path.size() - 1, joinedAliases, childAlias, buf);
 
-                // join the memeber path parents
+                // join the member path parents
                 for (int i = 0; i < path.size() - 1; i++) {
                     createThetaJoin(path, i, joinedAliases, buf);
                 }
@@ -906,11 +901,11 @@ public final class JDBCEJBQLCompiler extends BasicVisitor implements QLCompiler 
                 selectEntity(path, node.distinct, buf);
             }
         } else {
-            // the function should take a path expresion as a parameter
+            // the function should take a path expression as a parameter
             path = getPathFromChildren(child0);
 
             if (path == null) {
-                throw new IllegalStateException("The function in SELECT clause does not contain a path expression.");
+                throw MESSAGES.functionInSelectNoPath();
             }
 
             if (path.isCMPField()) {
@@ -996,7 +991,7 @@ public final class JDBCEJBQLCompiler extends BasicVisitor implements QLCompiler 
             }
             buf.append(SQLUtil.NULL);
         } else {
-            throw new IllegalStateException("Unexpected node in IS NULL clause: " + node);
+            throw MESSAGES.unexpectedNodeInNull(node);
         }
 
         return buf;
@@ -1016,7 +1011,7 @@ public final class JDBCEJBQLCompiler extends BasicVisitor implements QLCompiler 
     public Object visit(ASTMemberOf node, Object data) {
         StringBuffer buf = (StringBuffer) data;
 
-        // setup compare to vars first, so we can compre types in from vars
+        // setup compare to vars first, so we can compare types in from vars
         ASTPath toPath = (ASTPath) node.jjtGetChild(1);
 
         JDBCCMRFieldBridge toCMRField = (JDBCCMRFieldBridge) toPath.getCMRField();
@@ -1050,10 +1045,7 @@ public final class JDBCEJBQLCompiler extends BasicVisitor implements QLCompiler 
 
             // can only compare like kind entities
             if (!fromEntity.equals(toChildEntity)) {
-                throw new IllegalStateException("Only like types can be " +
-                        "compared: from entity=" +
-                        fromEntity.getEntityName() +
-                        " to entity=" + toChildEntity.getEntityName());
+                throw CmpMessages.MESSAGES.onlyLikeTypesCanBeCompared(fromEntity.getEntityName(), toChildEntity.getEntityName());
             }
         }
 
@@ -1108,7 +1100,7 @@ public final class JDBCEJBQLCompiler extends BasicVisitor implements QLCompiler 
 
         // second part makes fromNode equal toChild
         if (fromAlias != null) {
-            // compre pk to pk
+            // compare pk to pk
             if (relationTableAlias == null) {
                 SQLUtil.getSelfCompareWhereClause(toChildEntity.getPrimaryKeyFields(),
                         toChildAlias,
@@ -1164,10 +1156,7 @@ public final class JDBCEJBQLCompiler extends BasicVisitor implements QLCompiler 
             // can only compare like kind entities
             Class parameterType = getParameterType(toParam.number);
             if (!(fromCMPField.getFieldType().equals(parameterType))) {
-                throw new IllegalStateException("Only like types can be " +
-                        "compared: from CMP field=" +
-                        fromCMPField.getFieldType() +
-                        " to parameter=" + parameterType);
+                throw CmpMessages.MESSAGES.onlyLikeTypesCanBeCompared(fromCMPField.getFieldType().getName(), parameterType.getName());
             }
 
             inputParameters.addAll(QueryParameter.createParameters(toParam.number - 1, fromCMPField));
@@ -1180,10 +1169,7 @@ public final class JDBCEJBQLCompiler extends BasicVisitor implements QLCompiler 
 
             // can only compare like kind entities
             if (!(fromCMPField.getFieldType().equals(toCMPField.getFieldType()))) {
-                throw new IllegalStateException("Only like types can be " +
-                        "compared: from CMP field=" +
-                        fromCMPField.getFieldType() +
-                        " to CMP field=" + toCMPField.getFieldType());
+                throw CmpMessages.MESSAGES.onlyLikeTypesCanBeCompared(fromCMPField.getFieldType().getName(), toCMPField.getFieldType().getName());
             }
 
             SQLUtil.getSelfCompareWhereClause(fromCMPField, toCMPField, fromAlias, toAlias, comparison, buf);
@@ -1193,7 +1179,7 @@ public final class JDBCEJBQLCompiler extends BasicVisitor implements QLCompiler 
     }
 
     /**
-     * compreEntity(arg0, arg1)
+     * compareEntity(arg0, arg1)
      */
     public Object visit(ASTEntityComparison node, Object data) {
         StringBuffer buf = (StringBuffer) data;
@@ -1427,8 +1413,7 @@ public final class JDBCEJBQLCompiler extends BasicVisitor implements QLCompiler 
     public Object visit(ASTPath node, Object data) {
         StringBuffer buf = (StringBuffer) data;
         if (!node.isCMPField()) {
-            throw new IllegalStateException("Can only visit cmp valued path " +
-                    "node. Should have been handled at a higher level.");
+            throw CmpMessages.MESSAGES.canOnlyVisitCmpNodes();
         }
 
         JDBCCMPFieldBridge cmpField = (JDBCCMPFieldBridge) node.getCMPField();
@@ -1442,8 +1427,7 @@ public final class JDBCEJBQLCompiler extends BasicVisitor implements QLCompiler 
                     break;
                 }
             case EJBQLTypes.UNKNOWN_TYPE:
-                throw new IllegalStateException("Can not visit multi-column path " +
-                        "node. Should have been handled at a higher level.");
+                throw CmpMessages.MESSAGES.canNotVisitMultiColumnPath();
         }
 
         addJoinPath(node);
@@ -1453,8 +1437,7 @@ public final class JDBCEJBQLCompiler extends BasicVisitor implements QLCompiler 
     }
 
     public Object visit(ASTAbstractSchema node, Object data) {
-        throw new IllegalStateException("Can not visit abstract schema node. " +
-                "Should have been handled at a higher level.");
+        throw CmpMessages.MESSAGES.canNotVisitAbstractNode();
     }
 
     /**
@@ -1469,8 +1452,7 @@ public final class JDBCEJBQLCompiler extends BasicVisitor implements QLCompiler 
         if (ejbqlType == EJBQLTypes.ENTITY_TYPE ||
                 ejbqlType == EJBQLTypes.VALUE_CLASS_TYPE ||
                 ejbqlType == EJBQLTypes.UNKNOWN_TYPE) {
-            throw new IllegalStateException("Can not visit multi-column " +
-                    "parameter node. Should have been handled at a higher level.");
+            throw CmpMessages.MESSAGES.canNotVisitMultiColumnParameter();
         }
 
         QueryParameter param = new QueryParameter(node.number - 1, typeFactory.getJDBCType(type));
@@ -1500,7 +1482,7 @@ public final class JDBCEJBQLCompiler extends BasicVisitor implements QLCompiler 
                 ASTParameter param = (ASTParameter) offsetNode;
                 Class parameterType = getParameterType(param.number);
                 if (int.class != parameterType && Integer.class != parameterType) {
-                    throw new UnsupportedOperationException("OFFSET parameter must be an int");
+                    throw MESSAGES.offsetParameterMustBeInt();
                 }
                 offsetParam = param.number;
             } else {
@@ -1514,7 +1496,7 @@ public final class JDBCEJBQLCompiler extends BasicVisitor implements QLCompiler 
                 ASTParameter param = (ASTParameter) limitNode;
                 Class parameterType = getParameterType(param.number);
                 if (int.class != parameterType && Integer.class != parameterType) {
-                    throw new UnsupportedOperationException("LIMIT parameter must be an int");
+                    throw MESSAGES.limitParameterMustBeInt();
                 }
                 limitParam = param.number;
             } else {
@@ -1548,10 +1530,10 @@ public final class JDBCEJBQLCompiler extends BasicVisitor implements QLCompiler 
 
     /**
      * Wrap a node with a class that when ever toString is called visits the
-     * node.  This is used by the function implmentations, for parameters.
+     * node.  This is used by the function implementations, for parameters.
      * <p/>
      * Be careful with this class because it visits the node for each call of
-     * toString, which could have undesireable result if called multiple times.
+     * toString, which could have undesirable result if called multiple times.
      */
     private final class NodeStringWrapper {
         final Node node;
@@ -1641,7 +1623,7 @@ public final class JDBCEJBQLCompiler extends BasicVisitor implements QLCompiler 
                 leftJoinCMRList = JDBCAbstractQueryCommand.getLeftJoinCMRNodes(
                         selectEntity, path.getPath(), readAhead.getLeftJoins(), declaredPaths);
             } catch (Exception e) {
-                throw new IllegalStateException(e.getMessage());
+                throw MESSAGES.failedToGetLeftJoinNodes(e);
             }
 
             if (!leftJoinCMRList.isEmpty()) {

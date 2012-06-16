@@ -22,6 +22,8 @@
 
 package org.jboss.as.domain.http.server;
 
+import java.util.Locale;
+
 import org.jboss.modules.ModuleLoadException;
 
 /**
@@ -35,20 +37,20 @@ class ErrorHandler extends ResourceHandler {
     private static final String INDEX_WIN_HTML = "index_win.html";
 
     private static final String ERROR_MODULE = "org.jboss.as.domain-http-error-context";
-    static final String ERROR_CONTEXT = "/error";
+    private static final String ERROR_CONTEXT = "/error";
     private static final String DEFAULT_RESOURCE;
 
     static {
         String os = System.getProperty("os.name");
-        if (os != null && os.toLowerCase().contains("win")) {
+        if (os != null && os.toLowerCase(Locale.ENGLISH).contains("win")) {
             DEFAULT_RESOURCE = "/" + INDEX_WIN_HTML;
         } else {
             DEFAULT_RESOURCE = "/" + INDEX_HTML;
         }
     }
 
-    ErrorHandler() throws ModuleLoadException {
-        super(ERROR_CONTEXT, DEFAULT_RESOURCE, getClassLoader(ERROR_MODULE));
+    ErrorHandler(String slot) throws ModuleLoadException {
+        super(ERROR_CONTEXT, DEFAULT_RESOURCE, getClassLoader(ERROR_MODULE, slot));
     }
 
     @Override
@@ -61,6 +63,8 @@ class ErrorHandler extends ResourceHandler {
         return true;
     }
 
-
+    public static String getRealmRedirect() {
+        return ERROR_CONTEXT + DEFAULT_RESOURCE;
+    }
 
 }

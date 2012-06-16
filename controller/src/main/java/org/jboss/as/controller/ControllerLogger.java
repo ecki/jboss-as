@@ -22,21 +22,33 @@
 
 package org.jboss.as.controller;
 
+import static org.jboss.logging.Logger.Level.ERROR;
+import static org.jboss.logging.Logger.Level.WARN;
+
+import java.io.Closeable;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.util.Set;
+
+import javax.xml.stream.XMLStreamWriter;
+
 import org.jboss.dmr.ModelNode;
 import org.jboss.logging.BasicLogger;
 import org.jboss.logging.Cause;
 import org.jboss.logging.LogMessage;
 import org.jboss.logging.Logger;
+import org.jboss.logging.Logger.Level;
 import org.jboss.logging.Message;
 import org.jboss.logging.MessageLogger;
 
-import javax.xml.stream.XMLStreamWriter;
-import java.io.Closeable;
-
-import static org.jboss.logging.Logger.Level.ERROR;
-import static org.jboss.logging.Logger.Level.WARN;
-
 /**
+ * This module is using message IDs in the range 14600-14899.
+ * <p/>
+ * This file is using the subset 14600-14629 for logger messages.
+ * <p/>
+ * See <a href="http://community.jboss.org/docs/DOC-16810">http://community.jboss.org/docs/DOC-16810</a> for the full
+ * list of currently reserved JBAS message id blocks.
+ * <p/>
  * Date: 02.11.2011
  *
  * @author <a href="mailto:jperkins@redhat.com">James R. Perkins</a>
@@ -48,6 +60,11 @@ public interface ControllerLogger extends BasicLogger {
      * Default root logger with category of the package name.
      */
     ControllerLogger ROOT_LOGGER = Logger.getMessageLogger(ControllerLogger.class, ControllerLogger.class.getPackage().getName());
+
+    /**
+     * Logger for management operation messages.
+     */
+    ControllerLogger MGMT_OP_LOGGER = Logger.getMessageLogger(ControllerLogger.class, ControllerLogger.class.getPackage().getName() + ".management-operation");
 
     /**
      * A logger with the category {@code org.jboss.as.server}
@@ -63,7 +80,7 @@ public interface ControllerLogger extends BasicLogger {
      * Logs a warning message indicating the address, represented by the {@code address} parameter, could not be
      * resolved, so cannot match it to any InetAddress.
      *
-     * @param address the address that could not be resoloved.
+     * @param address the address that could not be resolved.
      */
     @LogMessage(level = WARN)
     @Message(id = 14600, value = "Cannot resolve address %s, so cannot match it to any InetAddress")
@@ -257,4 +274,111 @@ public interface ControllerLogger extends BasicLogger {
             "process at address %s. The result of this operation will only include the remote process' preliminary response to" +
             "the request.")
     void noFinalProxyOutcomeReceived(ModelNode op, ModelNode opAddress, ModelNode proxyAddress);
+
+    /**
+     * Logs an error message indicating operation failed due to a client error (e.g. an invalid request).
+     *
+     * @param op                 the operation that failed.
+     * @param opAddress          the address the operation failed on.
+     * @param failureDescription the failure description.
+     */
+    @LogMessage(level = Logger.Level.DEBUG)
+    @Message(id = 14616, value = "Operation (%s) failed - address: (%s) - failure description: %s")
+    void operationFailedOnClientError(ModelNode op, ModelNode opAddress, ModelNode failureDescription);
+
+    /**
+     * Logs an error indicating that createWrapper should be called
+     *
+     * @param name the subsystem name
+     */
+    @LogMessage(level = Logger.Level.WARN)
+    @Message(id = 14617, value = "A subystem '%s' was registered without calling ExtensionContext.createTracker(). The subsystems are registered normally but won't be cleaned up when the extension is removed.")
+    void registerSubsystemNoWraper(String name);
+
+    /**
+     * Logs a warning message indicating graceful shutdown of native management request handling
+     * communication did not complete within the given timeout period.
+     *
+     * @param timeout the timeout, in ms.
+     */
+    @LogMessage(level = Logger.Level.WARN)
+    @Message(id = 14618, value = "Graceful shutdown of the handler used for native management requests did not complete within [%d] ms but shutdown of the underlying communication channel is proceeding")
+    void gracefulManagementChannelHandlerShutdownTimedOut(int timeout);
+
+    /**
+     * Logs a warning message indicating graceful shutdown of native management request handling
+     * communication failed.
+     *
+     * @param cause the timeout, in ms.
+     */
+    @LogMessage(level = Logger.Level.WARN)
+    @Message(id = 14619, value = "Graceful shutdown of the handler used for native management requests failed but shutdown of the underlying communication channel is proceeding")
+    void gracefulManagementChannelHandlerShutdownFailed(@Cause Throwable cause);
+
+    /**
+     * Logs a warning message indicating graceful shutdown of management request handling of slave HC to master HC
+     * communication failed.
+     *
+     * @param cause the the cause of the failure
+     * @param propertyName the name of the system property
+     * @param propValue the value provided
+     */
+    @LogMessage(level = Logger.Level.WARN)
+    @Message(id = 14620, value = "Invalid value '%s' for system property '%s' -- value must be convertible into an int")
+    void invalidChannelCloseTimeout(@Cause NumberFormatException cause, String propertyName, String propValue);
+
+    /**
+     * Logs a warning message indicating multiple addresses or nics matched the selection criteria provided for
+     * an interface
+     *
+     * @param interfaceName the name of the interface configuration
+     * @param addresses the matching addresses
+     * @param nis the matching nics
+     * @param inetAddress the selected address
+     * @param networkInterface the selected nic
+     */
+    @LogMessage(level = Logger.Level.WARN)
+    @Message(id = 14621, value = "Multiple addresses or network interfaces matched the selection criteria for interface '%s'. Matching addresses: %s.  Matching network interfaces: %s. The interface will use address %s and network interface %s.")
+    void multipleMatchingAddresses(String interfaceName, Set<InetAddress> addresses, Set<String> nis, InetAddress inetAddress, String networkInterface);
+
+    /**
+     * Logs a warning message indicating multiple addresses or nics matched the selection criteria provided for
+     * an interface
+     *
+     * @param toMatch the name of the interface configuration
+     * @param addresses the matching addresses
+     * @param nis the matching nics
+     */
+    @LogMessage(level = Logger.Level.WARN)
+    @Message(id = 14622, value = "Value '%s' for interface selection criteria 'inet-address' is ambiguous, as more than one address or network interface available on the machine matches it. Because of this ambiguity, no address will be selected as a match. Matching addresses: %s.  Matching network interfaces: %s.")
+    void multipleMatchingAddresses(String toMatch, Set<InetAddress> addresses, Set<String> nis);
+
+    /**
+     * Logs an error message indicating the target definition could not be read.
+     *
+     * @param cause the cause of the error.
+     */
+    @LogMessage(level = Level.ERROR)
+    @Message(id = 14623, value = "Could not read target definition!")
+    void cannotReadTargetDefinition(@Cause Throwable cause);
+
+    /**
+     * Logs an error message indicating a failure to transform.
+     *
+     * @param cause the cause of the error.
+     */
+    @LogMessage(level = Level.ERROR)
+    @Message(id = 14624, value = "Could not transform")
+    void cannotTransform(@Cause Throwable cause);
+
+    /**
+     * Logs a warning message indicating the there is not transformer for the subsystem.
+     *
+     * @param subsystemName the subsystem name
+     * @param major         the major version
+     * @param minor         the minor version
+     */
+    @LogMessage(level = Level.WARN)
+    @Message(id = 14625, value = "We have no transformer for subsystem: %s-%d.%d model transfer can break!")
+    void transformerNotFound(String subsystemName, int major, int minor);
 }

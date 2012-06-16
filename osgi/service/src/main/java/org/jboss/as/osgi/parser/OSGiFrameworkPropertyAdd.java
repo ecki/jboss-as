@@ -46,11 +46,6 @@ public class OSGiFrameworkPropertyAdd extends AbstractAddStepHandler {
     }
 
     @Override
-    protected boolean requiresRuntime(OperationContext context) {
-        return context.getType() == OperationContext.Type.SERVER || context.getType() == OperationContext.Type.HOST;
-    }
-
-    @Override
     protected void populateModel(ModelNode operation, ModelNode model) throws OperationFailedException {
         model.get(ModelConstants.VALUE).set(operation.get(ModelConstants.VALUE));
     }
@@ -82,7 +77,7 @@ public class OSGiFrameworkPropertyAdd extends AbstractAddStepHandler {
         @Override
         public ModelNode getModelDescription(Locale locale) {
             ModelNode node = new ModelNode();
-            ResourceBundle resbundle = OSGiSubsystemProviders.getResourceBundle(locale);
+            ResourceBundle resbundle = OSGiDescriptionProviders.getResourceBundle(locale);
             node.get(ModelDescriptionConstants.OPERATION_NAME).set(ModelDescriptionConstants.ADD);
             node.get(ModelDescriptionConstants.DESCRIPTION).set(resbundle.getString("framework.property.add"));
             node.get(ModelDescriptionConstants.REQUEST_PROPERTIES, ModelConstants.VALUE, ModelDescriptionConstants.DESCRIPTION).set(resbundle.getString("framework.property.value"));

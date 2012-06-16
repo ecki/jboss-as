@@ -21,17 +21,29 @@
  */
 package org.jboss.as.domain.http.server;
 
+import static org.jboss.as.domain.http.server.HttpServerLogger.ROOT_LOGGER;
+import static org.jboss.as.domain.management.RealmConfigurationConstants.DIGEST_PLAIN_TEXT;
+
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Executor;
 
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
 
+import org.jboss.as.controller.ControlledProcessStateService;
 import org.jboss.as.controller.client.ModelControllerClient;
+import org.jboss.as.domain.http.server.security.BasicAuthenticator;
+import org.jboss.as.domain.http.server.security.ClientCertAuthenticator;
+import org.jboss.as.domain.http.server.security.DigestAuthenticator;
+import org.jboss.as.domain.management.AuthenticationMechanism;
 import org.jboss.as.domain.management.SecurityRealm;
+import org.jboss.com.sun.net.httpserver.Authenticator;
 import org.jboss.com.sun.net.httpserver.HttpServer;
 import org.jboss.com.sun.net.httpserver.HttpsConfigurator;
 import org.jboss.com.sun.net.httpserver.HttpsParameters;
@@ -59,7 +71,7 @@ public class ManagementHttpServer {
         this.securityRealm = securityRealm;
     }
 
-    private void addHandler(ManagementHttpHandler handler) {
+    void addHandler(ManagementHttpHandler handler) {
         handlers.add(handler);
     }
 
@@ -93,81 +105,107 @@ public class ManagementHttpServer {
         }
     }
 
-    public static ManagementHttpServer create(InetSocketAddress bindAddress, InetSocketAddress secureBindAddress, int backlog, ModelControllerClient modelControllerClient, Executor executor, SecurityRealm securityRealm)
+    public static ManagementHttpServer create(InetSocketAddress bindAddress, InetSocketAddress secureBindAddress, int backlog,
+            ModelControllerClient modelControllerClient, Executor executor, SecurityRealm securityRealm, ControlledProcessStateService controlledProcessStateService,
+            ConsoleMode consoleMode, String consoleSlot)
             throws IOException {
+        Map<String, String> configuration = Collections.emptyMap();
+
+        Authenticator auth = null;
+        final CertAuth certAuthMode;
+
+        if (securityRealm != null) {
+            Set<AuthenticationMechanism> authenticationMechanisms = securityRealm.getSupportedAuthenticationMechanisms();
+            if (authenticationMechanisms.contains(AuthenticationMechanism.DIGEST)) {
+                Map<String, String> mechConfig = securityRealm.getMechanismConfig(AuthenticationMechanism.DIGEST);
+                boolean plainTextDigest = true;
+                if (mechConfig.containsKey(DIGEST_PLAIN_TEXT)) {
+                    plainTextDigest = Boolean.parseBoolean(mechConfig.get(DIGEST_PLAIN_TEXT));
+                }
+                // TODO - Let the authenticator pull it's own config?
+                auth = new DigestAuthenticator(securityRealm, plainTextDigest == false);
+            } else if (authenticationMechanisms.contains(AuthenticationMechanism.PLAIN)) {
+                auth = new BasicAuthenticator(securityRealm);
+            }
+
+            if (authenticationMechanisms.contains(AuthenticationMechanism.CLIENT_CERT)) {
+                if (auth == null) {
+                    certAuthMode = CertAuth.NEED;
+                    auth = new ClientCertAuthenticator(securityRealm);
+                } else {
+                    // We have the possibility to use Client Cert but also Username/Password authentication so don't
+                    // need to force clients into presenting a Cert.
+                    certAuthMode = CertAuth.WANT;
+                }
+            } else {
+                certAuthMode = CertAuth.NONE;
+            }
+        } else {
+            certAuthMode = CertAuth.NONE;
+        }
+
         HttpServer httpServer = null;
         if (bindAddress != null) {
-            httpServer = HttpServer.create(bindAddress, backlog);
+            httpServer = HttpServer.create(bindAddress, backlog, configuration);
             httpServer.setExecutor(executor);
         }
 
-        HttpServer secureHttpServer = null;
+        HttpsServer secureHttpServer = null;
         if (secureBindAddress != null) {
-            secureHttpServer = HttpsServer.create(secureBindAddress, backlog);
-            SSLContext context = securityRealm.getSSLContext();
-            ((HttpsServer) secureHttpServer).setHttpsConfigurator(new HttpsConfigurator(context) {
+            secureHttpServer = HttpsServer.create(secureBindAddress, backlog, configuration);
+            final SSLContext context = securityRealm.getSSLContext();
+            if (context != null) {
+                secureHttpServer.setHttpsConfigurator(new HttpsConfigurator(context) {
 
-                @Override
-                public void configure(HttpsParameters params) {
-                    super.configure(params);
-                    {
-                        if (true)
-                            return;
+                    @Override
+                    public void configure(HttpsParameters params) {
+                        SSLParameters sslparams = context.getDefaultSSLParameters();
 
-                        // TODO - Add propper capture of these values.
-
-                        System.out.println(" * SSLContext * ");
-
-                        SSLContext sslContext = getSSLContext();
-                        SSLParameters sslParams = sslContext.getDefaultSSLParameters();
-                        String[] cipherSuites = sslParams.getCipherSuites();
-                        for (String current : cipherSuites) {
-                            System.out.println("Cipher Suite - " + current);
+                        switch (certAuthMode) {
+                            case NEED:
+                                sslparams.setNeedClientAuth(true);
+                                break;
+                            case WANT:
+                                sslparams.setWantClientAuth(true);
+                                break;
                         }
-                        System.out.println("Need Client Auth " + sslParams.getNeedClientAuth());
-                        String[] protocols = sslParams.getProtocols();
-                        for (String current : protocols) {
-                            System.out.println("Protocol " + current);
-                        }
-                        System.out.println("Want Client Auth " + sslParams.getWantClientAuth());
+
+                        params.setSSLParameters(sslparams);
+
                     }
-
-                    System.out.println(" * HTTPSParameters * ");
-                    {
-                        System.out.println("Client Address " + params.getClientAddress());
-                        String[] cipherSuites = params.getCipherSuites();
-                        if (cipherSuites != null) {
-                            for (String current : cipherSuites) {
-                                System.out.println("Cipher Suite - " + current);
-                            }
-                        }
-                        System.out.println("Need Client Auth " + params.getNeedClientAuth());
-                        String[] protocols = params.getProtocols();
-                        if (protocols != null) {
-                            for (String current : protocols) {
-                                System.out.println("Protocol " + current);
-                            }
-                        }
-                        System.out.println("Want Client Auth " + params.getWantClientAuth());
-                    }
-                }
-            });
-
-            secureHttpServer.setExecutor(executor);
+                });
+                secureHttpServer.setExecutor(executor);
+            } else {
+                ROOT_LOGGER.sslConfigurationNotFound();
+            }
         }
 
         ManagementHttpServer managementHttpServer = new ManagementHttpServer(httpServer, secureHttpServer, securityRealm);
-        managementHttpServer.addHandler(new RootHandler());
-        managementHttpServer.addHandler(new DomainApiHandler(modelControllerClient));
+        ResourceHandler consoleHandler = null;
+        try {
+            consoleHandler = consoleMode.createConsoleHandler(consoleSlot);
+        } catch (ModuleLoadException e) {
+            HttpServerLogger.ROOT_LOGGER.consoleModuleNotFound(consoleSlot == null ? "main" : consoleSlot);
+        }
+        managementHttpServer.addHandler(new RootHandler(consoleHandler));
+        managementHttpServer.addHandler(new DomainApiHandler(modelControllerClient, auth, controlledProcessStateService));
+        if (consoleHandler != null) {
+            managementHttpServer.addHandler(consoleHandler);
+        }
 
         try {
-            managementHttpServer.addHandler(new ConsoleHandler());
-            managementHttpServer.addHandler(new ErrorHandler());
+            managementHttpServer.addHandler(new ErrorHandler(consoleSlot));
         } catch (ModuleLoadException e) {
             throw new IOException("Unable to load resource handler", e);
         }
 
+        managementHttpServer.addHandler(new LogoutHandler());
+
         return managementHttpServer;
+    }
+
+    private enum CertAuth {
+        NONE, WANT, NEED
     }
 
 }

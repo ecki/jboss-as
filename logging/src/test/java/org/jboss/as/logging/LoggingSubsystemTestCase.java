@@ -21,11 +21,10 @@
 */
 package org.jboss.as.logging;
 
-import org.jboss.as.controller.OperationContext;
+import java.io.IOException;
+
 import org.jboss.as.subsystem.test.AbstractSubsystemBaseTest;
 import org.jboss.as.subsystem.test.AdditionalInitialization;
-
-import java.io.IOException;
 
 /**
  * @author <a href="kabir.khan@jboss.com">Kabir Khan</a>
@@ -48,11 +47,11 @@ public class LoggingSubsystemTestCase extends AbstractSubsystemBaseTest {
 
 
     protected AdditionalInitialization createAdditionalInitialization() {
-        return new AdditionalInitialization() {
-            @Override
-            protected OperationContext.Type getType() {
-                return OperationContext.Type.MANAGEMENT;
-            }
-        };
+        return AdditionalInitialization.MANAGEMENT;
+    }
+
+    @Override
+    protected void compareXml(String configId, String original, String marshalled) throws Exception {
+        super.compareXml(configId, original, marshalled, true);
     }
 }

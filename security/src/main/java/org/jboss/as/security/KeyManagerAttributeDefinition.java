@@ -1,12 +1,16 @@
 package org.jboss.as.security;
 
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.*;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.DESCRIPTION;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.EXPRESSIONS_ALLOWED;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.NILLABLE;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.TYPE;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.VALUE_TYPE;
 
 import java.util.Locale;
 import java.util.ResourceBundle;
 
-import javax.xml.stream.Location;
 import javax.xml.stream.XMLStreamException;
+import javax.xml.stream.XMLStreamReader;
 import javax.xml.stream.XMLStreamWriter;
 
 import org.jboss.as.controller.AttributeDefinition;
@@ -16,6 +20,7 @@ import org.jboss.as.controller.operations.validation.ModelTypeValidator;
 import org.jboss.as.controller.operations.validation.ParameterValidator;
 import org.jboss.as.controller.operations.validation.ParametersOfValidator;
 import org.jboss.as.controller.operations.validation.ParametersValidator;
+import org.jboss.as.controller.parsing.ParseUtils;
 import org.jboss.as.controller.registry.AttributeAccess;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.ModelType;
@@ -26,13 +31,13 @@ import org.jboss.dmr.ModelType;
 public class KeyManagerAttributeDefinition extends AttributeDefinition {
     private static final ParameterValidator keyManagerValidator;
     private static final ParameterValidator fieldValidator;
-
+    private static final String[] FIELDS = { Constants.ALGORITHM, Constants.PROVIDER };
 
     static {
         final ParametersValidator delegate = new ParametersValidator();
-        delegate.registerValidator(Constants.ALGORITHM, new ModelTypeValidator(ModelType.STRING, true));
-        delegate.registerValidator(Constants.PROVIDER, new ModelTypeValidator(ModelType.STRING, true));
-
+        for (String field : FIELDS) {
+            delegate.registerValidator(field, new ModelTypeValidator(ModelType.STRING, true, true));
+        }
         keyManagerValidator = new ParametersOfValidator(delegate);
         fieldValidator = delegate;
     }
@@ -46,17 +51,17 @@ public class KeyManagerAttributeDefinition extends AttributeDefinition {
             resourceModel = resourceModel.get(getName());
 
             if (resourceModel.hasDefined(Constants.ALGORITHM))
-                writer.writeAttribute(getName() + "-factory-" + Constants.PASSWORD, resourceModel.get(Constants.PASSWORD).asString());
+                writer.writeAttribute(getName() + "-factory-" + Constants.ALGORITHM, resourceModel.get(Constants.ALGORITHM).asString());
             if (resourceModel.hasDefined(Constants.PROVIDER))
                 writer.writeAttribute(getName() + "-factory-" + Constants.PROVIDER, resourceModel.get(Constants.PROVIDER).asString());
         }
     }
 
-   public static ModelNode parseField(String name, String value, Location location) throws XMLStreamException {
+   public static ModelNode parseField(String name, String value, XMLStreamReader reader) throws XMLStreamException {
         final String trimmed = value == null ? null : value.trim();
         ModelNode node;
         if (trimmed != null ) {
-            node = new ModelNode().set(trimmed);
+            node = new ModelNode().set(ParseUtils.parsePossibleExpression(trimmed));
         } else {
             node = new ModelNode();
         }
@@ -64,9 +69,26 @@ public class KeyManagerAttributeDefinition extends AttributeDefinition {
         try {
             fieldValidator.validateParameter(name, node);
         } catch (OperationFailedException e) {
-            throw new XMLStreamException(e.getFailureDescription().toString(), location);
+            throw SecurityMessages.MESSAGES.xmlStreamException(e.getFailureDescription().toString(), reader.getLocation());
         }
         return node;
+    }
+
+    @Override
+    public ModelNode validateOperation(ModelNode operationObject) throws OperationFailedException {
+        ModelNode validateOp = operationObject;
+        if (operationObject.hasDefined(getName())) {
+            // Convert any expression strings into ModelType.EXPRESSION
+            validateOp = operationObject.clone();
+            ModelNode attr = validateOp.get(getName());
+            for (String field : FIELDS) {
+                ModelNode fieldNode = attr.get(field);
+                if (fieldNode.getType() == ModelType.STRING) {
+                    fieldNode.set(ParseUtils.parsePossibleExpression(fieldNode.asString()));
+                }
+            }
+        }
+        return super.validateOperation(validateOp);
     }
 
     @Override
@@ -103,27 +125,29 @@ public class KeyManagerAttributeDefinition extends AttributeDefinition {
         password.get(DESCRIPTION); // placeholder
         password.get(TYPE).set(ModelType.STRING);
         password.get(NILLABLE).set(true);
+        password.get(EXPRESSIONS_ALLOWED).set(true);
 
         final ModelNode provider = valueType.get(Constants.PROVIDER);
         provider.get(DESCRIPTION);  // placeholder
         provider.get(TYPE).set(ModelType.STRING);
         provider.get(NILLABLE).set(true);
+        provider.get(EXPRESSIONS_ALLOWED).set(true);
 
         return valueType;
     }
 
     @Override
     public ModelNode addResourceAttributeDescription(ResourceBundle bundle, String prefix, ModelNode resourceDescription) {
-       throw new UnsupportedOperationException("Use the ResourceDescriptionResolver variant");
+       throw SecurityMessages.MESSAGES.unsupportedOperationExceptionUseResourceDesc();
     }
 
     @Override
     public ModelNode addOperationParameterDescription(ResourceBundle bundle, String prefix, ModelNode operationDescription) {
-       throw new UnsupportedOperationException("Use the ResourceDescriptionResolver variant");
+       throw SecurityMessages.MESSAGES.unsupportedOperationExceptionUseResourceDesc();
     }
 
     @Override
     public void marshallAsElement(ModelNode resourceModel, XMLStreamWriter writer) throws XMLStreamException {
-        throw new UnsupportedOperationException();
+        throw SecurityMessages.MESSAGES.unsupportedOperation();
     }
 }

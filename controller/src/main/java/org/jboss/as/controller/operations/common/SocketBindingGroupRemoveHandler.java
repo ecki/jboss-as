@@ -24,12 +24,6 @@ import org.jboss.as.controller.AbstractRemoveStepHandler;
 import org.jboss.as.controller.OperationContext;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.REMOVE;
 
-import java.util.Locale;
-
-import org.jboss.as.controller.descriptions.DescriptionProvider;
-import org.jboss.as.controller.descriptions.common.SocketBindingGroupDescription;
-import org.jboss.dmr.ModelNode;
-
 /**
  * Handler for the socket-binding-group resource's remove operation.
  *
@@ -48,6 +42,6 @@ public class SocketBindingGroupRemoveHandler extends AbstractRemoveStepHandler {
     }
 
     protected boolean requiresRuntime(OperationContext context) {
-        return false;
+        return context.getProcessType().isServer();
     }
 }

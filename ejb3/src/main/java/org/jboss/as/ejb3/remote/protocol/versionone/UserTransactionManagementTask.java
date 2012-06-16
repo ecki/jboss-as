@@ -25,12 +25,11 @@ package org.jboss.as.ejb3.remote.protocol.versionone;
 import org.jboss.as.ejb3.remote.EJBRemoteTransactionsRepository;
 import org.jboss.ejb.client.UserTransactionID;
 import org.jboss.logging.Logger;
-import org.jboss.remoting3.Channel;
+import org.jboss.marshalling.MarshallerFactory;
 import org.xnio.IoUtils;
 
 import javax.transaction.Transaction;
 import javax.transaction.TransactionManager;
-import javax.transaction.xa.XAResource;
 import java.io.IOException;
 
 /**
@@ -41,15 +40,18 @@ abstract class UserTransactionManagementTask implements Runnable {
     private static final Logger logger = Logger.getLogger(UserTransactionManagementTask.class);
 
     protected final short invocationId;
-    protected final Channel channel;
+    protected final ChannelAssociation channelAssociation;
     protected final EJBRemoteTransactionsRepository transactionsRepository;
     protected final UserTransactionID userTransactionID;
+    protected final MarshallerFactory marshallerFactory;
     protected final TransactionRequestHandler transactionRequestHandler;
 
-    UserTransactionManagementTask(final TransactionRequestHandler transactionRequestHandler, final EJBRemoteTransactionsRepository transactionsRepository, final UserTransactionID userTransactionID,
-                                  final Channel channel, final short invocationId) {
+    UserTransactionManagementTask(final TransactionRequestHandler transactionRequestHandler, final EJBRemoteTransactionsRepository transactionsRepository,
+                                  final MarshallerFactory marshallerFactory, final UserTransactionID userTransactionID,
+                                  final ChannelAssociation channelAssociation, final short invocationId) {
         this.transactionRequestHandler = transactionRequestHandler;
-        this.channel = channel;
+        this.channelAssociation = channelAssociation;
+        this.marshallerFactory = marshallerFactory;
         this.invocationId = invocationId;
         this.transactionsRepository = transactionsRepository;
         this.userTransactionID = userTransactionID;
@@ -63,22 +65,22 @@ abstract class UserTransactionManagementTask implements Runnable {
             try {
                 // write out a failure message to the channel to let the client know that
                 // the transaction operation failed
-                transactionRequestHandler.writeException(this.channel, this.invocationId, t, null);
+                transactionRequestHandler.writeException(this.channelAssociation, this.marshallerFactory, this.invocationId, t, null);
             } catch (IOException e) {
                 logger.error("Could not write out message to channel due to", e);
                 // close the channel
-                IoUtils.safeClose(this.channel);
+                IoUtils.safeClose(this.channelAssociation.getChannel());
             }
             return;
         }
 
         try {
             // write out invocation success message to the channel
-            transactionRequestHandler.writeTxInvocationResponseMessage(this.channel, this.invocationId);
+            transactionRequestHandler.writeTxInvocationResponseMessage(this.channelAssociation, this.invocationId);
         } catch (IOException e) {
             logger.error("Could not write out invocation success message to channel due to", e);
             // close the channel
-            IoUtils.safeClose(this.channel);
+            IoUtils.safeClose(this.channelAssociation.getChannel());
         }
     }
 

@@ -26,7 +26,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import javax.ejb.CreateException;
-import javax.ejb.DuplicateKeyException;
+import static org.jboss.as.cmp.CmpMessages.MESSAGES;
 import org.jboss.as.cmp.context.CmpEntityBeanContext;
 
 /**
@@ -42,7 +42,7 @@ public abstract class JDBCInsertPKCreateCommand extends JDBCAbstractCreateComman
     public void init(JDBCStoreManager manager) {
         super.init(manager);
 
-        // if no exception processor is defined, we will perform a existance
+        // if no exception processor is defined, we will perform a existence
         // check before trying the insert to report duplicate key
         if (exceptionProcessor == null) {
             initExistsSQL();
@@ -62,7 +62,7 @@ public abstract class JDBCInsertPKCreateCommand extends JDBCAbstractCreateComman
     }
 
     protected void beforeInsert(CmpEntityBeanContext ctx) throws CreateException {
-        // are we checking existance by query?
+        // are we checking existence by query?
         if (existsSQL != null) {
             Connection c = null;
             PreparedStatement ps = null;
@@ -81,14 +81,13 @@ public abstract class JDBCInsertPKCreateCommand extends JDBCAbstractCreateComman
 
                 rs = ps.executeQuery();
                 if (!rs.next()) {
-                    throw new CreateException("Error checking if entity with primary pk " + pk + "exists: SQL returned no rows");
+                    throw MESSAGES.errorCheckingEntityExists(pk);
                 }
                 if (rs.getInt(1) > 0) {
-                    throw new DuplicateKeyException("Entity with primary key " + pk + " already exists");
+                    throw MESSAGES.entityWithPKExists(pk);
                 }
             } catch (SQLException e) {
-                log.error("Error checking if entity exists", e);
-                throw new CreateException("Error checking if entity exists:" + e);
+                throw MESSAGES.errorCheckingIfEntityExists(e);
             } finally {
                 JDBCUtil.safeClose(rs);
                 JDBCUtil.safeClose(ps);

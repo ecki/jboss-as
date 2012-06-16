@@ -38,6 +38,8 @@ import org.jboss.as.server.deployment.DeploymentPhaseContext;
 import org.jboss.as.server.deployment.DeploymentUnitProcessingException;
 import org.jboss.as.server.deployment.reflect.ClassIndex;
 import org.jboss.invocation.InterceptorFactory;
+import org.jboss.metadata.ejb.spec.EntityBeanMetaData;
+import org.jboss.modules.ModuleLoader;
 import org.jboss.msc.service.ServiceBuilder;
 import org.jboss.msc.service.ServiceName;
 
@@ -47,8 +49,8 @@ import org.jboss.msc.service.ServiceName;
 public class CmpEntityBeanComponentDescription extends EntityBeanComponentDescription {
     private JDBCEntityMetaData entityMetaData;
 
-    public CmpEntityBeanComponentDescription(String componentName, String componentClassName, EjbJarDescription ejbJarDescription, ServiceName deploymentUnitServiceName) {
-        super(componentName, componentClassName, ejbJarDescription, deploymentUnitServiceName);
+    public CmpEntityBeanComponentDescription(String componentName, String componentClassName, EjbJarDescription ejbJarDescription, ServiceName deploymentUnitServiceName, final EntityBeanMetaData descriptorData) {
+        super(componentName, componentClassName, ejbJarDescription, deploymentUnitServiceName, descriptorData);
 
         getConfigurators().addFirst(new ComponentConfigurator() {
             public void configure(final DeploymentPhaseContext context, final ComponentDescription description, final ComponentConfiguration configuration) throws DeploymentUnitProcessingException {
@@ -66,8 +68,8 @@ public class CmpEntityBeanComponentDescription extends EntityBeanComponentDescri
     }
 
     @Override
-    public ComponentConfiguration createEntityBeanConfiguration(final ClassIndex classIndex, final ClassLoader moduleClassLoder) {
-        final ComponentConfiguration configuration = new ComponentConfiguration(this, classIndex, moduleClassLoder);
+    public ComponentConfiguration createEntityBeanConfiguration(final ClassIndex classIndex, final ClassLoader moduleClassLoader, final ModuleLoader moduleLoader) {
+        final ComponentConfiguration configuration = new ComponentConfiguration(this, classIndex, moduleClassLoader, moduleLoader);
         configuration.setComponentCreateServiceFactory(CmpEntityBeanComponentCreateService.FACTORY);
         return configuration;
     }

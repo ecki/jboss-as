@@ -23,12 +23,12 @@
 package org.jboss.as.ejb3.deployment;
 
 import org.jboss.as.ejb3.deployment.processors.EjbInjectionSource;
+import org.jboss.as.ejb3.security.EjbJaccConfig;
 import org.jboss.as.ejb3.subsystem.deployment.InstalledComponent;
 import org.jboss.as.server.deployment.AttachmentKey;
 import org.jboss.as.server.deployment.AttachmentList;
 import org.jboss.ejb.client.EJBClientContext;
 import org.jboss.metadata.ejb.spec.EjbJarMetaData;
-import org.jboss.msc.service.ServiceName;
 
 /**
  * {@link org.jboss.as.server.deployment.DeploymentUnitProcessor} attachment keys specific to EJB3 deployment
@@ -51,13 +51,14 @@ public class EjbDeploymentAttachmentKeys {
 
     public static final AttachmentKey<AttachmentList<EjbInjectionSource>> EJB_INJECTIONS = AttachmentKey.createList(EjbInjectionSource.class);
 
-    public static final AttachmentKey<ServiceName> EJB_CLIENT_CONTEXT_SERVICE_NAME = AttachmentKey.create(ServiceName.class);
     public static final AttachmentKey<EJBClientContext> EJB_CLIENT_CONTEXT = AttachmentKey.create(EJBClientContext.class);
 
     /**
      * components that have been registered with the management API
      */
     public static final AttachmentKey<AttachmentList<InstalledComponent>> MANAGED_COMPONENTS = AttachmentKey.createList(InstalledComponent.class);
+
+    public static final AttachmentKey<AttachmentList<EjbJaccConfig>> JACC_PERMISSIONS = AttachmentKey.createList(EjbJaccConfig.class);
 
 }
 

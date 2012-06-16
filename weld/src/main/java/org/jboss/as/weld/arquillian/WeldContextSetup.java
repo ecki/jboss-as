@@ -33,7 +33,7 @@ import javax.naming.InitialContext;
 import javax.naming.NamingException;
 
 import org.jboss.as.server.deployment.SetupAction;
-import org.jboss.logging.Logger;
+import org.jboss.as.weld.WeldLogger;
 import org.jboss.msc.service.ServiceName;
 import org.jboss.weld.Container;
 import org.jboss.weld.context.bound.BoundConversationContext;
@@ -59,8 +59,6 @@ public class WeldContextSetup implements SetupAction {
     }
 
     private static final String STANDARD_BEAN_MANAGER_JNDI_NAME = "java:comp/BeanManager";
-
-    private static final Logger log = Logger.getLogger("org.jboss.as.arquillian");
 
     private final ThreadLocal<Map<String, Object>> sessionContexts = new ContextMapThreadLocal();
     private final ThreadLocal<Map<String, Object>> requestContexts = new ContextMapThreadLocal();
@@ -100,7 +98,7 @@ public class WeldContextSetup implements SetupAction {
                 conversationContext.activate();
             }
         } catch (NamingException e) {
-            log.error("Failed to setup Weld contexts", e);
+            WeldLogger.ROOT_LOGGER.failedToSetupWeldContexts(e);
         }
     }
 
@@ -115,6 +113,7 @@ public class WeldContextSetup implements SetupAction {
                 CreationalContext<?> ctx = manager.createCreationalContext(sessionContextBean);
                 final BoundSessionContext sessionContext = (BoundSessionContext) manager.getReference(sessionContextBean,
                         BoundSessionContext.class, ctx);
+                sessionContext.invalidate();
                 sessionContext.deactivate();
                 sessionContext.dissociate(sessionContexts.get());
 
@@ -123,6 +122,7 @@ public class WeldContextSetup implements SetupAction {
                 ctx = manager.createCreationalContext(requestContextBean);
                 final BoundRequestContext requestContext = (BoundRequestContext) manager.getReference(requestContextBean,
                         BoundRequestContext.class, ctx);
+                requestContext.invalidate();
                 requestContext.deactivate();
                 requestContext.dissociate(requestContexts.get());
 
@@ -131,11 +131,12 @@ public class WeldContextSetup implements SetupAction {
                 ctx = manager.createCreationalContext(conversationContextBean);
                 final BoundConversationContext conversationContext = (BoundConversationContext) manager.getReference(
                         conversationContextBean, BoundConversationContext.class, ctx);
+                conversationContext.invalidate();
                 conversationContext.deactivate();
                 conversationContext.dissociate(boundRequests.get());
             }
         } catch (NamingException e) {
-            log.error("Failed to tear down Weld contexts", e);
+            WeldLogger.ROOT_LOGGER.failedToTearDownWeldContexts(e);
         } finally {
             sessionContexts.remove();
             requestContexts.remove();

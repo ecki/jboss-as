@@ -23,7 +23,6 @@
 package org.jboss.as.cmp.component.interceptors;
 
 import java.lang.reflect.Method;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Enumeration;
 import java.util.Iterator;
@@ -72,7 +71,7 @@ public class CmpEntityBeanHomeFinderInterceptorFactory extends EntityBeanHomeFin
 
         final JDBCQueryCommand.EntityProxyFactory factory = new JDBCQueryCommand.EntityProxyFactory() {
             public Object getEntityObject(final Object primaryKey) {
-                return localHome ? cmpComponent.getEjbLocalObject(primaryKey) : cmpComponent.getEJBObject(primaryKey);
+                return localHome ? cmpComponent.getEJBLocalObject(primaryKey) : cmpComponent.getEJBObject(primaryKey);
             }
         };
 
@@ -102,9 +101,6 @@ public class CmpEntityBeanHomeFinderInterceptorFactory extends EntityBeanHomeFin
                 };
             }
             default: {
-                if (result == null) {
-                    throw new ObjectNotFoundException("Could not find entity from " + finderMethod + " with params " + Arrays.toString(context.getParameters()));
-                }
                 return result;
             }
         }

@@ -22,7 +22,7 @@
 
 package org.jboss.as.web.security.jaspi;
 
-import org.jboss.logging.Logger;
+import java.io.IOException;
 
 import javax.security.auth.callback.Callback;
 import javax.security.auth.callback.CallbackHandler;
@@ -30,7 +30,8 @@ import javax.security.auth.callback.UnsupportedCallbackException;
 import javax.security.auth.message.callback.CallerPrincipalCallback;
 import javax.security.auth.message.callback.GroupPrincipalCallback;
 import javax.security.auth.message.callback.PasswordValidationCallback;
-import java.io.IOException;
+
+import org.jboss.as.web.WebLogger;
 
 /**
  * <p>
@@ -43,8 +44,6 @@ import java.io.IOException;
 @SuppressWarnings("unused")
 public class WebJASPICallbackHandler implements CallbackHandler {
 
-    private static final Logger log = Logger.getLogger("org.jboss.as.web.security");
-
     private CallerPrincipalCallback callerPrincipalCallback;
 
     private PasswordValidationCallback passwordValidationCallback;
@@ -56,23 +55,29 @@ public class WebJASPICallbackHandler implements CallbackHandler {
         if (callbacks.length > 0) {
             for (Callback callback : callbacks) {
                 if (callback instanceof CallerPrincipalCallback) {
-                    CallerPrincipalCallback callerCallback = (CallerPrincipalCallback) callback;
-                    if (callerCallback.getPrincipal()  != null)
-                        this.callerPrincipalCallback = new CallerPrincipalCallback(callerCallback.getSubject(),
-                                callerCallback.getPrincipal());
-                    else
-                        this.callerPrincipalCallback = new CallerPrincipalCallback(callerCallback.getSubject(),
-                                callerCallback.getName());
+                    if (this.callerPrincipalCallback == null) {
+                        CallerPrincipalCallback callerCallback = (CallerPrincipalCallback) callback;
+                        if (callerCallback.getPrincipal()  != null)
+                            this.callerPrincipalCallback = new CallerPrincipalCallback(callerCallback.getSubject(),
+                                    callerCallback.getPrincipal());
+                        else
+                            this.callerPrincipalCallback = new CallerPrincipalCallback(callerCallback.getSubject(),
+                                    callerCallback.getName());
+                    }
                 } else if (callback instanceof PasswordValidationCallback) {
-                    PasswordValidationCallback passCallback = (PasswordValidationCallback) callback;
-                    this.passwordValidationCallback = new PasswordValidationCallback(passCallback.getSubject(),
-                            passCallback.getUsername(), passCallback.getPassword());
+                    if (this.passwordValidationCallback == null) {
+                        PasswordValidationCallback passCallback = (PasswordValidationCallback) callback;
+                        this.passwordValidationCallback = new PasswordValidationCallback(passCallback.getSubject(),
+                                passCallback.getUsername(), passCallback.getPassword());
+                    }
                 } else if (callback instanceof GroupPrincipalCallback) {
-                    GroupPrincipalCallback groupCallback = (GroupPrincipalCallback) callback;
-                    this.groupPrincipalCallback = new GroupPrincipalCallback(groupCallback.getSubject(),
-                            groupCallback.getGroups());
+                    if (this.groupPrincipalCallback == null) {
+                        GroupPrincipalCallback groupCallback = (GroupPrincipalCallback) callback;
+                        this.groupPrincipalCallback = new GroupPrincipalCallback(groupCallback.getSubject(),
+                                groupCallback.getGroups());
+                    }
                 } else
-                    log.tracef("Callback %s not supported", callback.getClass().getCanonicalName());
+                    WebLogger.WEB_SECURITY_LOGGER.tracef("Callback %s not supported", callback.getClass().getCanonicalName());
             }
         }
     }

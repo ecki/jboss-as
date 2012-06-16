@@ -22,23 +22,7 @@
 
 package org.jboss.as.test.integration.security.loginmodules;
 
-import static org.jboss.as.arquillian.container.Authentication.getCallbackHandler;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADD;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.COMPOSITE;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OPERATION_HEADERS;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.REMOVE;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ROLLBACK_ON_RUNTIME_FAILURE;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.STEPS;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SUBSYSTEM;
-import static org.jboss.as.security.Constants.AUTHENTICATION;
-import static org.jboss.as.security.Constants.CODE;
-import static org.jboss.as.security.Constants.FLAG;
-import static org.jboss.as.security.Constants.SECURITY_DOMAIN;
-import static org.junit.Assert.assertEquals;
-
-import java.net.InetAddress;
+import java.io.IOException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
@@ -59,17 +43,32 @@ import org.apache.http.util.EntityUtils;
 import org.jboss.arquillian.container.test.api.Deployment;
 import org.jboss.arquillian.container.test.api.RunAsClient;
 import org.jboss.arquillian.junit.Arquillian;
-import org.jboss.as.controller.client.ModelControllerClient;
-import org.jboss.as.controller.client.OperationBuilder;
+import org.jboss.arquillian.test.api.ArquillianResource;
+import org.jboss.as.arquillian.api.ServerSetup;
+import org.jboss.as.arquillian.container.ManagementClient;
 import org.jboss.as.security.Constants;
+import org.jboss.as.test.integration.security.common.AbstractSecurityDomainSetup;
+import org.jboss.as.test.integration.security.loginmodules.common.CustomTestLoginModule;
 import org.jboss.as.test.integration.web.security.SecuredServlet;
 import org.jboss.as.test.integration.web.security.WebSecurityPasswordBasedBase;
 import org.jboss.dmr.ModelNode;
+import org.jboss.logging.Logger;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
 import org.jboss.shrinkwrap.api.spec.WebArchive;
-import org.junit.AfterClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADD;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.COMPOSITE;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.STEPS;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SUBSYSTEM;
+import static org.jboss.as.security.Constants.AUTHENTICATION;
+import static org.jboss.as.security.Constants.CODE;
+import static org.jboss.as.security.Constants.FLAG;
+import static org.jboss.as.security.Constants.SECURITY_DOMAIN;
+import static org.junit.Assert.assertEquals;
 
 /**
  * Unit test for custom login modules in authentication.
@@ -78,59 +77,77 @@ import org.junit.runner.RunWith;
  */
 @RunWith(Arquillian.class)
 @RunAsClient
+@ServerSetup(CustomLoginModuleTestCase.CustomLoginModuleSecurityDomainSetup.class)
 public class CustomLoginModuleTestCase {
 
-    protected final String URL = "http://localhost:8080/" + getContextPath() + "/secured/";
+
+    @ArquillianResource(SecuredServlet.class)
+    URL deploymentURL;
+
+    private String getURL(){
+       return deploymentURL.toString() + "secured/";
+    }
+
+    static class CustomLoginModuleSecurityDomainSetup extends AbstractSecurityDomainSetup {
+
+        @Override
+        protected String getSecurityDomainName() {
+            return "custom-login-module";
+        }
+
+        @Override
+        public void setup(final ManagementClient managementClient, final String containerId) throws Exception {
+            final List<ModelNode> updates = new ArrayList<ModelNode>();
+            ModelNode op = new ModelNode();
+
+            op.get(OP).set(COMPOSITE);
+            op.get(OP_ADDR).setEmptyList();
+            ModelNode add1 = op.get(STEPS).add();
+
+            add1.get(OP).set(ADD);
+            add1.get(OP_ADDR).add(SUBSYSTEM, "security");
+            add1.get(OP_ADDR).add(SECURITY_DOMAIN, getSecurityDomainName());
+
+            ModelNode add2 =  op.get(STEPS).add();
+            add2.get(OP).set(ADD);
+            add2.get(OP_ADDR).add(SUBSYSTEM, "security");
+            add2.get(OP_ADDR).add(SECURITY_DOMAIN, getSecurityDomainName());
+            add2.get(OP_ADDR).add(AUTHENTICATION, Constants.CLASSIC);
+
+            ModelNode loginModule = add2.get(Constants.LOGIN_MODULES).add();
+            loginModule.get(CODE).set(CustomTestLoginModule.class.getName());
+            loginModule.get(FLAG).set("required");
+
+            updates.add(op);
+            applyUpdates(managementClient.getControllerClient(), updates);
+        }
+    }
 
     /**
      * Base method to create a {@link WebArchive}
      *
      * @param name Name of the war file
      * @param servletClass a class that is the servlet
-     * @param webxml {@link URL} to the web.xml. This can be null
      * @return
      */
-    public static WebArchive create(String name, Class<?> servletClass, URL webxml) {
+    public static WebArchive create(String name, Class<?> servletClass) {
         WebArchive war = ShrinkWrap.create(WebArchive.class, name);
         war.addClass(servletClass);
 
-        ClassLoader tccl = Thread.currentThread().getContextClassLoader();
-
-        war.addAsWebResource(tccl.getResource("web-secure.war/login.jsp"), "login.jsp");
-        war.addAsWebResource(tccl.getResource("web-secure.war/error.jsp"), "error.jsp");
-        war.addAsWebInfResource(tccl.getResource("custom-login-module.war/jboss-web.xml"), "jboss-web.xml");
+        war.addAsWebResource(CustomLoginModuleTestCase.class.getPackage() ,"login.jsp", "login.jsp");
+        war.addAsWebResource( CustomLoginModuleTestCase.class.getPackage(),"error.jsp", "error.jsp");
+        war.addAsWebInfResource(CustomLoginModuleTestCase.class.getPackage() ,"jboss-web.xml", "jboss-web.xml");
+        war.setWebXML(CustomLoginModuleTestCase.class.getPackage(), "web.xml");
         war.addClass(CustomTestLoginModule.class);
-
-        if (webxml != null) {
-            war.setWebXML(webxml);
-        }
-
         return war;
     }
 
     @Deployment
-    public static WebArchive deployment() {
-        // FIXME hack to get things prepared before the deployment happens
-        try {
-            final ModelControllerClient client = ModelControllerClient.Factory.create(InetAddress.getByName("localhost"), 9999, getCallbackHandler());
-            // create required security domains
-            createSecurityDomains(client);
-        } catch (Exception e) {
-            // ignore
-        }
-
-        ClassLoader tccl = Thread.currentThread().getContextClassLoader();
-        URL webxml = tccl.getResource("web-secure.war/web.xml");
-        WebArchive war = create("custom-login-module.war", SecuredServlet.class, webxml);
+    public static WebArchive deployment() throws IOException {
+        WebArchive war = create("custom-login-module.war", SecuredServlet.class);
         WebSecurityPasswordBasedBase.printWar(war);
+        Logger.getLogger(CustomLoginModuleTestCase.class).debug(war.toString(true));
         return war;
-    }
-
-    @AfterClass
-    public static void after() throws Exception {
-        final ModelControllerClient client = ModelControllerClient.Factory.create(InetAddress.getByName("localhost"), 9999, getCallbackHandler());
-        // remove test security domains
-        removeSecurityDomains(client);
     }
 
     @Test
@@ -146,7 +163,7 @@ public class CustomLoginModuleTestCase {
     protected void makeCall(String user, String pass, int expectedStatusCode) throws Exception {
         DefaultHttpClient httpclient = new DefaultHttpClient();
         try {
-            HttpGet httpget = new HttpGet(URL);
+            HttpGet httpget = new HttpGet(getURL());
 
             HttpResponse response = httpclient.execute(httpget);
 
@@ -170,7 +187,7 @@ public class CustomLoginModuleTestCase {
             }
 
             // We should now login with the user name and password
-            HttpPost httpost = new HttpPost(URL + "/j_security_check");
+            HttpPost httpost = new HttpPost(getURL() + "j_security_check");
 
             List<NameValuePair> nvps = new ArrayList<NameValuePair>();
             nvps.add(new BasicNameValuePair("j_username", user));
@@ -215,63 +232,6 @@ public class CustomLoginModuleTestCase {
             // shut down the connection manager to ensure
             // immediate deallocation of all system resources
             httpclient.getConnectionManager().shutdown();
-        }
-    }
-
-    public static void createSecurityDomains(final ModelControllerClient client) throws Exception {
-        final List<ModelNode> updates = new ArrayList<ModelNode>();
-        ModelNode op = new ModelNode();
-        String securityDomain = "custom-login-module";
-
-        op.get(OP).set(COMPOSITE);
-        op.get(OP_ADDR).setEmptyList();
-        ModelNode add1 = op.get(STEPS).add();
-
-        add1.get(OP).set(ADD);
-        add1.get(OP_ADDR).add(SUBSYSTEM, "security");
-        add1.get(OP_ADDR).add(SECURITY_DOMAIN, securityDomain);
-
-        ModelNode add2 =  op.get(STEPS).add();
-        add2.get(OP).set(ADD);
-        add2.get(OP_ADDR).add(SUBSYSTEM, "security");
-        add2.get(OP_ADDR).add(SECURITY_DOMAIN, securityDomain);
-        add2.get(OP_ADDR).add(AUTHENTICATION, Constants.CLASSIC);
-
-        ModelNode loginModule = add2.get(Constants.LOGIN_MODULES).add();
-        loginModule.get(CODE).set(CustomTestLoginModule.class.getName());
-        loginModule.get(FLAG).set("required");
-
-        updates.add(op);
-        applyUpdates(updates, client);
-    }
-
-    public static void removeSecurityDomains(final ModelControllerClient client) throws Exception {
-        ModelNode op = new ModelNode();
-        op.get(OP).set(REMOVE);
-        op.get(OP_ADDR).add(SUBSYSTEM, "security");
-        op.get(OP_ADDR).add(SECURITY_DOMAIN, "custom-login-module");
-        // Don't rollback when the AS detects the war needs the module
-        op.get(OPERATION_HEADERS, ROLLBACK_ON_RUNTIME_FAILURE).set(false);
-
-        applyUpdate(op, client, true);
-    }
-
-    public static void applyUpdates(final List<ModelNode> updates, final ModelControllerClient client) throws Exception {
-        for (ModelNode update : updates) {
-            applyUpdate(update, client, false);
-        }
-    }
-
-    public static void applyUpdate(ModelNode update, final ModelControllerClient client, boolean allowFailure) throws Exception {
-        ModelNode result = client.execute(new OperationBuilder(update).build());
-        if (result.hasDefined("outcome") && (allowFailure || "success".equals(result.get("outcome").asString()))) {
-            if (result.hasDefined("result")) {
-                System.out.println(result.get("result"));
-            }
-        } else if (result.hasDefined("failure-description")) {
-            throw new RuntimeException(result.get("failure-description").toString());
-        } else {
-            throw new RuntimeException("Operation not successful; outcome = " + result.get("outcome"));
         }
     }
 

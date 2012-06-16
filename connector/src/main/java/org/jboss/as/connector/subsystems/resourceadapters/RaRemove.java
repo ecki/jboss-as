@@ -27,12 +27,16 @@ import static org.jboss.as.connector.subsystems.resourceadapters.Constants.RESOU
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADD;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
 
-import org.jboss.as.connector.ConnectorServices;
+import org.jboss.as.connector.util.ConnectorServices;
 import org.jboss.as.controller.OperationContext;
+import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.PathAddress;
 import org.jboss.as.controller.operations.common.Util;
 import org.jboss.dmr.ModelNode;
+import org.jboss.msc.service.ServiceName;
+
+import java.util.List;
 
 /**
  * @author @author <a href="mailto:stefano.maestri@redhat.com">Stefano
@@ -41,15 +45,15 @@ import org.jboss.dmr.ModelNode;
 public class RaRemove extends RaOperationUtil implements OperationStepHandler {
     static final RaRemove INSTANCE = new RaRemove();
 
-    public void execute(OperationContext context, ModelNode operation) {
+    public void execute(OperationContext context, ModelNode operation) throws OperationFailedException {
 
         final ModelNode opAddr = operation.require(OP_ADDR);
-        final String archive = PathAddress.pathAddress(opAddr).getLastElement().getValue();
-
-        operation.get(ARCHIVE.getName()).set(archive);
+        final String raName = PathAddress.pathAddress(opAddr).getLastElement().getValue();
 
         // Compensating is add
         final ModelNode model = context.readModel(PathAddress.EMPTY_ADDRESS);
+        final String archive = model.get(ARCHIVE.getName()).asString();
+
         final ModelNode compensating = Util.getEmptyOperation(ADD, opAddr);
 
         if (model.hasDefined(RESOURCEADAPTERS_NAME)) {
@@ -58,12 +62,23 @@ public class RaRemove extends RaOperationUtil implements OperationStepHandler {
                 compensating.get(RESOURCEADAPTERS_NAME).add(raCompensatingNode);
             }
         }
+
+
         context.removeResource(PathAddress.EMPTY_ADDRESS);
 
         context.addStep(new OperationStepHandler() {
-            public void execute(OperationContext context, ModelNode operation) {
-                context.removeService(ConnectorServices.RESOURCEADAPTERS_SERVICE);
+            public void execute(OperationContext context, ModelNode operation) throws OperationFailedException {
 
+                RaOperationUtil.deactivateIfActive(context, raName);
+                ServiceName raServiceName = ServiceName.of(ConnectorServices.RA_SERVICE, raName);
+                final List<ServiceName> serviceNameList = context.getServiceRegistry(false).getServiceNames();
+                for (ServiceName name : serviceNameList) {
+                    if (raServiceName.isParentOf(name)) {
+                        context.removeService(name);
+                    }
+
+                }
+                context.removeService(raServiceName);
                 if (context.completeStep() == OperationContext.ResultAction.ROLLBACK) {
                     // TODO:  RE-ADD SERVICES
                 }

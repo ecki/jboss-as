@@ -7,19 +7,12 @@ package org.jboss.as.mail.extension;
 public class MailSessionServer {
     private final String outgoingSocketBinding;
     private final Credentials credentials;
+    private boolean sslEnabled = false;
 
-    public MailSessionServer(final String outgoingSocketBinding, final Credentials credentials) {
+    public MailSessionServer(final String outgoingSocketBinding, final Credentials credentials, boolean ssl) {
         this.outgoingSocketBinding = outgoingSocketBinding;
         this.credentials = credentials;
-    }
-
-    public MailSessionServer(final String outgoingSocketBinding, String username, String password) {
-        this.outgoingSocketBinding = outgoingSocketBinding;
-        if (username != null) {
-            this.credentials = new Credentials(username, password);
-        }else{
-            credentials = null;
-        }
+        this.sslEnabled = ssl;
     }
 
     public String getOutgoingSocketBinding() {
@@ -30,4 +23,7 @@ public class MailSessionServer {
         return credentials;
     }
 
+    public boolean isSslEnabled() {
+        return sslEnabled;
+    }
 }

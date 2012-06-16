@@ -23,17 +23,17 @@
 package org.jboss.as.jpa.hibernate3;
 
 import java.lang.reflect.Method;
-import java.util.ArrayList;
 import java.util.Map;
 
 import org.hibernate.cfg.Configuration;
+import org.hibernate.cfg.Environment;
 import org.jboss.as.jpa.spi.JtaManager;
 import org.jboss.as.jpa.spi.ManagementAdaptor;
 import org.jboss.as.jpa.spi.PersistenceProviderAdaptor;
 import org.jboss.as.jpa.spi.PersistenceUnitMetadata;
-import org.jboss.as.naming.deployment.ContextNames;
-import org.jboss.as.naming.deployment.JndiName;
-import org.jboss.msc.service.ServiceName;
+import org.jboss.msc.service.ServiceBuilder;
+import org.jboss.msc.service.ServiceRegistry;
+import org.jboss.msc.service.ServiceTarget;
 
 /**
  * Implements the PersistenceProviderAdaptor for Hibernate 3.3.x or higher 3.x
@@ -52,8 +52,8 @@ public class HibernatePersistenceProviderAdaptor implements PersistenceProviderA
 
     @Override
     public void addProviderProperties(Map properties, PersistenceUnitMetadata pu) {
-        putPropertyIfAbsent(properties, "hibernate.transaction.manager_lookup_class", "org.jboss.as.jpa.hibernate3.JBossAppServerJtaPlatform");
-        putPropertyIfAbsent(properties, Configuration.USE_NEW_ID_GENERATOR_MAPPINGS, "true");
+        putPropertyIfAbsent(pu, properties, Environment.TRANSACTION_MANAGER_STRATEGY, JBossAppServerJtaPlatform.class.getName());
+        putPropertyIfAbsent(pu, properties, Configuration.USE_NEW_ID_GENERATOR_MAPPINGS, "true");
         addAnnotationScanner(pu);
     }
 
@@ -73,47 +73,23 @@ public class HibernatePersistenceProviderAdaptor implements PersistenceProviderA
     }
 
     @Override
-    public Iterable<ServiceName> getProviderDependencies(PersistenceUnitMetadata pu) {
-        //
-        String cacheManager = pu.getProperties().getProperty("hibernate.cache.infinispan.cachemanager");
-        String useCache = pu.getProperties().getProperty("hibernate.cache.use_second_level_cache");
-        String regionFactoryClass = pu.getProperties().getProperty("hibernate.cache.region.factory_class");
-        if ((useCache != null && useCache.equalsIgnoreCase("true")) ||
-            cacheManager != null) {
-            if (regionFactoryClass == null) {
-                regionFactoryClass = "org.hibernate.cache.infinispan.JndiInfinispanRegionFactory";
-                pu.getProperties().put("hibernate.cache.region.factory_class", regionFactoryClass);
-            }
-            if (cacheManager == null) {
-                cacheManager = "java:jboss/infinispan/hibernate";
-                pu.getProperties().put("hibernate.cache.infinispan.cachemanager", cacheManager);
-            }
-            if (pu.getProperties().getProperty("hibernate.cache.region_prefix") == null) {
-                // cache entries for this PU will be identified by scoped pu name + Entity class name
-                pu.getProperties().put("hibernate.cache.region_prefix", pu.getScopedPersistenceUnitName());
-            }
-            ArrayList<ServiceName> result = new ArrayList<ServiceName>();
-            result.add(ContextNames.bindInfoFor(toJndiName(cacheManager).toString()).getBinderServiceName());
-            return result;
+    public void addProviderDependencies(ServiceRegistry registry, ServiceTarget target, ServiceBuilder<?> builder, PersistenceUnitMetadata pu) {
+        if (Boolean.parseBoolean(pu.getProperties().getProperty(Environment.USE_SECOND_LEVEL_CACHE))) {
+            HibernateSecondLevelCache.addSecondLevelCacheDependencies(registry, target, builder, pu);
         }
-        return null;
     }
 
-    private void putPropertyIfAbsent(Map properties, String property, Object value) {
-        if (!properties.containsKey(property)) {
+    private void putPropertyIfAbsent(PersistenceUnitMetadata pu, Map properties, String property, Object value) {
+        if (!pu.getProperties().containsKey(property)) {
             properties.put(property, value);
         }
-    }
-
-    private static JndiName toJndiName(String value) {
-        return value.startsWith("java:") ? JndiName.of(value) : JndiName.of("java:jboss").append(value.startsWith("/") ? value.substring(1) : value);
     }
 
     @Override
     public void beforeCreateContainerEntityManagerFactory(PersistenceUnitMetadata pu) {
         if (pu.getProperties().containsKey(SCANNER)) {
             try {
-                Class scanner = Configuration.class.getClassLoader().loadClass(HIBERNATE_ANNOTATION_SCANNER_CLASS);
+                Class<?> scanner = Configuration.class.getClassLoader().loadClass(HIBERNATE_ANNOTATION_SCANNER_CLASS);
                 // get method for public static void setThreadLocalPersistenceUnitMetadata(final PersistenceUnitMetadata pu) {
                 Method setThreadLocalPersistenceUnitMetadata = scanner.getMethod("setThreadLocalPersistenceUnitMetadata", PersistenceUnitMetadata.class);
                 setThreadLocalPersistenceUnitMetadata.invoke(null, pu);
@@ -128,9 +104,9 @@ public class HibernatePersistenceProviderAdaptor implements PersistenceProviderA
         if (pu.getProperties().containsKey(SCANNER)) {
             // clear backdoor annotation scanner access to pu
             try {
-                Class scanner = Configuration.class.getClassLoader().loadClass(HIBERNATE_ANNOTATION_SCANNER_CLASS);
+                Class<?> scanner = Configuration.class.getClassLoader().loadClass(HIBERNATE_ANNOTATION_SCANNER_CLASS);
                 // get method for public static void clearThreadLocalPersistenceUnitMetadata() {
-                Method clearThreadLocalPersistenceUnitMetadata = scanner.getMethod("clearThreadLocalPersistenceUnitMetadata", null);
+                Method clearThreadLocalPersistenceUnitMetadata = scanner.getMethod("clearThreadLocalPersistenceUnitMetadata");
                 clearThreadLocalPersistenceUnitMetadata.invoke(null);
             } catch (Throwable ignore) {
             }
@@ -142,5 +118,14 @@ public class HibernatePersistenceProviderAdaptor implements PersistenceProviderA
         return null;
     }
 
+    @Override
+    public boolean doesScopedPersistenceUnitNameIdentifyCacheRegionName(PersistenceUnitMetadata pu) {
+        return true;
+    }
+
+    @Override
+    public void cleanup(PersistenceUnitMetadata pu) {
+        HibernateAnnotationScanner.cleanup(pu);
+    }
 }
 

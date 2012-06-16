@@ -24,6 +24,7 @@ package org.jboss.as.webservices.deployers;
 import static org.jboss.as.webservices.util.ASHelper.getEndpointClassName;
 import static org.jboss.as.webservices.util.ASHelper.getJBossWebMetaData;
 import static org.jboss.as.webservices.util.ASHelper.getJaxrpcDeployment;
+import static org.jboss.as.webservices.util.ASHelper.getJaxwsPojos;
 import static org.jboss.as.webservices.util.ASHelper.getOptionalAttachment;
 import static org.jboss.as.webservices.util.ASHelper.getServletForName;
 import static org.jboss.as.webservices.util.WSAttachmentKeys.WEBSERVICES_METADATA_KEY;
@@ -49,9 +50,10 @@ public final class WSIntegrationProcessorJAXRPC_POJO implements DeploymentUnitPr
     @Override
     public void deploy(final DeploymentPhaseContext phaseContext) throws DeploymentUnitProcessingException {
         final DeploymentUnit unit = phaseContext.getDeploymentUnit();
+        if (isJaxwsPojoDeployment(unit)) return;
         final JBossWebMetaData jbossWebMD = getJBossWebMetaData(unit);
         final WebservicesMetaData webservicesMD = getOptionalAttachment(unit, WEBSERVICES_METADATA_KEY);
-        if (jbossWebMD != null && webservicesMD != null) {
+        if (jbossWebMD != null && webservicesMD != null && hasJaxRpcMapping(webservicesMD)) {
             createJaxrpcDeployment(unit, webservicesMD, jbossWebMD);
         }
     }
@@ -59,6 +61,10 @@ public final class WSIntegrationProcessorJAXRPC_POJO implements DeploymentUnitPr
     @Override
     public void undeploy(final DeploymentUnit context) {
         // does nothing
+    }
+
+    private static boolean isJaxwsPojoDeployment(final DeploymentUnit unit) {
+        return getJaxwsPojos(unit).size() > 0;
     }
 
     private static void createJaxrpcDeployment(final DeploymentUnit unit, final WebservicesMetaData webservicesMD, final JBossWebMetaData jbossWebMD) {
@@ -88,6 +94,15 @@ public final class WSIntegrationProcessorJAXRPC_POJO implements DeploymentUnitPr
             }
         }
         throw new IllegalStateException();
+    }
+
+    private boolean hasJaxRpcMapping(WebservicesMetaData webservicesMD) {
+        for (WebserviceDescriptionMetaData wsdmd : webservicesMD.getWebserviceDescriptions()) {
+            if (wsdmd.getJaxrpcMappingFile() != null) {
+                return true;
+            }
+        }
+        return false;
     }
 
 }

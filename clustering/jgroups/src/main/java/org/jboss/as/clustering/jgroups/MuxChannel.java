@@ -21,8 +21,8 @@
  */
 package org.jboss.as.clustering.jgroups;
 
-import org.jgroups.Event;
 import org.jgroups.JChannel;
+import org.jgroups.Receiver;
 import org.jgroups.UpHandler;
 import org.jgroups.blocks.mux.MuxUpHandler;
 import org.jgroups.blocks.mux.Muxer;
@@ -35,7 +35,16 @@ import org.jgroups.conf.ProtocolStackConfigurator;
 public class MuxChannel extends JChannel {
     public MuxChannel(ProtocolStackConfigurator configurator) throws Exception {
         super(configurator);
-        this.setUpHandler(new ClassLoaderAwareMuxUpHandler());
+        this.setUpHandler(new MuxUpHandler());
+    }
+
+    @Override
+    public void setReceiver(Receiver receiver) {
+        super.setReceiver(receiver);
+        // If we're using a receiver, we're not interested in using an up handler
+        if (receiver != null) {
+            super.setUpHandler(null);
+        }
     }
 
     @Override
@@ -47,30 +56,6 @@ public class MuxChannel extends JChannel {
             muxer.setDefaultHandler(handler);
         } else {
             super.setUpHandler(handler);
-        }
-    }
-
-    /**
-     * Custom muxing up handler that decorates registered up handlers with class loader awareness.
-     */
-    private static class ClassLoaderAwareMuxUpHandler extends MuxUpHandler {
-        @Override
-        public void add(short id, UpHandler handler) {
-            super.add(id, this.getUpHandler(handler));
-        }
-
-        @Override
-        public Object up(Event event) {
-            return super.up(event);
-        }
-
-        @Override
-        public void setDefaultHandler(UpHandler handler) {
-            super.setDefaultHandler(this.getUpHandler(handler));
-        }
-
-        private UpHandler getUpHandler(UpHandler handler) {
-            return (handler instanceof ClassLoaderAwareUpHandler) ? handler : new ClassLoaderAwareUpHandler(handler);
         }
     }
 }

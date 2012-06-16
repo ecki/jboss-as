@@ -27,8 +27,14 @@ package org.jboss.as.jmx;
  */
 interface CommonAttributes {
 
+    String CONNECTOR = "connector";
+    String JMX = "jmx";
+    String NAME = "name";
     String SHOW_MODEL = "show-model";
     String SERVER_BINDING = "server-binding";
     String REGISTRY_BINDING = "registry-binding";
+    String REMOTING_CONNECTOR = "remoting-connector";
     String JMX_CONNECTOR = "jmx-connector";
+    String USE_MANAGEMENT_ENDPOINT = "use-management-endpoint";
+    String VALUE = "value";
 }

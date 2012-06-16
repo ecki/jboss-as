@@ -22,10 +22,19 @@
 
 package org.jboss.as.jdr;
 
+import java.io.Console;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.security.AccessController;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+
 import org.jboss.as.controller.ModelController;
 import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.ServiceVerificationHandler;
 import org.jboss.as.controller.client.ModelControllerClient;
+import org.jboss.as.network.NetworkUtils;
 import org.jboss.as.server.ServerEnvironment;
 import org.jboss.as.server.ServerEnvironmentService;
 import org.jboss.as.server.Services;
@@ -38,11 +47,6 @@ import org.jboss.msc.service.StartException;
 import org.jboss.msc.service.StopContext;
 import org.jboss.msc.value.InjectedValue;
 import org.jboss.threads.JBossThreadFactory;
-
-import java.security.AccessController;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadFactory;
 
 /**
  * Service that provides a {@link JdrReportCollector}.
@@ -75,9 +79,41 @@ public class JdrReportService implements JdrReportCollector, Service<JdrReportCo
     /**
      * Collect a JDR report when run outside the Application Server.
      */
-    public JdrReport standaloneCollect() throws OperationFailedException {
+    public JdrReport standaloneCollect(String host, String port) throws OperationFailedException {
+        Console cons = System.console();
+        String username = null;
+        String password = null;
+
+        if (host == null) {
+            host = "localhost";
+        }
+        if (port == null) {
+            port = "9990";
+        }
+
+        // Let's go ahead and see if we need to auth before prompting the user
+        // for a username and password
+        boolean must_auth = false;
+
+        try {
+            URL managementApi = new URL("http://" + NetworkUtils.formatPossibleIpv6Address(host) + ":" + port + "/management");
+            HttpURLConnection conn = (HttpURLConnection) managementApi.openConnection();
+            int code = conn.getResponseCode();
+            if (code != 200) {
+                must_auth = true;
+            }
+        }
+        catch(Exception e) {
+        }
+
+        if (must_auth) {
+            if (cons != null) {
+                username = cons.readLine("Management username: ");
+                password = String.valueOf(cons.readPassword("Management password: "));
+            }
+        }
         SosInterpreter interpreter = new SosInterpreter();
-        return interpreter.collect();
+        return interpreter.collect(username, password, host, port);
     }
 
     /**
@@ -89,6 +125,8 @@ public class JdrReportService implements JdrReportCollector, Service<JdrReportCo
         interpreter.setJbossHomeDir(serverEnvironment.getHomeDir().getAbsolutePath());
         interpreter.setReportLocationDir(serverEnvironment.getServerTempDir().getAbsolutePath());
         interpreter.setControllerClient(controllerClient);
+        interpreter.setHostControllerName(serverEnvironment.getHostControllerName());
+        interpreter.setServerName(serverEnvironment.getServerName());
         return interpreter.collect();
     }
 

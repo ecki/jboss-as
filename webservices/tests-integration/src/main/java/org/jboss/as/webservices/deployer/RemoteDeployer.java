@@ -21,29 +21,6 @@
  */
 package org.jboss.as.webservices.deployer;
 
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADD;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ALLOW_RESOURCE_SERVICE_RESTART;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OPERATION_HEADERS;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.REMOVE;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ROLLBACK_ON_RUNTIME_FAILURE;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SUBSYSTEM;
-import static org.jboss.as.security.Constants.AUTHENTICATION;
-import static org.jboss.as.security.Constants.CLASSIC;
-import static org.jboss.as.security.Constants.CODE;
-import static org.jboss.as.security.Constants.FLAG;
-import static org.jboss.as.security.Constants.LOGIN_MODULES;
-import static org.jboss.as.security.Constants.MODULE_OPTIONS;
-import static org.jboss.as.security.Constants.SECURITY_DOMAIN;
-
-import javax.security.auth.callback.Callback;
-import javax.security.auth.callback.CallbackHandler;
-import javax.security.auth.callback.NameCallback;
-import javax.security.auth.callback.PasswordCallback;
-import javax.security.auth.callback.UnsupportedCallbackException;
-import javax.security.sasl.RealmCallback;
-import javax.security.sasl.RealmChoiceCallback;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.URL;
@@ -53,6 +30,14 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import javax.security.auth.callback.Callback;
+import javax.security.auth.callback.CallbackHandler;
+import javax.security.auth.callback.NameCallback;
+import javax.security.auth.callback.PasswordCallback;
+import javax.security.auth.callback.UnsupportedCallbackException;
+import javax.security.sasl.RealmCallback;
+import javax.security.sasl.RealmChoiceCallback;
 
 import org.jboss.as.controller.client.ModelControllerClient;
 import org.jboss.as.controller.client.OperationBuilder;
@@ -66,8 +51,34 @@ import org.jboss.dmr.ModelNode;
 import org.jboss.logging.Logger;
 import org.jboss.wsf.spi.deployer.Deployer;
 
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADD;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ALLOW_RESOURCE_SERVICE_RESTART;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.FAILURE_DESCRIPTION;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.NAME;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OPERATION_HEADERS;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OUTCOME;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.READ_ATTRIBUTE_OPERATION;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RELEASE_VERSION;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.REMOVE;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.REQUIRED;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RESULT;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ROLLBACK_ON_RUNTIME_FAILURE;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SUBSYSTEM;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SUCCESS;
+import static org.jboss.as.security.Constants.AUTHENTICATION;
+import static org.jboss.as.security.Constants.CLASSIC;
+import static org.jboss.as.security.Constants.CODE;
+import static org.jboss.as.security.Constants.FLAG;
+import static org.jboss.as.security.Constants.LOGIN_MODULES;
+import static org.jboss.as.security.Constants.MODULE_OPTIONS;
+import static org.jboss.as.security.Constants.SECURITY_DOMAIN;
+
 /**
  * Remote deployer that uses AS7 client deployment API.
+ *
+ * TODO: this class leaks the ModelControllerClient
  *
  * @author <a href="mailto:ropalka@redhat.com">Richard Opalka</a>
  * @author <a href="mailto:alessio.soldano@jboss.com">Alessio Soldano</a>
@@ -76,40 +87,79 @@ public final class RemoteDeployer implements Deployer {
 
     private static final Logger LOGGER = Logger.getLogger(RemoteDeployer.class);
     private static final int PORT = 9999;
+
+    private static final String JBWS_DEPLOYER_HOST = "jbossws.deployer.host";
+    private static final String JBWS_DEPLOYER_PORT = "jbossws.deployer.port";
     private static final String JBWS_DEPLOYER_AUTH_USER = "jbossws.deployer.authentication.username";
     private static final String JBWS_DEPLOYER_AUTH_PWD = "jbossws.deployer.authentication.password";
     private final Map<URL, String> url2Id = new HashMap<URL, String>();
-    private final InetAddress address = InetAddress.getByName("127.0.0.1");
-
-    private CallbackHandler callbackHandler;
-    private ServerDeploymentManager deploymentManager;
+    private final CallbackHandler callbackHandler = getCallbackHandler();
+    private final ServerDeploymentManager deploymentManager;
+    private final ModelControllerClient modelControllerClient;
+    private final Map<String, Integer> securityDomainUsers = new HashMap<String, Integer>(1);
+    private final Map<String, Integer> archiveCounters = new HashMap<String, Integer>();
 
     public RemoteDeployer() throws IOException {
-        callbackHandler = getCallbackHandler();
-        deploymentManager = ServerDeploymentManager.Factory.create(address, PORT, callbackHandler);
+        final String host = System.getProperty(JBWS_DEPLOYER_HOST);
+        InetAddress address;
+        if(host != null) {
+            address = InetAddress.getByName(host);
+        } else {
+            address = InetAddress.getByName("localhost");
+        }
+        final Integer port = Integer.getInteger(JBWS_DEPLOYER_PORT, PORT);
+        modelControllerClient = ModelControllerClient.Factory.create(address, port, callbackHandler);
+        deploymentManager = ServerDeploymentManager.Factory.create(modelControllerClient);
     }
 
     @Override
-    public void deploy(URL archiveURL) throws Exception {
-        final DeploymentPlanBuilder builder = deploymentManager.newDeploymentPlan().add(archiveURL).andDeploy();
-        final DeploymentPlan plan = builder.build();
-        final DeploymentAction deployAction = builder.getLastAction();
-        final String uniqueId = deployAction.getDeploymentUnitUniqueName();
-        executeDeploymentPlan(plan, deployAction);
-        url2Id.put(archiveURL, uniqueId);
+    public void deploy(final URL archiveURL) throws Exception {
+        synchronized (archiveCounters) {
+            String k = archiveURL.toString();
+            if (archiveCounters.containsKey(k)) {
+                int count = archiveCounters.get(k);
+                archiveCounters.put(k, (count + 1));
+                return;
+            } else {
+                archiveCounters.put(k, 1);
+            }
+
+            final DeploymentPlanBuilder builder = deploymentManager.newDeploymentPlan().add(archiveURL).andDeploy();
+            final DeploymentPlan plan = builder.build();
+            final DeploymentAction deployAction = builder.getLastAction();
+            final String uniqueId = deployAction.getDeploymentUnitUniqueName();
+            executeDeploymentPlan(plan, deployAction);
+            url2Id.put(archiveURL, uniqueId);
+        }
     }
 
     @Override
     public void undeploy(final URL archiveURL) throws Exception {
-        final DeploymentPlanBuilder builder = deploymentManager.newDeploymentPlan();
-        final String uniqueName = url2Id.get(archiveURL);
-        if (uniqueName != null) {
-            final DeploymentPlan plan = builder.undeploy(uniqueName).remove(uniqueName).build();
-            final DeploymentAction deployAction = builder.getLastAction();
-            try {
-                executeDeploymentPlan(plan, deployAction);
-            } finally {
-                url2Id.remove(archiveURL);
+        synchronized (archiveCounters) {
+            String k = archiveURL.toString();
+            if (archiveCounters.containsKey(k)) {
+                int count = archiveCounters.get(k);
+                if (count > 1) {
+                    archiveCounters.put(k, (count - 1));
+                    return;
+                } else {
+                    archiveCounters.remove(k);
+                }
+            } else {
+                LOGGER.warn("Trying to undeploy archive " + archiveURL + " which is not currently deployed!");
+                return;
+            }
+
+            final DeploymentPlanBuilder builder = deploymentManager.newDeploymentPlan();
+            final String uniqueName = url2Id.get(archiveURL);
+            if (uniqueName != null) {
+                final DeploymentPlan plan = builder.undeploy(uniqueName).remove(uniqueName).build();
+                final DeploymentAction deployAction = builder.getLastAction();
+                try {
+                    executeDeploymentPlan(plan, deployAction);
+                } finally {
+                    url2Id.remove(archiveURL);
+                }
             }
         }
     }
@@ -119,8 +169,7 @@ public final class RemoteDeployer implements Deployer {
             final ServerDeploymentPlanResult planResult = deploymentManager.execute(plan).get();
 
             if (deployAction != null) {
-                final ServerDeploymentActionResult actionResult = planResult
-                .getDeploymentActionResult(deployAction.getId());
+                final ServerDeploymentActionResult actionResult = planResult.getDeploymentActionResult(deployAction.getId());
                 if (actionResult != null) {
                     final Exception deploymentException = (Exception) actionResult.getDeploymentException();
                     if (deploymentException != null)
@@ -133,50 +182,81 @@ public final class RemoteDeployer implements Deployer {
         }
     }
 
+    public String getServerVersion() throws Exception {
+        final ModelNode request = new ModelNode();
+        request.get(OP).set(READ_ATTRIBUTE_OPERATION);
+        request.get(OP_ADDR).setEmptyList();
+        request.get(NAME).set(RELEASE_VERSION);
+
+        final ModelNode response = applyUpdate(request, getModelControllerClient());
+        return response.get(RESULT).asString();
+    }
+
     @Override
     public void addSecurityDomain(String name, Map<String, String> authenticationOptions) throws Exception {
-        final ModelControllerClient client = ModelControllerClient.Factory.create(address, PORT, callbackHandler);
-        final List<ModelNode> updates = new ArrayList<ModelNode>();
-
-        ModelNode op = new ModelNode();
-        op.get(OP).set(ADD);
-        op.get(OP_ADDR).add(SUBSYSTEM, "security");
-        op.get(OP_ADDR).add(SECURITY_DOMAIN, name);
-        updates.add(op);
-
-        op = new ModelNode();
-        op.get(OP).set(ADD);
-        op.get(OP_ADDR).add(SUBSYSTEM, "security");
-        op.get(OP_ADDR).add(SECURITY_DOMAIN, name);
-        op.get(OP_ADDR).add(AUTHENTICATION, CLASSIC);
-
-        final ModelNode loginModule = op.get(LOGIN_MODULES).add();
-        loginModule.get(CODE).set("UsersRoles");
-        loginModule.get(FLAG).set("required");
-        op.get(OPERATION_HEADERS).get(ALLOW_RESOURCE_SERVICE_RESTART).set(true);
-        updates.add(op);
-
-        final ModelNode moduleOptions = loginModule.get(MODULE_OPTIONS);
-        if (authenticationOptions != null) {
-            for (final String k : authenticationOptions.keySet()) {
-                moduleOptions.add(k, authenticationOptions.get(k));
+        synchronized (securityDomainUsers) {
+            if (securityDomainUsers.containsKey(name)) {
+                int count = securityDomainUsers.get(name);
+                securityDomainUsers.put(name, (count + 1));
+                return;
+            } else {
+                securityDomainUsers.put(name, 1);
             }
-        }
 
-        applyUpdates(updates, client);
+            final List<ModelNode> updates = new ArrayList<ModelNode>();
+
+            ModelNode op = new ModelNode();
+            op.get(OP).set(ADD);
+            op.get(OP_ADDR).add(SUBSYSTEM, "security");
+            op.get(OP_ADDR).add(SECURITY_DOMAIN, name);
+            updates.add(op);
+
+            op = new ModelNode();
+            op.get(OP).set(ADD);
+            op.get(OP_ADDR).add(SUBSYSTEM, "security");
+            op.get(OP_ADDR).add(SECURITY_DOMAIN, name);
+            op.get(OP_ADDR).add(AUTHENTICATION, CLASSIC);
+
+            final ModelNode loginModule = op.get(LOGIN_MODULES).add();
+            loginModule.get(CODE).set("UsersRoles");
+            loginModule.get(FLAG).set(REQUIRED);
+            op.get(OPERATION_HEADERS).get(ALLOW_RESOURCE_SERVICE_RESTART).set(true);
+            updates.add(op);
+
+            final ModelNode moduleOptions = loginModule.get(MODULE_OPTIONS);
+            if (authenticationOptions != null) {
+                for (final String k : authenticationOptions.keySet()) {
+                    moduleOptions.add(k, authenticationOptions.get(k));
+                }
+            }
+
+            applyUpdates(updates, getModelControllerClient());
+        }
     }
 
     @Override
     public void removeSecurityDomain(String name) throws Exception {
-        final ModelControllerClient client = ModelControllerClient.Factory.create(address, PORT, callbackHandler);
-        final ModelNode op = new ModelNode();
-        op.get(OP).set(REMOVE);
-        op.get(OP_ADDR).add(SUBSYSTEM, "security");
-        op.get(OP_ADDR).add(SECURITY_DOMAIN, name);
-        // Don't rollback when the AS detects the war needs the module
-        op.get(OPERATION_HEADERS, ROLLBACK_ON_RUNTIME_FAILURE).set(false);
+        synchronized (securityDomainUsers) {
+            int count = securityDomainUsers.get(name);
+            if (count > 1) {
+                securityDomainUsers.put(name, (count - 1));
+                return;
+            } else {
+                securityDomainUsers.remove(name);
+            }
 
-        applyUpdate(op, client);
+            final ModelNode op = new ModelNode();
+            op.get(OP).set(REMOVE);
+            op.get(OP_ADDR).add(SUBSYSTEM, "security");
+            op.get(OP_ADDR).add(SECURITY_DOMAIN, name);
+            op.get(OPERATION_HEADERS, ROLLBACK_ON_RUNTIME_FAILURE).set(false);
+
+            applyUpdate(op, getModelControllerClient());
+        }
+    }
+
+    private ModelControllerClient getModelControllerClient() {
+        return modelControllerClient;
     }
 
     private static void applyUpdates(final List<ModelNode> updates, final ModelControllerClient client) throws Exception {
@@ -185,20 +265,21 @@ public final class RemoteDeployer implements Deployer {
         }
     }
 
-    private static void applyUpdate(final ModelNode update, final ModelControllerClient client) throws Exception {
+    private static ModelNode applyUpdate(final ModelNode update, final ModelControllerClient client) throws Exception {
         final ModelNode result = client.execute(new OperationBuilder(update).build());
         checkResult(result);
+        return result;
     }
 
     private static void checkResult(final ModelNode result) throws Exception {
-        if (result.hasDefined("outcome") && "success".equals(result.get("outcome").asString())) {
-            if (result.hasDefined("result")) {
-                LOGGER.info(result.get("result"));
+        if (result.hasDefined(OUTCOME) && SUCCESS.equals(result.get(OUTCOME).asString())) {
+            if (result.hasDefined(RESULT)) {
+                LOGGER.info(result.get(RESULT));
             }
-        } else if (result.hasDefined("failure-description")) {
-            throw new Exception(result.get("failure-description").toString());
+        } else if (result.hasDefined(FAILURE_DESCRIPTION)) {
+            throw new Exception(result.get(FAILURE_DESCRIPTION).toString());
         } else {
-            throw new Exception("Operation not successful; outcome = " + result.get("outcome"));
+            throw new Exception("Operation not successful; outcome = " + result.get(OUTCOME));
         }
     }
 
@@ -242,4 +323,5 @@ public final class RemoteDeployer implements Deployer {
         };
         return AccessController.doPrivileged(action);
     }
+
 }

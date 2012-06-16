@@ -26,7 +26,6 @@ import java.util.Locale;
 
 import org.jboss.as.controller.descriptions.DescriptionProvider;
 import org.jboss.as.controller.descriptions.common.DeploymentDescription;
-import org.jboss.as.controller.descriptions.common.SocketBindingGroupDescription;
 import org.jboss.dmr.ModelNode;
 
 /**
@@ -64,14 +63,6 @@ public final class ServerDescriptionProviders {
         @Override
         public ModelNode getModelDescription(Locale locale) {
             return DeploymentDescription.getSubDeploymentDescription(locale);
-        }
-    };
-
-    public static final DescriptionProvider RELOAD_PROVIDER = new DescriptionProvider() {
-
-        @Override
-        public ModelNode getModelDescription(Locale locale) {
-            return ServerDescriptions.getServerReloadOperation(locale);
         }
     };
 

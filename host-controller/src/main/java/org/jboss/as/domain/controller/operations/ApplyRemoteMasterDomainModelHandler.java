@@ -22,11 +22,6 @@
 
 package org.jboss.as.domain.controller.operations;
 
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Iterator;
-import org.jboss.as.controller.PathElement;
-import org.jboss.as.controller.ProxyController;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.CONTENT;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.DEPLOYMENT;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.DOMAIN_MODEL;
@@ -35,46 +30,51 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.GRO
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.HASH;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.HOST;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.INTERFACE;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.MANAGEMENT_CLIENT_CONTENT;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PATH;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PROFILE;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ROLLOUT_PLAN;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ROLLOUT_PLANS;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SERVER;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SERVER_CONFIG;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SERVER_GROUP;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SOCKET_BINDING_GROUP;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SYSTEM_PROPERTY;
+import static org.jboss.as.domain.controller.DomainControllerLogger.ROOT_LOGGER;
+import static org.jboss.as.domain.controller.operations.coordination.DomainServerUtils.getRelatedElements;
+import static org.jboss.as.domain.controller.operations.coordination.DomainServerUtils.getServersForGroup;
+import static org.jboss.as.domain.controller.operations.coordination.DomainServerUtils.getServersForType;
 
+import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-import org.jboss.as.controller.Extension;
-import org.jboss.as.controller.ExtensionContext;
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.PathAddress;
+import org.jboss.as.controller.PathElement;
+import org.jboss.as.controller.ProxyController;
 import org.jboss.as.controller.descriptions.DescriptionProvider;
 import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SOCKET_BINDING_GROUP;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SYSTEM_PROPERTY;
-import org.jboss.as.controller.registry.ImmutableManagementResourceRegistration;
 import org.jboss.as.controller.registry.Resource;
-import org.jboss.as.domain.controller.FileRepository;
 import org.jboss.as.domain.controller.LocalHostControllerInfo;
 import org.jboss.as.domain.controller.ServerIdentity;
 import org.jboss.as.domain.controller.operations.coordination.DomainServerUtils;
-import static org.jboss.as.domain.controller.operations.coordination.DomainServerUtils.getRelatedElements;
-import static org.jboss.as.domain.controller.operations.coordination.DomainServerUtils.getServersForGroup;
-import static org.jboss.as.domain.controller.operations.coordination.DomainServerUtils.getServersForType;
+import org.jboss.as.host.controller.ignored.IgnoredDomainResourceRegistry;
+import org.jboss.as.management.client.content.ManagedDMRContentTypeResource;
+import org.jboss.as.repository.ContentRepository;
+import org.jboss.as.repository.HostFileRepository;
 import org.jboss.as.server.operations.ServerRestartRequiredHandler;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.Property;
-import org.jboss.logging.Logger;
-import org.jboss.modules.Module;
-import org.jboss.modules.ModuleIdentifier;
-import org.jboss.modules.ModuleLoadException;
 
 /**
  * Step handler responsible for taking in a domain model and updating the local domain model to match.
@@ -84,17 +84,20 @@ import org.jboss.modules.ModuleLoadException;
 public class ApplyRemoteMasterDomainModelHandler implements OperationStepHandler, DescriptionProvider {
     public static final String OPERATION_NAME = "apply-remote-domain-model";
 
-    private final Set<String> appliedExensions = new HashSet<String>();
-    private final FileRepository fileRepository;
-
-    private final ExtensionContext extensionContext;
+    private final HostFileRepository fileRepository;
+    private final ContentRepository contentRepository;
+    private final IgnoredDomainResourceRegistry ignoredResourceRegistry;
 
     private final LocalHostControllerInfo localHostInfo;
 
-    public ApplyRemoteMasterDomainModelHandler(final ExtensionContext extensionContext, final FileRepository fileRepository, final LocalHostControllerInfo localHostInfo) {
-        this.extensionContext = extensionContext;
+    public ApplyRemoteMasterDomainModelHandler(final HostFileRepository fileRepository,
+                                               final ContentRepository contentRepository,
+                                               final LocalHostControllerInfo localHostInfo,
+                                               final IgnoredDomainResourceRegistry ignoredResourceRegistry) {
         this.fileRepository = fileRepository;
+        this.contentRepository = contentRepository;
         this.localHostInfo = localHostInfo;
+        this.ignoredResourceRegistry = ignoredResourceRegistry;
     }
 
     public void execute(OperationContext context, ModelNode operation) throws OperationFailedException {
@@ -102,42 +105,54 @@ public class ApplyRemoteMasterDomainModelHandler implements OperationStepHandler
         // We get the model as a list of resources descriptions
         final ModelNode domainModel = operation.get(DOMAIN_MODEL);
 
-        final ModelNode startRoot = Resource.Tools.readModel(context.getRootResource());
+        final ModelNode startRoot = Resource.Tools.readModel(context.readResourceFromRoot(PathAddress.EMPTY_ADDRESS));
 
         final Set<String> ourServerGroups = getOurServerGroups(context);
         final Map<String, Set<byte[]>> deploymentHashes = new HashMap<String, Set<byte[]>>();
         final Set<String> relevantDeployments = new HashSet<String>();
+        final Set<byte[]> requiredContent = new HashSet<byte[]>();
 
         final Resource rootResource = context.readResourceForUpdate(PathAddress.EMPTY_ADDRESS);
         clearDomain(rootResource);
 
         for (final ModelNode resourceDescription : domainModel.asList()) {
+
             final PathAddress resourceAddress = PathAddress.pathAddress(resourceDescription.require("domain-resource-address"));
+            if (ignoredResourceRegistry.isResourceExcluded(resourceAddress)) {
+                continue;
+            }
+
             final Resource resource = getResource(resourceAddress, rootResource, context);
             if (resourceAddress.size() == 1 && resourceAddress.getElement(0).getKey().equals(EXTENSION)) {
-                final String module = resourceAddress.getElement(0).getValue();
-                if (!appliedExensions.contains(module)) {
-                    appliedExensions.add(module);
-                    initializeExtension(module);
-                }
+                // Extensions are handled in ApplyExtensionsHandler
+                continue;
             }
             resource.writeModel(resourceDescription.get("domain-resource-model"));
 
-            // Track deployment hashes and server group deployments so we can pull over the content we need
-            if (resourceAddress.size() == 1
-                    && resourceAddress.getElement(0).getKey().equals(DEPLOYMENT)) {
-                ModelNode model = resource.getModel();
-                String id = resourceAddress.getElement(0).getValue();
-                if (model.hasDefined(CONTENT)) {
-                    for (ModelNode contentItem : model.get(CONTENT).asList()) {
-                        if (contentItem.hasDefined(HASH)) {
-                            Set<byte[]> hashes = deploymentHashes.get(id);
-                            if (hashes == null) {
-                                hashes = new HashSet<byte[]>();
-                                deploymentHashes.put(id, hashes);
+            // Track deployment and management content hashes and server group deployments so we can pull over the content we need
+            if (resourceAddress.size() == 1) {
+                PathElement pe = resourceAddress.getElement(0);
+                String peKey = pe.getKey();
+                if (peKey.equals(DEPLOYMENT)) {
+                    ModelNode model = resource.getModel();
+                    String id = resourceAddress.getElement(0).getValue();
+                    if (model.hasDefined(CONTENT)) {
+                        for (ModelNode contentItem : model.get(CONTENT).asList()) {
+                            if (contentItem.hasDefined(HASH)) {
+                                Set<byte[]> hashes = deploymentHashes.get(id);
+                                if (hashes == null) {
+                                    hashes = new HashSet<byte[]>();
+                                    deploymentHashes.put(id, hashes);
+                                }
+                                hashes.add(contentItem.get(HASH).asBytes());
                             }
-                            hashes.add(contentItem.get(HASH).asBytes());
                         }
+                    }
+                } else if (peKey.equals(MANAGEMENT_CLIENT_CONTENT)) {
+                    // We need to pull over management content from the master HC's repo
+                    ModelNode model = resource.getModel();
+                    if (model.hasDefined(HASH)) {
+                        requiredContent.add(model.get(HASH).asBytes());
                     }
                 }
 
@@ -149,30 +164,27 @@ public class ApplyRemoteMasterDomainModelHandler implements OperationStepHandler
             }
         }
 
-        // Make sure we have all needed deployment content
+        // Make sure we have all needed deployment and management client content
         for (String id : relevantDeployments) {
             Set<byte[]> hashes = deploymentHashes.remove(id);
             if (hashes != null) {
-                for (byte[] hash : hashes) {
-                    fileRepository.getDeploymentFiles(hash);
-                }
+                requiredContent.addAll(hashes);
             }
+        }
+        for (byte[] hash : requiredContent) {
+            fileRepository.getDeploymentFiles(hash);
         }
 
         if (!context.isBooting()) {
-            final ModelNode endRoot = Resource.Tools.readModel(context.readResourceForUpdate(PathAddress.EMPTY_ADDRESS));
+            final Resource domainRootResource = context.readResourceForUpdate(PathAddress.EMPTY_ADDRESS);
+            final ModelNode endRoot = Resource.Tools.readModel(domainRootResource);
             final Set<ServerIdentity> affectedServers = new HashSet<ServerIdentity>();
             final ModelNode hostModel = endRoot.require(HOST).asPropertyList().iterator().next().getValue();
             final ModelNode existingHostModel = startRoot.require(HOST).asPropertyList().iterator().next().getValue();
 
-            final Map<String, ProxyController> serverProxies = getServerProxies(context);
+            final Map<String, ProxyController> serverProxies = DomainServerUtils.getServerProxies(localHostInfo.getLocalHostName(), domainRootResource, context.getResourceRegistration());
 
-            final ModelNode startExtensions = startRoot.get(EXTENSION);
-            final ModelNode finishExtensions = endRoot.get(EXTENSION);
-            if (!startExtensions.equals(finishExtensions)) {
-                // This affects all servers
-                affectedServers.addAll(DomainServerUtils.getAllRunningServers(hostModel, localHostInfo.getLocalHostName(), serverProxies));
-            }
+            // Extensions are handled in ApplyExtensionsHandler
 
             final ModelNode startPaths = startRoot.get(PATH);
             final ModelNode endPaths = endRoot.get(PATH);
@@ -296,7 +308,7 @@ public class ApplyRemoteMasterDomainModelHandler implements OperationStepHandler
             }
 
             if (!affectedServers.isEmpty()) {
-                Logger.getLogger(ApplyRemoteMasterDomainModelHandler.class).info("Domain model has changed on re-connect.  The following servers will need to be restarted for changes to take affect: " + affectedServers);
+                ROOT_LOGGER.domainModelChangedOnReConnect(affectedServers);
                 final Set<ServerIdentity> runningServers = DomainServerUtils.getAllRunningServers(hostModel, localHostInfo.getLocalHostName(), serverProxies);
                 for (ServerIdentity serverIdentity : affectedServers) {
                     if(!runningServers.contains(serverIdentity)) {
@@ -314,38 +326,8 @@ public class ApplyRemoteMasterDomainModelHandler implements OperationStepHandler
         context.completeStep();
     }
 
-    private Map<String, ProxyController> getServerProxies(OperationContext context) {
-        final Set<String> serverNames = context.readResource(PathAddress.pathAddress(PathElement.pathElement(HOST, localHostInfo.getLocalHostName()))).getChildrenNames(SERVER_CONFIG);
-        final Map<String, ProxyController> proxies = new HashMap<String, ProxyController>();
-        for(String serverName : serverNames) {
-            final PathAddress serverAddress = PathAddress.pathAddress(PathElement.pathElement(HOST, localHostInfo.getLocalHostName()), PathElement.pathElement(SERVER, serverName));
-            final ProxyController proxyController = context.getResourceRegistration().getProxyController(serverAddress);
-            if(proxyController != null) {
-                proxies.put(serverName, proxyController);
-            }
-        }
-        return proxies;
-    }
-
-    protected void initializeExtension(String module) {
-        try {
-            for (final Extension extension : Module.loadServiceFromCallerModuleLoader(ModuleIdentifier.fromString(module), Extension.class)) {
-                ClassLoader oldTccl = SecurityActions.setThreadContextClassLoader(extension.getClass());
-                try {
-                    extension.initialize(extensionContext);
-                } finally {
-                    SecurityActions.setThreadContextClassLoader(oldTccl);
-                }
-            }
-        } catch (ModuleLoadException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
     private void clearDomain(final Resource rootResource) {
-        for(Resource.ResourceEntry entry : rootResource.getChildren(EXTENSION)) {
-            rootResource.removeChild(entry.getPathElement());
-        }
+        // Extensions are handled in ApplyExtensionsHandler
         for(Resource.ResourceEntry entry : rootResource.getChildren(ModelDescriptionConstants.PATH)) {
             rootResource.removeChild(entry.getPathElement());
         }
@@ -374,11 +356,27 @@ public class ApplyRemoteMasterDomainModelHandler implements OperationStepHandler
             return rootResource;
         }
         Resource temp = rootResource;
+        int idx = 0;
         for(PathElement element : resourceAddress) {
             temp = temp.getChild(element);
             if(temp == null) {
-                return context.createResource(resourceAddress);
+                if (idx == 0) {
+                    String type = element.getKey();
+                    if (type.equals(EXTENSION)) {
+                        // Extensions are handled in ApplyExtensionsHandler
+                        continue;
+                    } else if (type.equals(MANAGEMENT_CLIENT_CONTENT) && element.getValue().equals(ROLLOUT_PLANS)) {
+                        // Needs a specialized resource type
+                        temp = new ManagedDMRContentTypeResource(element, ROLLOUT_PLAN, null, contentRepository);
+                        context.addResource(resourceAddress, temp);
+                    }
+                }
+                if (temp == null) {
+                    temp = context.createResource(resourceAddress);
+                }
+                break;
             }
+            idx++;
         }
         return temp;
     }
@@ -511,7 +509,6 @@ public class ApplyRemoteMasterDomainModelHandler implements OperationStepHandler
             ModelNode model = server.getModel();
             result.add(model.get(GROUP).asString());
         }
-
         return result;
     }
 

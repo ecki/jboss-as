@@ -59,7 +59,9 @@ import org.jboss.vfs.VFSUtils;
  * TODO: this needs to be updated when libraries are deployed the server with extension name in the manifest
  */
 public final class ExtensionIndexService implements Service<ExtensionIndex>, ExtensionIndex {
+
     private static final Logger log = Logger.getLogger("org.jboss.as.server.deployment.module.extension-index");
+
     public static final String MODULE_PREFIX = ServiceModuleLoader.MODULE_PREFIX + "extension.";
 
     private final File[] extensionRoots;
@@ -111,7 +113,7 @@ public final class ExtensionIndexService implements Service<ExtensionIndex>, Ext
                                 // different places
                                 continue;
                             // now register a module spec service for this extension
-                            // this makes it availble for loading
+                            // this makes it available for loading
                             ExternalModuleSpecService service = new ExternalModuleSpecService(moduleIdentifier, jar);
                             serviceContainer.addService(ServiceModuleLoader.moduleSpecServiceName(moduleIdentifier), service)
                                     .addDependency(org.jboss.as.server.deployment.Services.JBOSS_DEPLOYMENT_EXTENSION_INDEX)

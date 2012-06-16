@@ -6,43 +6,75 @@
 
     <parent>
         <groupId>org.jboss.as</groupId>
-        <artifactId>jboss-as-testsuite-integration-agg</artifactId>
-        <version>7.1.0.CR1-SNAPSHOT</version>
+        <artifactId>jboss-as-ts-integ</artifactId>
+        <version>7.2.0.Alpha1-SNAPSHOT</version>
     </parent>
 
     <!-- ********************************************************************************** -->
     <!-- ******************************** Basic Integration ******************************* -->
     <!-- ********************************************************************************** -->
     <groupId>org.jboss.as</groupId>
-    <artifactId>jboss-as-testsuite-integration-basic</artifactId>
-    <version>7.1.0.CR1-SNAPSHOT</version>
+    <artifactId>jboss-as-ts-integ-basic</artifactId>
+    <version>7.2.0.Alpha1-SNAPSHOT</version>
 
-    <name>JBoss AS Test Suite: Integration - Basic</name>
+    <name>JBoss Application Server Test Suite: Integration - Basic</name>
 
     <properties>
         <jbossas.ts.integ.dir>${basedir}/..</jbossas.ts.integ.dir>
         <jbossas.ts.dir>${jbossas.ts.integ.dir}/..</jbossas.ts.dir>
         <jbossas.project.dir>${jbossas.ts.dir}/..</jbossas.project.dir>
+        <version.apacheds>2.0.0-M6</version.apacheds>
+        <version.apacheds.shared>1.0.0-M11</version.apacheds.shared>
     </properties>
 
-    <!--  TODO move this to parent? -->
-    <build>
-        <testResources>
-            <testResource>
-                <directory>src/test/resources</directory>
-            </testResource>
-            <testResource>
-                <directory>src/test/java</directory>
-                <excludes>
-                    <exclude>**/*.java</exclude>
-                </excludes>
-            </testResource>
-        </testResources>
-    </build>
+    <dependencies>
+        <dependency>
+            <groupId>org.jboss.security</groupId>
+            <artifactId>jbossxacml</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>jboss</groupId>
+            <artifactId>jnp-client</artifactId>
+            <version>4.2.2.GA</version>
+        </dependency>    
+    
+        <dependency>
+            <groupId>org.apache.directory.server</groupId>
+            <artifactId>apacheds-core</artifactId>
+            <version>${version.apacheds}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.directory.server</groupId>
+            <artifactId>apacheds-server-config</artifactId>
+            <version>${version.apacheds}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.directory.server</groupId>
+            <artifactId>apacheds-protocol-ldap</artifactId>
+            <version>${version.apacheds}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.directory.server</groupId>
+            <artifactId>apacheds-interceptors-hash</artifactId>
+            <version>${version.apacheds}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.directory.shared</groupId>
+            <artifactId>shared-ldap-codec-standalone</artifactId>
+            <version>${version.apacheds.shared}</version>
+            <scope>test</scope>
+        </dependency>
+
+    </dependencies>
 
     <profiles>
 
-                                
         <profile>
             <id>basic.integration.tests.profile</id>
             <activation>
@@ -56,12 +88,48 @@
             -->
             <build>
                 <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>xml-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>adjust-default-server-configuration-for-basic-tests</id>
+                                <phase>process-test-resources</phase>
+                                <goals>
+                                    <goal>transform</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                        <configuration>
+                            <transformationSets>
+                                <transformationSet>
+                                    <dir>${basedir}/target/jbossas/standalone/configuration</dir>
+                                    <skipDefaultExcludes>true</skipDefaultExcludes>
+                                    <includes>
+                                        <include>standalone*.xml</include>
+                                    </includes>
+                                    <stylesheet>${basedir}/src/test/xslt/passwdMaskConfig.xsl</stylesheet>
+                                    <outputDir>${basedir}/target/jbossas/standalone/configuration</outputDir>
+                                    <parameters>
+                                        <parameter>
+                                            <name>keystore</name>
+                                            <value>${basedir}/src/test/resources/security/vault.keystore</value>
+                                        </parameter>
+                                        <parameter>
+                                            <name>encFileDir</name>
+                                            <value>${basedir}/src/test/resources/security/</value>
+                                        </parameter>
+                                    </parameters>
+                                </transformationSet>
+                            </transformationSets>
+                        </configuration>
+                    </plugin>
 
                     <!-- Build the target/jbossas server configuration. -->
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-antrun-plugin</artifactId>
-                        <executions combine.children="append">
+                        <executions>
                             <!-- Copy in some jars. -->
                             <execution>
                                 <id>prepare-jars-basic-integration.server</id>
@@ -70,7 +138,10 @@
                                 <configuration>
                                     <target>
                                         <property name="tests.resources.dir" value="${basedir}/../src/test/resources"/>
-                                        <property name="tests.output.dir" value="${project.build.directory}"/>
+                                        <property name="tests.output.dir"    value="${project.build.directory}"/>
+                                        <ant antfile="${basedir}/../src/test/scripts/basic-integration-build.xml">
+                                            <target name="build-basic-integration"/>  <!-- TODO: Unify names, then call "recursively". -->
+                                        </ant>
                                     </target>
                                 </configuration>
                             </execution>
@@ -83,11 +154,7 @@
                         <executions combine.children="append">
 
                             <!-- Disable default-test execution. -->
-                            <execution>
-                                <id>default-test</id>
-                                <goals><goal>test</goal></goals>
-                                <phase>none</phase>
-                            </execution>
+                            <execution><id>default-test</id><goals><goal>test</goal></goals><phase>none</phase></execution>
 
 
                             <execution>
@@ -97,22 +164,31 @@
                                 <configuration>
                                     <!-- Tests to execute. Overriden in webProfileExclusion.profile . -->
                                     <includes>
-                                        <include>org/jboss/as/test/integration/**/*SecondTestCase.java</include>
                                         <include>org/jboss/as/test/integration/ejb/iiop/**/*TestCase*.java</include>
+                                        <include>org/jboss/as/test/integration/*/security/**/*TestCase.java</include>
                                         <include>org/jboss/as/test/integration/ejb/mdb/**/*TestCase*.java</include>
+                                        <include>org/jboss/as/test/integration/ejb/pool/**/*TestCase*.java</include>
                                         <include>org/jboss/as/test/integration/ejb/entity/cmp/**/*TestCase*.java</include>
                                         <include>org/jboss/as/test/integration/ejb/remote/entity/cmp/**/*TestCase*.java</include>
-                                        <include>org/jboss/as/test/integration/ejb/management/deployments/EjbJarInEarRuntimeResourcesTestCase.java</include>
-                                        <include>org/jboss/as/test/integration/ejb/management/deployments/EjbJarRuntimeResourcesTestCase.java</include>
+                                        <include>org/jboss/as/test/integration/ejb/management/deployments/*TestCase.java</include>
+                                        <include>org/jboss/as/test/integration/ejb/transaction/bmt/lazyenlist</include>
+                                        <include>org/jboss/as/test/integration/jaxr/**/*TestCase*.java</include>
+                                        <include>org/jboss/as/test/integration/jca/bootstrap/**/*TestCase*.java</include>
                                         <include>org/jboss/as/test/integration/messaging/**/*TestCase*.java</include>
                                         <include>org/jboss/as/test/integration/management/cli/HelpTestCase.java</include>
                                         <include>org/jboss/as/test/integration/management/cli/JmsTestCase.java</include>
+                                        <include>org/jboss/as/test/integration/naming/remote/**/*TestCase.java</include>
+                                        <include>org/jboss/as/test/integration/ee/injection/resource/resourceref/*TestCase.java</include>
+                                        <include>org/jboss/as/test/integration/ee/injection/resource/enventry/EnvEntryTestCase.java</include>
+                                        <include>org/jboss/as/test/integration/ee/injection/resource/basic/*TestCase.java</include>
                                     </includes>
 
                                     <!-- Parameters to test cases. -->
                                     <systemPropertyVariables>
                                         <jboss.server.config.file.name>standalone-full.xml</jboss.server.config.file.name>
                                         <jboss.inst>${basedir}/target/jbossas</jboss.inst>
+                                        <!-- Needed for the IIOP tests-->
+                                        <com.sun.CORBA.ORBUseDynamicStub>true</com.sun.CORBA.ORBUseDynamicStub>
                                     </systemPropertyVariables>
 
                                     <additionalClasspathElements>
@@ -122,7 +198,7 @@
                                     <!--<reportNameSuffix>tests-basic-integration-default</reportNameSuffix>-->
                                 </configuration>
                             </execution>
-                            
+
                             <execution>
                                 <id>basic-integration-default-web.surefire</id>
                                 <phase>test</phase>
@@ -130,16 +206,26 @@
                                 <configuration>
                                     <!-- Tests to execute. Overriden in webProfileExclusion.profile . -->
                                     <excludes>
+                                        <!-- 2nd run tests are run in other execution. -->
                                         <exclude>org/jboss/as/test/integration/**/*SecondTestCase.java</exclude>
+                                        <!-- Tests which need FULL config. -->
                                         <exclude>org/jboss/as/test/integration/ejb/iiop/**/*TestCase*.java</exclude>
+                                        <exclude>org/jboss/as/test/integration/*/security/**/*TestCase.java</exclude>
                                         <exclude>org/jboss/as/test/integration/ejb/mdb/**/*TestCase*.java</exclude>
+                                        <exclude>org/jboss/as/test/integration/ejb/pool/**/*TestCase*.java</exclude>
                                         <exclude>org/jboss/as/test/integration/ejb/entity/cmp/**/*TestCase*.java</exclude>
                                         <exclude>org/jboss/as/test/integration/ejb/remote/entity/cmp/**/*TestCase*.java</exclude>
-                                        <exclude>org/jboss/as/test/integration/ejb/management/deployments/EjbJarInEarRuntimeResourcesTestCase.java</exclude>
-                                        <exclude>org/jboss/as/test/integration/ejb/management/deployments/EjbJarRuntimeResourcesTestCase.java</exclude>
+                                        <exclude>org/jboss/as/test/integration/ejb/management/deployments/*TestCase.java</exclude>
+                                        <exclude>org/jboss/as/test/integration/ejb/transaction/bmt/lazyenlist</exclude>
+                                        <exclude>org/jboss/as/test/integration/jaxr/**/*TestCase*.java</exclude>
+                                        <exclude>org/jboss/as/test/integration/jca/bootstrap/**/*TestCase*.java</exclude>
                                         <exclude>org/jboss/as/test/integration/messaging/**/*TestCase*.java</exclude>
                                         <exclude>org/jboss/as/test/integration/management/cli/HelpTestCase.java</exclude>
                                         <exclude>org/jboss/as/test/integration/management/cli/JmsTestCase.java</exclude>
+                                        <exclude>org/jboss/as/test/integration/naming/remote/**/*TestCase.java</exclude>
+                                        <exclude>org/jboss/as/test/integration/ee/injection/resource/resourceref/*TestCase.java</exclude>
+                                        <exclude>org/jboss/as/test/integration/ee/injection/resource/enventry/EnvEntryTestCase.java</exclude>
+                                        <exclude>org/jboss/as/test/integration/ee/injection/resource/basic/*TestCase.java</exclude>
                                     </excludes>
 
                                     <!-- Parameters to test cases. -->
@@ -155,16 +241,16 @@
                                     <!--<reportNameSuffix>tests-basic-integration-default</reportNameSuffix>-->
                                 </configuration>
                             </execution>
-                            
-                            
+
+
                             <!-- The second run tests rely on restoring timer services setup in the first run of tests. -->
                             <execution>
                                 <id>basic-integration-2nd.surefire</id>
                                 <phase>test</phase>
                                 <goals><goal>test</goal></goals>
                                 <configuration>
-                                    <skipTests>false</skipTests>
-                                    <redirectTestOutputToFile>true</redirectTestOutputToFile>
+                                    <skipTests>${ts.skipTests}</skipTests>
+                                    <redirectTestOutputToFile>${testLogToFile}</redirectTestOutputToFile>
                                     <enableAssertions>true</enableAssertions>
                                     <includes>
                                         <include>org/jboss/as/test/integration/**/*SecondTestCase.java</include>
@@ -179,62 +265,50 @@
 
                     </plugin>
 
+                    <plugin>
+                    	<groupId>org.apache.felix</groupId>
+                    	<artifactId>maven-bundle-plugin</artifactId>
+                    	<inherited>true</inherited>
+                    	<extensions>true</extensions>
+                    </plugin>
+
                 </plugins>
             </build>
         </profile>
-        
-        <!-- TODO is this still needed after I (Kabir) did the split in basic.integration.tests.profile? 
-              I disabled it for now
-         -->
-        <!-- Web profile - separation of web~ and full~profile tests. -->
+
+        <!-- With -DnoWebProfile, the all tests will run with standalone-full.xml. -->
+        <!-- This changes the FULL exec so that it includes all tests. -->
         <profile>
             <id>webProfileExclusion.profile</id>
-            <!-- With -DnoWebProfile, the all tests will run with standalone-full.xml. -->
-            <!--  DISABLED  -->
-            <!-- activation><property><name>!noWebProfile</name></property></activation -->
+            <activation><property><name>noWebProfile</name></property></activation>
             <build>
                 <plugins>
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-surefire-plugin</artifactId>
-                        <!-- Run the tests with web profile. -->
                         <executions>
+                            <!-- Disable execution with WEB config. -->
                             <execution>
-                                <!-- Overrides the default execution. -->
-                                <id>basic-integration-web.surefire</id>
-                                <phase>test</phase>
+                                <id>basic-integration-default-web.surefire</id>
+                                <phase>none</phase>
                                 <goals><goal>test</goal></goals>
-                                <configuration>
-                                    <!-- Parameters to test cases. -->
-                                    <systemPropertyVariables>
-                                        <jboss.server.config.file.name>standalone.xml</jboss.server.config.file.name>
-                                    </systemPropertyVariables>
-                                    <!-- Exclude jacorb, hornetq, jaxr, and webservices. -->
-                                    <excludes>
-                                        <exclude>org/jboss/as/test/integration/**/*SecondTestCase.java</exclude>
-                                        <exclude>org/jboss/as/test/integration/jacorb/**/*</exclude>
-                                        <exclude>org/jboss/as/test/integration/hornetq/**/*</exclude>
-                                        <exclude>org/jboss/as/test/integration/jaxr/**/*</exclude>
-                                        <exclude>org/jboss/as/test/integration/ws/**/*</exclude>
-                                    </excludes>
-                                </configuration>
                             </execution>
-                            <!-- Run the rest with full profile. -->
+                            <!-- Run the ALL tests with FULL config. -->
                             <execution>
-                                <id>basic-integration-non-web.surefire</id>
+                                <id>basic-integration-default-full.surefire</id>
                                 <phase>test</phase>
                                 <goals><goal>test</goal></goals>
                                 <configuration>
+                                    <redirectTestOutputToFile>false</redirectTestOutputToFile>
                                     <systemPropertyVariables>
                                         <jboss.server.config.file.name>standalone-full.xml</jboss.server.config.file.name>
                                     </systemPropertyVariables>
-                                    <!-- Run only jacorb, hornetq, jaxr, and webservices. -->
                                     <includes>
-                                        <include>org/jboss/as/test/integration/jacorb/**/*TestCase.java</include>
-                                        <include>org/jboss/as/test/integration/hornetq/**/*TestCase.java</include>
-                                        <include>org/jboss/as/test/integration/jaxr/**/*TestCase.java</include>
-                                        <include>org/jboss/as/test/integration/ws/**/*TestCase.java</include>
+                                        <include>**/*TestCase.java</include>
                                     </includes>
+                                    <excludes>
+                                        <exclude>org/jboss/as/test/integration/**/*SecondTestCase.java</exclude>
+                                    </excludes>
                                 </configuration>
                             </execution>
                         </executions>
@@ -245,7 +319,7 @@
 
         <!-- When -Dtest=... is set, only the default surefire execution with standalone-full.xml will run. -->
         <profile>
-            <id>onlyOneSurefireExecution.profile</id>
+            <id>onlyOneSurefireExecution.basic.profile</id>
             <activation><property><name>test</name></property></activation>
             <build>
                 <plugins>
@@ -253,8 +327,8 @@
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-surefire-plugin</artifactId>
                         <executions>
-                            <execution><id>basic-integration-web.surefire</id><phase>none</phase></execution>
-                            <execution><id>basic-integration-non-web.surefire</id><phase>none</phase></execution>
+                            <execution><id>basic-integration-default-full.surefire</id><phase>test</phase></execution>
+                            <execution><id>basic-integration-default-web.surefire</id><phase>none</phase></execution>
                             <execution><id>basic-integration-2nd.surefire</id><phase>none</phase></execution>
                         </executions>
                     </plugin>
@@ -263,4 +337,5 @@
         </profile>
 
     </profiles>
+
 </project>

@@ -74,7 +74,7 @@ public final class WSHandlerChainAnnotationProcessor implements DeploymentUnitPr
         }
         // wars define resource roots
         AttachmentList<ResourceRoot> resourceRoots = unit.getAttachment(RESOURCE_ROOTS);
-        if (EjbDeploymentMarker.isEjbDeployment(unit)) {
+        if (!unit.getName().endsWith(".war") && EjbDeploymentMarker.isEjbDeployment(unit)) {
             // ejb archives don't define resource roots, using root resource
             resourceRoots = new AttachmentList<ResourceRoot>(ResourceRoot.class);
             final ResourceRoot root = unit.getAttachment(DEPLOYMENT_ROOT);
@@ -149,13 +149,13 @@ public final class WSHandlerChainAnnotationProcessor implements DeploymentUnitPr
             try {
                 classURI = new URI(annotatedClassName.replace('.', '/'));
             } catch (final URISyntaxException ignore) {}
-            final String handlerChaingConfigFileResourcePath = classURI.resolve(handlerChainConfigFile).toString();
-            final VirtualFile config = resourceRoot.getRoot().getChild(handlerChaingConfigFileResourcePath);
+            final String handlerChainConfigFileResourcePath = classURI.resolve(handlerChainConfigFile).toString();
+            final VirtualFile config = resourceRoot.getRoot().getChild(handlerChainConfigFileResourcePath);
             if (config.exists() && config.isFile()) {
                 return config.openStream();
             }
 
-            throw MESSAGES.missingHandlerChainConfigFile(handlerChaingConfigFileResourcePath, resourceRoot);
+            throw MESSAGES.missingHandlerChainConfigFile(handlerChainConfigFileResourcePath, resourceRoot);
         }
     }
 

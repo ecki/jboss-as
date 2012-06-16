@@ -17,19 +17,26 @@
  */
 package org.jboss.as.arquillian.container.managed;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Scanner;
+
 import org.jboss.arquillian.container.spi.ConfigurationException;
 import org.jboss.arquillian.container.spi.client.deployment.Validate;
 import org.jboss.as.arquillian.container.CommonContainerConfiguration;
 
-import java.io.File;
-
 /**
- * JBossAsManagedConfiguration
+ * The managed container configuration
  *
  * @author <a href="mailto:aslak@redhat.com">Aslak Knutsen</a>
- * @version $Revision: $
+ * @author Thomas.Diesler@jboss.com
  */
 public class ManagedContainerConfiguration extends CommonContainerConfiguration {
+
+    /**
+     * Default timeout value waiting on ports is 10 seconds
+     */
+    private static final Integer DEFAULT_VALUE_WAIT_FOR_PORTS_TIMEOUT_SECONDS = 10;
 
     private String jbossHome = System.getenv("JBOSS_HOME");
 
@@ -37,15 +44,25 @@ public class ManagedContainerConfiguration extends CommonContainerConfiguration 
 
     private String modulePath = System.getProperty("module.path");
 
+    private String bundlePath = System.getProperty("bundle.path");
+
     private String javaVmArguments = System.getProperty("jboss.options", "-Xmx512m -XX:MaxPermSize=128m");
 
-    private int startupTimeoutInSeconds = 30;
+    private int startupTimeoutInSeconds = 60;
 
     private boolean outputToConsole = true;
 
     private String serverConfig = System.getProperty("jboss.server.config.file.name",  "standalone.xml");
 
     private boolean allowConnectingToRunningServer = false;
+
+    private boolean enableAssertions = true;
+
+    private boolean adminOnly = false;
+
+    private Integer[] waitForPorts;
+
+    private Integer waitForPortsTimeoutInSeconds;
 
     public ManagedContainerConfiguration() {
         // if no javaHome is set use java.home of already running jvm
@@ -160,6 +177,14 @@ public class ManagedContainerConfiguration extends CommonContainerConfiguration 
         this.modulePath = modulePath;
     }
 
+    public String getBundlePath() {
+        return bundlePath;
+    }
+
+    public void setBundlePath(String bundlePath) {
+        this.bundlePath = bundlePath;
+    }
+
     public boolean isAllowConnectingToRunningServer() {
         return allowConnectingToRunningServer;
     }
@@ -167,4 +192,43 @@ public class ManagedContainerConfiguration extends CommonContainerConfiguration 
     public void setAllowConnectingToRunningServer(final boolean allowConnectingToRunningServer) {
         this.allowConnectingToRunningServer = allowConnectingToRunningServer;
     }
+
+    public boolean isEnableAssertions() {
+        return enableAssertions;
+    }
+
+    public void setEnableAssertions(final boolean enableAssertions) {
+        this.enableAssertions = enableAssertions;
+    }
+
+    public Integer[] getWaitForPorts() {
+        return waitForPorts;
+    }
+
+    public void setWaitForPorts(String waitForPorts) {
+        final Scanner scanner = new Scanner(waitForPorts);
+        final List<Integer> list = new ArrayList<Integer>();
+        while (scanner.hasNextInt()) {
+            list.add(scanner.nextInt());
+        }
+        this.waitForPorts = list.toArray(new Integer[] {});
+    }
+
+    public Integer getWaitForPortsTimeoutInSeconds() {
+        return waitForPortsTimeoutInSeconds != null ? waitForPortsTimeoutInSeconds
+            : DEFAULT_VALUE_WAIT_FOR_PORTS_TIMEOUT_SECONDS;
+    }
+
+    public void setWaitForPortsTimeoutInSeconds(final Integer waitForPortsTimeoutInSeconds) {
+        this.waitForPortsTimeoutInSeconds = waitForPortsTimeoutInSeconds;
+    }
+
+    public boolean isAdminOnly() {
+        return adminOnly;
+    }
+
+    public void setAdminOnly(boolean adminOnly) {
+        this.adminOnly = adminOnly;
+    }
+
 }

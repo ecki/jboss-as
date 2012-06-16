@@ -3,12 +3,12 @@
  */
 package org.jboss.as.controller.interfaces;
 
+import static org.jboss.as.controller.ControllerMessages.MESSAGES;
+
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
 import java.util.regex.Pattern;
-
-import static org.jboss.as.controller.ControllerMessages.MESSAGES;
 
 /**
  * {@link InterfaceCriteria} that tests whether a given {@link Pattern regex pattern}
@@ -16,7 +16,7 @@ import static org.jboss.as.controller.ControllerMessages.MESSAGES;
  *
  * @author Brian Stansberry
  */
-public class NicMatchInterfaceCriteria implements InterfaceCriteria {
+public class NicMatchInterfaceCriteria extends AbstractInterfaceCriteria {
 
     private static final long serialVersionUID = 6456168020697683203L;
 
@@ -47,13 +47,22 @@ public class NicMatchInterfaceCriteria implements InterfaceCriteria {
      *          matches <code>networkInterface</code>'s {@link NetworkInterface#getName() name}.
      */
     @Override
-    public InetAddress isAcceptable(NetworkInterface networkInterface, InetAddress address) throws SocketException {
+    protected InetAddress isAcceptable(NetworkInterface networkInterface, InetAddress address) throws SocketException {
 
         if( pattern.matcher(networkInterface.getName()).matches() )
             return address;
         return null;
     }
 
+    @Override
+    public int hashCode() {
+        return pattern.toString().hashCode();
+    }
 
+    @Override
+    public boolean equals(Object o) {
+        return (o instanceof NicMatchInterfaceCriteria)
+                && pattern.toString().equals(((NicMatchInterfaceCriteria)o).pattern.toString());
+    }
 
 }

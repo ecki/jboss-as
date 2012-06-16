@@ -26,11 +26,9 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.VAL
 
 import org.jboss.as.controller.AttributeDefinition;
 import org.jboss.as.controller.OperationContext;
-import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.OperationFailedException;
+import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.PathAddress;
-import org.jboss.as.controller.ServiceVerificationHandler;
-import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
 import org.jboss.as.controller.operations.validation.InetAddressValidator;
 import org.jboss.as.controller.operations.validation.IntRangeValidator;
 import org.jboss.as.controller.operations.validation.ListValidator;
@@ -38,7 +36,6 @@ import org.jboss.as.controller.operations.validation.ModelTypeValidator;
 import org.jboss.as.controller.operations.validation.ParameterValidator;
 import org.jboss.as.controller.operations.validation.ParametersValidator;
 import org.jboss.as.controller.operations.validation.StringLengthValidator;
-import org.jboss.as.controller.registry.Resource;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.ModelType;
 
@@ -191,17 +188,17 @@ public class WriteAttributeHandlers {
         }
     }
 
-    public static class ListValidatatingHandler extends WriteAttributeOperationHandler {
+    public static class ListValidatingHandler extends WriteAttributeOperationHandler {
 
-        public ListValidatatingHandler(ParameterValidator elementValidator) {
+        public ListValidatingHandler(ParameterValidator elementValidator) {
             this(elementValidator, false, 1, Integer.MAX_VALUE);
         }
 
-        public ListValidatatingHandler(ParameterValidator elementValidator, boolean nullable) {
+        public ListValidatingHandler(ParameterValidator elementValidator, boolean nullable) {
             this(elementValidator, nullable, 1, Integer.MAX_VALUE);
         }
 
-        public ListValidatatingHandler(ParameterValidator elementValidator, boolean nullable, int minSize, int maxSize) {
+        public ListValidatingHandler(ParameterValidator elementValidator, boolean nullable, int minSize, int maxSize) {
             super(new ListValidator(elementValidator, nullable, minSize, maxSize));
         }
     }

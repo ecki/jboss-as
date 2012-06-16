@@ -22,7 +22,6 @@
 
 package org.jboss.as.connector.subsystems.datasources;
 
-import org.jboss.jca.common.api.metadata.ds.XaDataSource;
 import org.jboss.jca.common.api.validator.ValidateException;
 import org.jboss.jca.core.spi.transaction.recovery.XAResourceRecovery;
 import org.jboss.jca.core.spi.transaction.recovery.XAResourceRecoveryRegistry;
@@ -39,10 +38,13 @@ public class XaDataSourceService extends AbstractDataSourceService {
 
     private final InjectedValue<ModifiableXaDataSource> dataSourceConfig = new InjectedValue<ModifiableXaDataSource>();
 
-    public XaDataSourceService(final String jndiName) {
-        super(jndiName);
+    public XaDataSourceService(final String jndiName, final ClassLoader classLoader) {
+        super(jndiName, classLoader);
     }
 
+    public XaDataSourceService(final String jndiName) {
+        this(jndiName, null);
+    }
     @Override
     public synchronized void stop(StopContext stopContext) {
         if (deploymentMD != null) {
@@ -64,7 +66,6 @@ public class XaDataSourceService extends AbstractDataSourceService {
     @Override
     public AS7DataSourceDeployer getDeployer() throws ValidateException {
         return new AS7DataSourceDeployer(dataSourceConfig.getValue().getUnModifiableInstance());
-
     }
 
     public Injector<ModifiableXaDataSource> getDataSourceConfigInjector() {

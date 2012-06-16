@@ -28,6 +28,7 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RUN
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.UNDEPLOY;
 import org.jboss.as.controller.descriptions.common.DeploymentDescription;
 import org.jboss.as.controller.operations.common.Util;
+import org.jboss.as.server.services.security.AbstractVaultReader;
 import org.jboss.dmr.ModelNode;
 
 /**
@@ -43,9 +44,10 @@ public class DeploymentUndeployHandler implements OperationStepHandler, Descript
         return Util.getEmptyOperation(OPERATION_NAME, address);
     }
 
-    public static final DeploymentUndeployHandler INSTANCE = new DeploymentUndeployHandler();
+    private final AbstractVaultReader vaultReader;
 
-    private DeploymentUndeployHandler() {
+    public DeploymentUndeployHandler(final AbstractVaultReader vaultReader) {
+        this.vaultReader = vaultReader;
     }
 
     @Override
@@ -54,11 +56,11 @@ public class DeploymentUndeployHandler implements OperationStepHandler, Descript
     }
 
     public void execute(OperationContext context, ModelNode operation) {
-        ModelNode model = context.readModelForUpdate(PathAddress.EMPTY_ADDRESS);
+        ModelNode model = context.readResourceForUpdate(PathAddress.EMPTY_ADDRESS).getModel();
         final String deploymentUnitName = model.require(RUNTIME_NAME).asString();
         model.get(ENABLED).set(false);
 
-        DeploymentHandlerUtil.undeploy(context, deploymentUnitName);
+        DeploymentHandlerUtil.undeploy(context, deploymentUnitName, vaultReader);
 
         context.completeStep();
     }

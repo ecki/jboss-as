@@ -22,6 +22,8 @@
 
 package org.jboss.as.web.security;
 
+import static org.jboss.as.web.WebMessages.MESSAGES;
+
 import java.io.IOException;
 import java.security.Principal;
 import java.security.acl.Group;
@@ -48,8 +50,8 @@ import org.apache.catalina.deploy.SecurityConstraint;
 import org.apache.catalina.realm.GenericPrincipal;
 import org.apache.catalina.realm.RealmBase;
 import org.jboss.as.server.deployment.DeploymentUnit;
+import org.jboss.as.web.WebLogger;
 import org.jboss.as.web.deployment.WarMetaData;
-import org.jboss.logging.Logger;
 import org.jboss.metadata.javaee.spec.SecurityRoleRefMetaData;
 import org.jboss.metadata.javaee.spec.SecurityRoleRefsMetaData;
 import org.jboss.metadata.web.jboss.JBossWebMetaData;
@@ -86,8 +88,6 @@ import org.jboss.security.mapping.MappingType;
  */
 public class JBossWebRealm extends RealmBase {
 
-    private static Logger log = Logger.getLogger(JBossWebRealm.class);
-
     protected static final String name = "JBossWebRealm";
 
     /**
@@ -118,7 +118,7 @@ public class JBossWebRealm extends RealmBase {
     /**
      * The {@code DeploymentUnit} associated with the Realm
      */
-    protected DeploymentUnit deploymnetUnit;
+    protected DeploymentUnit deploymentUnit;
 
     /**
      * MetaData associated with the DeploymentUnit
@@ -182,7 +182,7 @@ public class JBossWebRealm extends RealmBase {
      * @param deploymentUnit
      */
     public void setDeploymentUnit(DeploymentUnit deploymentUnit) {
-        this.deploymnetUnit = deploymentUnit;
+        this.deploymentUnit = deploymentUnit;
         metaData = deploymentUnit.getAttachment(WarMetaData.ATTACHMENT_KEY).getMergedJBossWebMetaData();
         principalVersusRolesMap = metaData.getSecurityRoles().getPrincipalVersusRolesMap();
         useJBossAuthorization = metaData.isUseJBossAuthorization();
@@ -213,7 +213,7 @@ public class JBossWebRealm extends RealmBase {
         try {
             boolean isValid = authenticationManager.isValid(userPrincipal, credentials, subject);
             if (isValid) {
-                log.tracef("User: " + userPrincipal + " is authenticated");
+                WebLogger.WEB_SECURITY_LOGGER.tracef("User: " + userPrincipal + " is authenticated");
                 SecurityContext sc = SecurityActions.getSecurityContext();
                 if (sc == null)
                     throw new IllegalStateException("No SecurityContext found!");
@@ -257,6 +257,7 @@ public class JBossWebRealm extends RealmBase {
                 }
             }
         } catch (Exception e) {
+            WebLogger.WEB_SECURITY_LOGGER.authenticateError(e);
             userPrincipal = null;
             exceptionAudit(userPrincipal, null, e);
         }
@@ -275,9 +276,9 @@ public class JBossWebRealm extends RealmBase {
         if ((certs == null) || (certs.length < 1))
             return (null);
         if (authenticationManager == null)
-            throw new IllegalStateException("Authentication Manager has not been set");
+            throw MESSAGES.noAuthenticationManager();
         if (authorizationManager == null)
-            throw new IllegalStateException("Authorization Manager has not been set");
+            throw MESSAGES.noAuthorizationManager();
 
         Principal userPrincipal = null;
         try {
@@ -285,7 +286,7 @@ public class JBossWebRealm extends RealmBase {
             Subject subject = new Subject();
             boolean isValid = authenticationManager.isValid(userPrincipal, certs, subject);
             if (isValid) {
-                log.tracef("User: " + userPrincipal + " is authenticated");
+                WebLogger.WEB_SECURITY_LOGGER.tracef("User: " + userPrincipal + " is authenticated");
                 SecurityContext sc = SecurityActions.getSecurityContext();
                 if (sc == null)
                     throw new IllegalStateException("No SecurityContext found!");
@@ -323,11 +324,11 @@ public class JBossWebRealm extends RealmBase {
                     userPrincipal = new JBossGenericPrincipal(this, userPrincipal.getName(), null, rolesAsStringList,
                             userPrincipal, null, certs, null, subject);
             } else {
-                log.tracef("User: " + userPrincipal + " is NOT authenticated");
+                WebLogger.WEB_SECURITY_LOGGER.tracef("User: " + userPrincipal + " is NOT authenticated");
                 userPrincipal = null;
             }
         } catch (Exception e) {
-            log.errorf("Error during authenticate(X509Certificate[])");
+            WebLogger.WEB_SECURITY_LOGGER.authenticateErrorCert(e);
             exceptionAudit(userPrincipal, null, e);
         }
 
@@ -347,13 +348,13 @@ public class JBossWebRealm extends RealmBase {
     public Principal authenticate(String username, String clientDigest, String nOnce, String nc, String cnonce, String qop,
             String realm, String md5a2) {
         if (authenticationManager == null)
-            throw new IllegalStateException("Authentication Manager has not been set");
+            throw MESSAGES.noAuthenticationManager();
         if (authorizationManager == null)
-            throw new IllegalStateException("Authorization Manager has not been set");
+            throw MESSAGES.noAuthorizationManager();
         Principal userPrincipal = null;
         SecurityContext sc = SecurityActions.getSecurityContext();
         if (sc == null)
-            throw new IllegalStateException("No SecurityContext found!");
+            throw MESSAGES.noSecurityContext();
         Principal caller = sc.getUtil().getUserPrincipal();
         if (caller == null && username == null && clientDigest == null) {
             return null;
@@ -365,7 +366,7 @@ public class JBossWebRealm extends RealmBase {
             Subject subject = new Subject();
             boolean isValid = authenticationManager.isValid(userPrincipal, clientDigest, subject);
             if (isValid) {
-                log.tracef("User: " + userPrincipal + " is authenticated");
+                WebLogger.WEB_SECURITY_LOGGER.tracef("User: " + userPrincipal + " is authenticated");
                 userPrincipal = getPrincipal(subject);
                 sc.getUtil().createSubjectInfo(userPrincipal, clientDigest, subject);
                 SecurityContextCallbackHandler scb = new SecurityContextCallbackHandler(sc);
@@ -400,11 +401,11 @@ public class JBossWebRealm extends RealmBase {
                     userPrincipal = new JBossGenericPrincipal(this, userPrincipal.getName(), null, rolesAsStringList,
                             userPrincipal, null, clientDigest, null, subject);
             } else {
-                log.tracef("User: " + userPrincipal + " is NOT authenticated");
+                WebLogger.WEB_SECURITY_LOGGER.tracef("User: " + userPrincipal + " is NOT authenticated");
                 userPrincipal = null;
             }
         } catch (Exception e) {
-            log.errorf("Error during authenticate(String,String,String,String,String,String,String,String)");
+            WebLogger.WEB_SECURITY_LOGGER.authenticateErrorDigest(e);
         }
 
         if (userPrincipal != null) {
@@ -503,7 +504,7 @@ public class JBossWebRealm extends RealmBase {
             try {
                 helper = SecurityHelperFactory.getWebAuthorizationHelper(sc);
             } catch (Exception e) {
-                log.errorf("Exception in obtaining helper", e);
+                WebLogger.WEB_SECURITY_LOGGER.noAuthorizationHelper(e);
                 return false;
             }
 
@@ -511,7 +512,7 @@ public class JBossWebRealm extends RealmBase {
                     requestURI(request), getPrincipalRoles(request));
         }
         boolean finalDecision = baseDecision && authzDecision;
-        log.tracef("hasResourcePermission:RealmBase says:" + baseDecision + "::Authz framework says:" + authzDecision
+        WebLogger.WEB_SECURITY_LOGGER.tracef("hasResourcePermission:RealmBase says:" + baseDecision + "::Authz framework says:" + authzDecision
                 + ":final=" + finalDecision);
         if (!finalDecision) {
             if (!disableAudit) {
@@ -563,7 +564,7 @@ public class JBossWebRealm extends RealmBase {
             try {
                 helper = SecurityHelperFactory.getWebAuthorizationHelper(sc);
             } catch (Exception e) {
-                log.errorf("Error obtaining helper", e);
+                WebLogger.WEB_SECURITY_LOGGER.noAuthorizationHelper(e);
             }
             Subject callerSubject = sc.getUtil().getSubject();
             if (callerSubject == null) {
@@ -576,7 +577,7 @@ public class JBossWebRealm extends RealmBase {
                     PolicyContext.getContextID(), callerSubject, getPrincipalRoles(request));
         }
         boolean finalDecision = baseDecision && authzDecision;
-        log.tracef("hasRole:RealmBase says:" + baseDecision + "::Authz framework says:" + authzDecision + ":final="
+        WebLogger.WEB_SECURITY_LOGGER.tracef("hasRole:RealmBase says:" + baseDecision + "::Authz framework says:" + authzDecision + ":final="
                 + finalDecision);
         if (finalDecision) {
             if (!disableAudit) {
@@ -610,7 +611,7 @@ public class JBossWebRealm extends RealmBase {
             try {
                 helper = SecurityHelperFactory.getWebAuthorizationHelper(sc);
             } catch (Exception e) {
-                log.errorf("Error obtaining helper", e);
+                WebLogger.WEB_SECURITY_LOGGER.noAuthorizationHelper(e);
             }
 
             Subject callerSubject = sc.getUtil().getSubject();
@@ -648,7 +649,7 @@ public class JBossWebRealm extends RealmBase {
      */
     protected Set<Principal> getPrincipalRoles(Principal principal) {
         if (!(principal instanceof GenericPrincipal))
-            throw new IllegalStateException("Expected GenericPrincipal, but saw: " + principal.getClass());
+            throw MESSAGES.illegalPrincipalType(principal.getClass());
         GenericPrincipal gp = GenericPrincipal.class.cast(principal);
         String[] roleNames = gp.getRoles();
         Set<Principal> userRoles = new HashSet<Principal>();
@@ -710,7 +711,7 @@ public class JBossWebRealm extends RealmBase {
     private String getServletName(Wrapper servlet) {
         // For jsp, the mapping will be (*.jsp, *.jspx)
         String[] mappings = servlet.findMappings();
-        log.tracef("[getServletName:servletmappings=" + mappings + ":servlet.getName()=" + servlet.getName() + "]");
+        WebLogger.WEB_SECURITY_LOGGER.tracef("[getServletName:servletmappings=" + mappings + ":servlet.getName()=" + servlet.getName() + "]");
         if ("jsp".equals(servlet.getName()) && (mappings != null && mappings[0].indexOf("*.jsp") > -1))
             return "";
         else
@@ -726,7 +727,7 @@ public class JBossWebRealm extends RealmBase {
         try {
             return (HttpServletRequest) PolicyContext.getContext(SecurityConstants.WEB_REQUEST_KEY);
         } catch (Exception e) {
-            log.tracef("Exception in getting servlet request:", e);
+            WebLogger.WEB_SECURITY_LOGGER.tracef("Exception in getting servlet request:", e);
         }
         return null;
     }

@@ -68,15 +68,17 @@ public class EEModuleConfigurationProcessor implements DeploymentUnitProcessor {
 
         final EEModuleConfiguration moduleConfiguration = new EEModuleConfiguration(moduleDescription);
         deploymentUnit.putAttachment(Attachments.EE_MODULE_CONFIGURATION, moduleConfiguration);
-
-        final Iterator<ComponentDescription> iterator = moduleDescription.getComponentDescriptions().iterator();
+        final ClassLoader oldCl = SecurityActions.getContextClassLoader();
+        try {
+            SecurityActions.setContextClassLoader(module.getClassLoader());
+            final Iterator<ComponentDescription> iterator = moduleDescription.getComponentDescriptions().iterator();
             while (iterator.hasNext()) {
                 final ComponentDescription componentDescription = iterator.next();
                 ROOT_LOGGER.debugf("Configuring component class: %s named %s", componentDescription.getComponentClassName(),
                         componentDescription.getComponentName());
                 final ComponentConfiguration componentConfiguration;
                 try {
-                    componentConfiguration = componentDescription.createConfiguration(classIndex.classIndex(componentDescription.getComponentClassName()), module.getClassLoader());
+                    componentConfiguration = componentDescription.createConfiguration(classIndex.classIndex(componentDescription.getComponentClassName()), module.getClassLoader(), module.getModuleLoader());
                     for (final ComponentConfigurator componentConfigurator : componentDescription.getConfigurators()) {
                         componentConfigurator.configure(phaseContext, componentDescription, componentConfiguration);
                     }
@@ -93,9 +95,11 @@ public class EEModuleConfigurationProcessor implements DeploymentUnitProcessor {
                     }
                 }
             }
+            deploymentUnit.putAttachment(Attachments.FAILED_COMPONENTS, Collections.synchronizedSet(failed));
 
-        deploymentUnit.putAttachment(Attachments.FAILED_COMPONENTS, Collections.synchronizedSet(failed));
-
+        } finally {
+            SecurityActions.setContextClassLoader(oldCl);
+        }
     }
 
     public void undeploy(DeploymentUnit context) {

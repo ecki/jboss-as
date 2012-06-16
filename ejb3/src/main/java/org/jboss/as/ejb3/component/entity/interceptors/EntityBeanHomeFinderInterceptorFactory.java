@@ -26,13 +26,14 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Enumeration;
 import java.util.HashMap;
-import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.Iterator;
 import java.util.Set;
 
 import org.jboss.as.ee.component.Component;
 import org.jboss.as.ee.component.ComponentInstance;
 import org.jboss.as.ee.component.ComponentView;
+import org.jboss.as.ee.component.interceptors.InvocationType;
 import org.jboss.as.ejb3.component.entity.EntityBeanComponent;
 import org.jboss.as.ejb3.component.entity.EntityBeanComponentInstance;
 import org.jboss.invocation.Interceptor;
@@ -83,14 +84,16 @@ public class EntityBeanHomeFinderInterceptorFactory implements InterceptorFactor
             public Object processInvocation(final InterceptorContext context) throws Exception {
 
                 //grab a bean from the pool to invoke the finder method on
-                final EntityBeanComponentInstance instance = component.getPool().get();
+                final EntityBeanComponentInstance instance = component.acquireUnAssociatedInstance();
                 final Object result;
+                final InvocationType invocationType = context.getPrivateData(InvocationType.class);
                 try {
+                    context.putPrivateData(InvocationType.class, InvocationType.FINDER_METHOD);
                     result = invokeFind(context, instance);
                     return prepareResults(context, result, component);
-
                 } finally {
-                    component.getPool().release(instance);
+                    component.releaseEntityBeanInstance(instance);
+                    context.putPrivateData(InvocationType.class, invocationType);
                 }
             }
 
@@ -101,7 +104,7 @@ public class EntityBeanHomeFinderInterceptorFactory implements InterceptorFactor
         switch (returnType) {
             case COLLECTION: {
                 Collection keys = (Collection) result;
-                final Set<Object> results = new HashSet<Object>();
+                final Set<Object> results = new LinkedHashSet<Object>();
                 if (keys != null) {
                     for (Object key : keys) {
                         results.add(getLocalObject(key));
@@ -111,7 +114,7 @@ public class EntityBeanHomeFinderInterceptorFactory implements InterceptorFactor
             }
             case ENUMERATION: {
                 Enumeration keys = (Enumeration) result;
-                final Set<Object> results = new HashSet<Object>();
+                final Set<Object> results = new LinkedHashSet<Object>();
                 if (keys != null) {
                     while (keys.hasMoreElements()) {
                         Object key = keys.nextElement();
@@ -134,7 +137,7 @@ public class EntityBeanHomeFinderInterceptorFactory implements InterceptorFactor
             }
             default: {
                 if (result == null) {
-                    throw MESSAGES.couldNotFindEntity(finderMethod,Arrays.toString(context.getParameters()));
+                    throw MESSAGES.couldNotFindEntity(finderMethod, Arrays.toString(context.getParameters()));
                 }
                 return getLocalObject(result);
             }

@@ -22,16 +22,17 @@
 
 package org.jboss.as.logging;
 
+import org.jboss.as.controller.CaseParameterCorrector;
 import org.jboss.as.controller.SimpleAttributeDefinition;
 import org.jboss.as.controller.SimpleAttributeDefinitionBuilder;
+import org.jboss.as.controller.operations.validation.EnumValidator;
 import org.jboss.as.controller.operations.validation.IntRangeValidator;
 import org.jboss.as.controller.registry.AttributeAccess;
 import org.jboss.as.logging.handlers.console.Target;
 import org.jboss.as.logging.validators.FileValidator;
 import org.jboss.as.logging.validators.LogLevelValidator;
-import org.jboss.as.logging.validators.OverflowActionValidator;
 import org.jboss.as.logging.validators.SizeValidator;
-import org.jboss.as.logging.validators.TargetValidator;
+import org.jboss.as.logging.validators.SuffixValidator;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.ModelType;
 import org.jboss.logmanager.handlers.AsyncHandler.OverflowAction;
@@ -59,7 +60,10 @@ public interface CommonAttributes {
 
     SimpleAttributeDefinition CATEGORY = SimpleAttributeDefinitionBuilder.create("category", ModelType.STRING).build();
 
-    SimpleAttributeDefinition CHANGE_LEVEL = SimpleAttributeDefinitionBuilder.create("change-level", ModelType.STRING, true).build();
+    SimpleAttributeDefinition CHANGE_LEVEL = SimpleAttributeDefinitionBuilder.create("change-level", ModelType.STRING, true).
+            setCorrector(CaseParameterCorrector.TO_UPPER).
+            setValidator(new LogLevelValidator(true)).
+            build();
 
     SimpleAttributeDefinition CLASS = SimpleAttributeDefinitionBuilder.create("class", ModelType.STRING).build();
 
@@ -73,7 +77,7 @@ public interface CommonAttributes {
 
     SimpleAttributeDefinition ENCODING = SimpleAttributeDefinitionBuilder.create("encoding", ModelType.STRING, true).build();
 
-    SimpleAttributeDefinition FILE = SimpleAttributeDefinitionBuilder.create("file", ModelType.OBJECT, true).
+    SimpleAttributeDefinition FILE = SimpleAttributeDefinitionBuilder.create("file", ModelType.OBJECT, false).
             setCorrector(FileCorrector.INSTANCE).
             setValidator(new FileValidator()).
             build();
@@ -93,6 +97,7 @@ public interface CommonAttributes {
             build();
 
     SimpleAttributeDefinition LEVEL = SimpleAttributeDefinitionBuilder.create("level", ModelType.STRING, true).
+            setCorrector(CaseParameterCorrector.TO_UPPER).
             setValidator(new LogLevelValidator(true)).
             build();
 
@@ -100,22 +105,28 @@ public interface CommonAttributes {
 
     SimpleAttributeDefinition MATCH = SimpleAttributeDefinitionBuilder.create("match", ModelType.STRING, true).build();
 
-    SimpleAttributeDefinition MAX_BACKUP_INDEX = SimpleAttributeDefinitionBuilder.create("max-backup-index", ModelType.INT).
+    SimpleAttributeDefinition MAX_BACKUP_INDEX = SimpleAttributeDefinitionBuilder.create("max-backup-index", ModelType.INT, true).
             setDefaultValue(new ModelNode().set(1)).
             setValidator(new IntRangeValidator(1, true)).
             build();
 
-    SimpleAttributeDefinition MAX_INCLUSIVE = SimpleAttributeDefinitionBuilder.create("max-inclusive", ModelType.BOOLEAN).
+    SimpleAttributeDefinition MAX_INCLUSIVE = SimpleAttributeDefinitionBuilder.create("max-inclusive", ModelType.BOOLEAN, true).
             setDefaultValue(new ModelNode().set(true)).
             build();
 
-    SimpleAttributeDefinition MAX_LEVEL = SimpleAttributeDefinitionBuilder.create("max-level", ModelType.STRING).build();
+    SimpleAttributeDefinition MAX_LEVEL = SimpleAttributeDefinitionBuilder.create("max-level", ModelType.STRING, true).
+            setCorrector(CaseParameterCorrector.TO_UPPER).
+            setValidator(new LogLevelValidator(true)).
+            build();
 
-    SimpleAttributeDefinition MIN_INCLUSIVE = SimpleAttributeDefinitionBuilder.create("min-inclusive", ModelType.BOOLEAN).
+    SimpleAttributeDefinition MIN_INCLUSIVE = SimpleAttributeDefinitionBuilder.create("min-inclusive", ModelType.BOOLEAN, true).
             setDefaultValue(new ModelNode().set(true)).
             build();
 
-    SimpleAttributeDefinition MIN_LEVEL = SimpleAttributeDefinitionBuilder.create("min-level", ModelType.STRING).build();
+    SimpleAttributeDefinition MIN_LEVEL = SimpleAttributeDefinitionBuilder.create("min-level", ModelType.STRING, true).
+            setCorrector(CaseParameterCorrector.TO_UPPER).
+            setValidator(new LogLevelValidator(true)).
+            build();
 
     SimpleAttributeDefinition MODULE = SimpleAttributeDefinitionBuilder.create("module", ModelType.STRING).build();
 
@@ -123,11 +134,14 @@ public interface CommonAttributes {
 
     SimpleAttributeDefinition VALUE = SimpleAttributeDefinitionBuilder.create("value", ModelType.STRING).build();
 
-    SimpleAttributeDefinition NEW_LEVEL = SimpleAttributeDefinitionBuilder.create("new-level", ModelType.STRING).build();
+    SimpleAttributeDefinition NEW_LEVEL = SimpleAttributeDefinitionBuilder.create("new-level", ModelType.STRING, true).
+            setCorrector(CaseParameterCorrector.TO_UPPER).
+            setValidator(new LogLevelValidator(true)).
+            build();
 
     SimpleAttributeDefinition OVERFLOW_ACTION = SimpleAttributeDefinitionBuilder.create("overflow-action", ModelType.STRING).
             setDefaultValue(new ModelNode().set(OverflowAction.BLOCK.name())).
-            setValidator(new OverflowActionValidator(false)).
+            setValidator(EnumValidator.create(OverflowAction.class, false, false)).
             build();
 
     SimpleAttributeDefinition PATH = SimpleAttributeDefinitionBuilder.create("path", ModelType.STRING).build();
@@ -170,11 +184,13 @@ public interface CommonAttributes {
             setAllowNull(true).
             build();
 
-    SimpleAttributeDefinition SUFFIX = SimpleAttributeDefinitionBuilder.create("suffix", ModelType.STRING, true).build();
+    SimpleAttributeDefinition SUFFIX = SimpleAttributeDefinitionBuilder.create("suffix", ModelType.STRING).
+            setValidator(new SuffixValidator()).
+            build();
 
     SimpleAttributeDefinition TARGET = SimpleAttributeDefinitionBuilder.create("target", ModelType.STRING, true).
             setDefaultValue(new ModelNode().set(Target.SYSTEM_OUT.toString())).
-            setValidator(new TargetValidator(false)).
+            setValidator(EnumValidator.create(Target.class, true, false)).
             build();
 
     SimpleAttributeDefinition USE_PARENT_HANDLERS = SimpleAttributeDefinitionBuilder.create("use-parent-handlers", ModelType.BOOLEAN, true).

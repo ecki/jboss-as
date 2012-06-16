@@ -26,9 +26,11 @@ import javax.ejb.EJBObject;
 import javax.ejb.EntityBean;
 import javax.transaction.UserTransaction;
 
+import org.jboss.as.ejb3.component.allowedmethods.AllowedMethodsInformation;
+import org.jboss.as.ejb3.component.allowedmethods.MethodType;
 import org.jboss.as.ejb3.component.entity.EntityBeanComponent;
 import org.jboss.as.ejb3.component.entity.EntityBeanComponentInstance;
-import static org.jboss.as.ejb3.EjbMessages.MESSAGES;
+
 /**
  * @author Stuart Douglas
  */
@@ -60,6 +62,7 @@ public class EntityContextImpl extends EJBContextImpl implements javax.ejb.Entit
     }
 
     public Object getPrimaryKey() throws IllegalStateException {
+        AllowedMethodsInformation.checkAllowed(MethodType.GET_PRIMARY_KEY);
         return instance.getPrimaryKey();
     }
 

@@ -22,12 +22,7 @@
 
 package org.jboss.as.domain.controller;
 
-import java.net.SocketException;
-import java.net.UnknownHostException;
-
 import org.jboss.as.controller.ControlledProcessState;
-import org.jboss.as.network.NetworkInterfaceBinding;
-import org.jboss.as.server.deployment.repository.api.ContentRepository;
 
 /**
  * Core information about the local host controller.
@@ -110,22 +105,14 @@ public interface LocalHostControllerInfo {
      * Gets the port of the remote domain controller
      * @return the port number
      */
-    int getRemoteDomainControllertPort();
+    int getRemoteDomainControllerPort();
 
     /**
-     * Get the network interface by its name
-     *
-     *  @param name the binding name
-     *  @return the network interface binding
+     * Gets the username to use when authenticating against the
+     * remote domain controller.
+     * @return the user name.
      */
-    NetworkInterfaceBinding getNetworkInterfaceBinding(String name) throws SocketException, UnknownHostException;
-
-    /**
-     * Gets the domain content repository, if this host {@link #isMasterDomainController()}.
-     *
-     * @return the content repository, or {@code null} is the host is not the domain controller
-     */
-    ContentRepository getContentRepository();
+    String getRemoteDomainControllerUsername();
 
     /**
      * Gets the current state of the host controller process.

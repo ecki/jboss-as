@@ -34,6 +34,7 @@ import org.jboss.as.cmp.context.CmpEntityBeanContext;
 import org.jboss.as.cmp.ejbql.Catalog;
 import org.jboss.as.cmp.jdbc.bridge.JDBCAbstractEntityBridge;
 import org.jboss.as.cmp.jdbc.metadata.JDBCEntityMetaData;
+import org.jboss.as.cmp.keygenerator.KeyGeneratorFactory;
 
 /**
  * @author <a href="mailto:alex@jboss.org">Alexey Loubyansky</a>
@@ -224,5 +225,7 @@ public interface JDBCEntityPersistenceStore {
     void addExistingTable(String entityName);
 
     EntityBridgeInvocationHandler getInvocationHandler();
+
+    KeyGeneratorFactory getKeyGeneratorFactory(String name);
 }
 

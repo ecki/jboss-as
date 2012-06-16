@@ -25,10 +25,7 @@ package org.jboss.as.domain.controller.operations;
 import java.util.Locale;
 import org.jboss.as.controller.AbstractRemoveStepHandler;
 import org.jboss.as.controller.OperationContext;
-import org.jboss.as.controller.OperationFailedException;
-import org.jboss.as.controller.PathAddress;
 import org.jboss.as.controller.descriptions.DescriptionProvider;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SUBSYSTEM;
 import org.jboss.as.controller.descriptions.common.ProfileDescription;
 import org.jboss.dmr.ModelNode;
 
@@ -39,15 +36,14 @@ public class ProfileRemoveHandler extends AbstractRemoveStepHandler implements D
 
     public static final ProfileRemoveHandler INSTANCE = new ProfileRemoveHandler();
 
-    protected void performRemove(OperationContext context, ModelNode operation, ModelNode model) throws OperationFailedException {
-        if (context.readModel(PathAddress.EMPTY_ADDRESS).get(SUBSYSTEM).keys().size() > 0) { // TODO replace with a reasonable check
-            throw new OperationFailedException(new ModelNode().set("subsytems are not empty"));
-        }
-        super.performRemove(context, operation, model);
-    }
-
+    @Override
     protected boolean requiresRuntime(OperationContext context) {
         return false;
+    }
+
+    @Override
+    protected boolean requireNoChildResources() {
+        return true;
     }
 
     @Override

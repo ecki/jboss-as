@@ -25,8 +25,6 @@ package org.jboss.as.jpa.processor;
 import static org.jboss.as.jpa.JpaLogger.JPA_LOGGER;
 import static org.jboss.as.jpa.JpaMessages.MESSAGES;
 
-import java.util.Collections;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.ServiceLoader;
 
@@ -39,7 +37,9 @@ import org.jboss.modules.Module;
 import org.jboss.modules.ModuleIdentifier;
 import org.jboss.modules.ModuleLoadException;
 import org.jboss.modules.ModuleLoader;
-import org.jboss.msc.service.ServiceName;
+import org.jboss.msc.service.ServiceBuilder;
+import org.jboss.msc.service.ServiceRegistry;
+import org.jboss.msc.service.ServiceTarget;
 
 /**
  * Loads persistence provider adaptors
@@ -47,8 +47,6 @@ import org.jboss.msc.service.ServiceName;
  * @author Scott Marlow
  */
 public class PersistenceProviderAdaptorLoader {
-    // need to keep an cache since the Hibernate4 adaptor has "management" state.
-    private static final Map<String, PersistenceProviderAdaptor> adaptorMap = Collections.synchronizedMap(new HashMap<String, PersistenceProviderAdaptor>());
 
     private static final PersistenceProviderAdaptor noopAdaptor = new PersistenceProviderAdaptor() {
 
@@ -61,8 +59,7 @@ public class PersistenceProviderAdaptorLoader {
         }
 
         @Override
-        public Iterable<ServiceName> getProviderDependencies(PersistenceUnitMetadata pu) {
-            return null;
+        public void addProviderDependencies(ServiceRegistry registry, ServiceTarget target, ServiceBuilder<?> builder, PersistenceUnitMetadata pu) {
         }
 
         @Override
@@ -77,10 +74,19 @@ public class PersistenceProviderAdaptorLoader {
         public ManagementAdaptor getManagementAdaptor() {
             return null;
         }
+
+        @Override
+        public boolean doesScopedPersistenceUnitNameIdentifyCacheRegionName(PersistenceUnitMetadata pu) {
+            return true;
+        }
+
+        @Override
+        public void cleanup(PersistenceUnitMetadata pu) {
+        }
     };
 
     /**
-     * Loads/caches the persistence provider adapter
+     * Loads the persistence provider adapter
      *
      * @param adapterModule may specify the adapter module name (can be null to use noop provider)
      * @return the persistence provider adaptor for the provider class
@@ -94,26 +100,24 @@ public class PersistenceProviderAdaptorLoader {
             return noopAdaptor;
         }
 
-        PersistenceProviderAdaptor persistenceProviderAdaptor = adaptorMap.get(adapterModule);
+        PersistenceProviderAdaptor persistenceProviderAdaptor=null;
 
-        if (persistenceProviderAdaptor == null) {
-            Module module = moduleLoader.loadModule(ModuleIdentifier.fromString(adapterModule));
-            final ServiceLoader<PersistenceProviderAdaptor> serviceLoader =
-                module.loadService(PersistenceProviderAdaptor.class);
-            if (serviceLoader != null) {
-                for (PersistenceProviderAdaptor adaptor : serviceLoader) {
-                    if (persistenceProviderAdaptor != null) {
-                        throw MESSAGES.multipleAdapters(adapterModule);
-                    }
-                    persistenceProviderAdaptor = adaptor;
-                    JPA_LOGGER.debugf("loaded persistence provider adapter %s", adapterModule);
-                }
+        Module module = moduleLoader.loadModule(ModuleIdentifier.fromString(adapterModule));
+        final ServiceLoader<PersistenceProviderAdaptor> serviceLoader =
+            module.loadService(PersistenceProviderAdaptor.class);
+        if (serviceLoader != null) {
+            for (PersistenceProviderAdaptor adaptor : serviceLoader) {
                 if (persistenceProviderAdaptor != null) {
-                    persistenceProviderAdaptor.injectJtaManager(JtaManagerImpl.getInstance());
-                    adaptorMap.put(adapterModule, persistenceProviderAdaptor);
+                    throw MESSAGES.multipleAdapters(adapterModule);
                 }
+                persistenceProviderAdaptor = adaptor;
+                JPA_LOGGER.debugf("loaded persistence provider adapter %s", adapterModule);
+            }
+            if (persistenceProviderAdaptor != null) {
+                persistenceProviderAdaptor.injectJtaManager(JtaManagerImpl.getInstance());
             }
         }
+
         return persistenceProviderAdaptor;
     }
 }

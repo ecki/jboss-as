@@ -22,18 +22,22 @@
 package org.jboss.as.cli.operation.impl;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.jboss.as.cli.ArgumentValueConverter;
+import org.jboss.as.cli.CommandContext;
 import org.jboss.as.cli.CommandFormatException;
 import org.jboss.as.cli.CommandLineFormat;
 import org.jboss.as.cli.Util;
 import org.jboss.as.cli.operation.OperationFormatException;
-import org.jboss.as.cli.operation.OperationRequestHeader;
+import org.jboss.as.cli.operation.ParsedOperationRequestHeader;
 import org.jboss.as.cli.operation.ParsedCommandLine;
 import org.jboss.as.cli.operation.OperationRequestAddress;
 import org.jboss.as.cli.operation.OperationRequestAddress.Node;
@@ -55,7 +59,9 @@ public class DefaultCallbackHandler extends ValidatingCallbackHandler implements
     private static final int SEPARATOR_OPERATION_ARGUMENTS = 4;
     private static final int SEPARATOR_ARG_NAME_VALUE = 5;
     private static final int SEPARATOR_ARG = 6;
-    private static final int SEPARATOR_HEADERS = 7;
+    private static final int SEPARATOR_ARG_LIST_END = 7;
+    private static final int SEPARATOR_HEADERS_START = 8;
+    private static final int SEPARATOR_HEADER = 9;
 
     private static final DefaultOperationRequestAddress EMPTY_ADDRESS = new DefaultOperationRequestAddress();
 
@@ -72,6 +78,7 @@ public class DefaultCallbackHandler extends ValidatingCallbackHandler implements
 
     private String lastPropName;
     private String lastPropValue;
+    private String lastHeaderName;
 
     private CommandLineFormat format;
 
@@ -79,7 +86,8 @@ public class DefaultCallbackHandler extends ValidatingCallbackHandler implements
 
     private String originalLine;
 
-    private List<OperationRequestHeader> headers;
+    private LinkedHashMap<String,ParsedOperationRequestHeader> headers;
+    private ParsedOperationRequestHeader lastHeader;
 
     public DefaultCallbackHandler() {
         this(true);
@@ -121,6 +129,12 @@ public class DefaultCallbackHandler extends ValidatingCallbackHandler implements
         ParserUtil.parseOperationRequest(argsStr, this);
     }
 
+    public void parseHeaders(String argsStr) throws CommandFormatException {
+        reset();
+        this.originalLine = argsStr;
+        ParserUtil.parseHeaders(argsStr, this);
+    }
+
     public void reset() {
         operationComplete = false;
         operationName = null;
@@ -135,6 +149,8 @@ public class DefaultCallbackHandler extends ValidatingCallbackHandler implements
         format = null;
         originalLine = null;
         headers = null;
+        lastHeaderName = null;
+        lastHeader = null;
     }
 
     @Override
@@ -167,8 +183,13 @@ public class DefaultCallbackHandler extends ValidatingCallbackHandler implements
     }
 
     @Override
+    public boolean endsOnPropertyListEnd() {
+        return separator == SEPARATOR_ARG_LIST_END;
+    }
+
+    @Override
     public boolean endsOnHeaderListStart() {
-        return separator == SEPARATOR_HEADERS;
+        return separator == SEPARATOR_HEADERS_START;
     }
 
     @Override
@@ -294,12 +315,6 @@ public class DefaultCallbackHandler extends ValidatingCallbackHandler implements
     }
 
     @Override
-    public void headerListStart(int index) {
-        separator = SEPARATOR_HEADERS;
-        this.lastSeparatorIndex = index;
-    }
-
-    @Override
     public void propertyName(int index, String propertyName) throws OperationFormatException {
         if(validation) {
             super.propertyName(index, propertyName);
@@ -366,11 +381,16 @@ public class DefaultCallbackHandler extends ValidatingCallbackHandler implements
 
     @Override
     public void propertyListEnd(int index) {
-        separator = SEPARATOR_NONE;
-        operationComplete = true;
+        separator = SEPARATOR_ARG_LIST_END;
         this.lastSeparatorIndex = index;
         this.lastPropName = null;
         this.lastPropValue = null;
+    }
+
+    @Override
+    public void headerListStart(int index) {
+        separator = SEPARATOR_HEADERS_START;
+        this.lastSeparatorIndex = index;
     }
 
     @Override
@@ -380,10 +400,25 @@ public class DefaultCallbackHandler extends ValidatingCallbackHandler implements
         this.lastSeparatorIndex = index;
         //this.lastPropName = null;
         //this.lastPropValue = null;
+        operationComplete = true;
+    }
+
+    public void headerSeparator(int index) {
+        this.separator = SEPARATOR_HEADER;
+        this.lastSeparatorIndex = index;
+    }
+
+    public void headerNameValueSeparator(int index) {
+        this.separator = SEPARATOR_ARG_NAME_VALUE;
+        this.lastSeparatorIndex = index;
     }
 
     @Override
     public ParsingStateCallbackHandler headerName(int index, String headerName) throws CommandFormatException {
+        this.separator = SEPARATOR_NONE;
+        lastChunkIndex = index;
+        this.lastHeaderName = headerName;
+        lastHeader = null;
         if(headerName.equals("rollout")) {
             return new RolloutPlanHeaderCallbackHandler(this);
         }
@@ -391,28 +426,51 @@ public class DefaultCallbackHandler extends ValidatingCallbackHandler implements
     }
 
     @Override
-    public void header(String name, String value, int nameValueSeparator) throws CommandFormatException {
+    public void header(String name, String value, int valueIndex) throws CommandFormatException {
         if(headers == null) {
-            headers = new ArrayList<OperationRequestHeader>();
+            headers = new LinkedHashMap<String,ParsedOperationRequestHeader>();
         }
-        headers.add(new SimpleOperationRequestHeader(name, value));
+        lastHeader = new SimpleParsedOperationRequestHeader(name, value);
+        headers.put(name, lastHeader);
+        separator = SEPARATOR_NONE;
+        this.lastSeparatorIndex = valueIndex -1;
+        this.lastChunkIndex = valueIndex;
+        this.lastHeaderName = null;
     }
 
-    public void header(OperationRequestHeader header) {
+    public void header(ParsedOperationRequestHeader header) {
         if(headers == null) {
-            headers = new ArrayList<OperationRequestHeader>();
+            headers = new LinkedHashMap<String,ParsedOperationRequestHeader>();
         }
-        headers.add(header);
+        lastHeader = header;
+        headers.put(header.getName(), header);
+        separator = SEPARATOR_NONE;
+        this.lastHeaderName = null;
     }
 
     @Override
     public boolean hasHeaders() {
-        return headers != null;
+        return headers != null || lastHeaderName != null;
     }
 
     @Override
-    public List<OperationRequestHeader> getHeaders() {
-        return headers == null ? Collections.<OperationRequestHeader>emptyList() : headers;
+    public boolean hasHeader(String name) {
+        return headers != null && headers.containsKey(name);
+    }
+
+    @Override
+    public String getLastHeaderName() {
+        return lastHeaderName;
+    }
+
+    @Override
+    public Collection<ParsedOperationRequestHeader> getHeaders() {
+        return headers == null ? Collections.<ParsedOperationRequestHeader>emptyList() : headers.values();
+    }
+
+    @Override
+    public ParsedOperationRequestHeader getLastHeader() {
+        return lastHeader;
     }
 
     @Override
@@ -501,9 +559,9 @@ public class DefaultCallbackHandler extends ValidatingCallbackHandler implements
         return lastPropValue;
     }
 
-    public ModelNode toOperationRequest() throws CommandFormatException {
+    public ModelNode toOperationRequest(CommandContext ctx) throws CommandFormatException {
         ModelNode request = new ModelNode();
-        ModelNode addressNode = request.get("address");
+        ModelNode addressNode = request.get(Util.ADDRESS);
         if(address.isEmpty()) {
             addressNode.setEmptyList();
         } else {
@@ -523,7 +581,7 @@ public class DefaultCallbackHandler extends ValidatingCallbackHandler implements
         if(operationName == null || operationName.isEmpty()) {
             throw new OperationFormatException("The operation name is missing or the format of the operation request is wrong.");
         }
-        request.get("operation").set(operationName);
+        request.get(Util.OPERATION).set(operationName);
 
         for(String propName : props.keySet()) {
             final String value = props.get(propName);
@@ -531,23 +589,19 @@ public class DefaultCallbackHandler extends ValidatingCallbackHandler implements
                 throw new OperationFormatException("The argument name is not specified: '" + propName + "'");
             if(value == null || value.trim().isEmpty())
                 throw new OperationFormatException("The argument value is not specified for " + propName + ": '" + value + "'");
-            ModelNode toSet = null;
-            try {
-                toSet = ModelNode.fromString(value);
-            } catch (Exception e) {
-                // just use the string
-                toSet = new ModelNode().set(value);
-            }
+            final ModelNode toSet = ArgumentValueConverter.DEFAULT.fromString(value);
             request.get(propName).set(toSet);
         }
 
+        if(this.lastHeaderName != null) {
+            throw new OperationFormatException("Header '" + this.lastHeaderName + "' is not complete.");
+        }
         if(headers != null) {
             final ModelNode headersNode = request.get(Util.OPERATION_HEADERS);
-            for(OperationRequestHeader header : headers) {
-                header.addTo(headersNode);
+            for(ParsedOperationRequestHeader header : headers.values()) {
+                header.addTo(ctx, headersNode);
             }
         }
-
         return request;
     }
 
@@ -559,5 +613,10 @@ public class DefaultCallbackHandler extends ValidatingCallbackHandler implements
     @Override
     public CommandLineFormat getFormat() {
         return format;
+    }
+
+    @Override
+    public boolean endsOnHeaderSeparator() {
+        return separator == SEPARATOR_HEADER;
     }
 }

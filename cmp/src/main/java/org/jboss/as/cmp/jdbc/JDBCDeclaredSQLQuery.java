@@ -22,6 +22,7 @@
 package org.jboss.as.cmp.jdbc;
 
 
+import static org.jboss.as.cmp.CmpMessages.MESSAGES;
 import org.jboss.as.cmp.ejbql.Catalog;
 import org.jboss.as.cmp.jdbc.bridge.JDBCCMPFieldBridge;
 import org.jboss.as.cmp.jdbc.bridge.JDBCEntityBridge;
@@ -30,7 +31,7 @@ import org.jboss.as.cmp.jdbc.metadata.JDBCQueryMetaData;
 import org.jboss.as.cmp.jdbc.metadata.JDBCReadAheadMetaData;
 
 /**
- * This class generates a query based on the delcared-sql xml specification.
+ * This class generates a query based on the declared-sql xml specification.
  *
  * @author <a href="mailto:dain@daingroup.com">Dain Sundstrom</a>
  * @author <a href="mailto:rickard.oberg@telkel.com">Rickard Oberg</a>
@@ -46,7 +47,7 @@ public final class JDBCDeclaredSQLQuery extends JDBCAbstractQueryCommand {
     private final JDBCDeclaredQueryMetaData metadata;
 
     /**
-     * Creted a defined finder command based on the information
+     * Create a defined finder command based on the information
      * in a declared-sql declaration.
      */
     public JDBCDeclaredSQLQuery(JDBCStoreManager manager,
@@ -85,7 +86,7 @@ public final class JDBCDeclaredSQLQuery extends JDBCAbstractQueryCommand {
 
         JDBCEntityBridge entity = (JDBCEntityBridge) catalog.getEntityByEJBName(entityName);
         if (entity == null) {
-            throw new RuntimeException("Unknown entity: " + entityName);
+            throw MESSAGES.unknownEntity(entityName);
         }
 
         String fieldName = metadata.getFieldName();
@@ -94,14 +95,14 @@ public final class JDBCDeclaredSQLQuery extends JDBCAbstractQueryCommand {
         } else {
             JDBCCMPFieldBridge field = entity.getCMPFieldByName(fieldName);
             if (field == null) {
-                throw new RuntimeException("Unknown cmp field: " + fieldName);
+                throw MESSAGES.unknownCmpField(fieldName);
             }
             setSelectField(field);
         }
     }
 
     /**
-     * Builds the sql statement based on the delcared-sql metadata specification.
+     * Builds the sql statement based on the declared-sql metadata specification.
      *
      * @return the sql statement for this query
      */

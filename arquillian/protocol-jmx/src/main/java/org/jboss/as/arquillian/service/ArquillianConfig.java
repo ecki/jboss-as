@@ -26,17 +26,15 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
-import org.jboss.arquillian.testenricher.msc.ServiceContainerAssociation;
 import org.jboss.arquillian.testenricher.msc.ServiceTargetAssociation;
 import org.jboss.arquillian.testenricher.osgi.BundleAssociation;
-import org.jboss.as.osgi.deployment.OSGiDeploymentAttachment;
+import org.jboss.as.osgi.OSGiConstants;
 import org.jboss.as.server.deployment.AttachmentKey;
 import org.jboss.as.server.deployment.Attachments;
 import org.jboss.as.server.deployment.DeploymentUnit;
 import org.jboss.modules.Module;
 import org.jboss.msc.service.Service;
 import org.jboss.msc.service.ServiceBuilder;
-import org.jboss.msc.service.ServiceContainer;
 import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceController.Mode;
 import org.jboss.msc.service.ServiceName;
@@ -46,7 +44,6 @@ import org.jboss.msc.service.StartException;
 import org.jboss.msc.service.StopContext;
 import org.jboss.msc.value.InjectedValue;
 import org.jboss.osgi.deployment.deployer.Deployment;
-import org.jboss.osgi.framework.BundleManagerService;
 import org.jboss.osgi.framework.Services;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleContext;
@@ -65,9 +62,7 @@ class ArquillianConfig implements Service<ArquillianConfig> {
     private final ServiceName serviceName;
     private final List<String> testClasses = new ArrayList<String>();
 
-    private final InjectedValue<BundleManagerService> injectedBundleManager = new InjectedValue<BundleManagerService>();
     private final InjectedValue<BundleContext> injectedBundleContext = new InjectedValue<BundleContext>();
-    private ServiceContainer serviceContainer;
     private ServiceTarget serviceTarget;
 
     static ServiceName getServiceName(DeploymentUnit depUnit) {
@@ -88,7 +83,6 @@ class ArquillianConfig implements Service<ArquillianConfig> {
     }
 
     void addFrameworkDependency(ServiceBuilder<ArquillianConfig> builder) {
-        builder.addDependency(Services.BUNDLE_MANAGER, BundleManagerService.class, injectedBundleManager);
         builder.addDependency(Services.SYSTEM_CONTEXT, BundleContext.class, injectedBundleContext);
         builder.addDependency(Services.FRAMEWORK_ACTIVATOR);
     }
@@ -115,37 +109,30 @@ class ArquillianConfig implements Service<ArquillianConfig> {
             throw new ClassNotFoundException("Class '" + className + "' not found in: " + testClasses);
 
         Module module = depUnit.getAttachment(Attachments.MODULE);
-        Deployment osgidep = OSGiDeploymentAttachment.getDeployment(depUnit);
-        if (module == null && osgidep == null)
+        Deployment osgiDep = depUnit.getAttachment(OSGiConstants.DEPLOYMENT_KEY);
+        if (module == null && osgiDep == null)
             throw new IllegalStateException("Cannot determine deployment type: " + depUnit);
-        if (module != null && osgidep != null)
+        if (module != null && osgiDep != null)
             throw new IllegalStateException("Found MODULE attachment for Bundle deployment: " + depUnit);
 
         Class<?> testClass;
-        if (osgidep != null) {
-            Bundle bundle = osgidep.getAttachment(Bundle.class);
+        if (osgiDep != null) {
+            Bundle bundle = osgiDep.getAttachment(Bundle.class);
             testClass = bundle.loadClass(className);
             BundleAssociation.setBundle(bundle);
         } else {
             testClass = module.getClassLoader().loadClass(className);
         }
 
-        // Always make the MSC artefacts available
-        ServiceTargetAssociation.setServiceTarget(serviceTarget);
-        ServiceContainerAssociation.setServiceContainer(serviceContainer);
-
         return testClass;
     }
 
     @Override
     public synchronized void start(StartContext context) throws StartException {
-        serviceContainer = context.getController().getServiceContainer();
         serviceTarget = context.getChildTarget();
         arqService.registerArquillianConfig(this);
-
-        BundleManagerService bundleManager = injectedBundleManager.getOptionalValue();
-        if (bundleManager != null) {
-            arqService.registerArquillianServiceWithOSGi(bundleManager);
+        for(String testClass : testClasses) {
+            ServiceTargetAssociation.setServiceTarget(testClass, serviceTarget);
         }
     }
 
@@ -153,6 +140,9 @@ class ArquillianConfig implements Service<ArquillianConfig> {
     public synchronized void stop(StopContext context) {
         context.getController().setMode(Mode.REMOVE);
         arqService.unregisterArquillianConfig(this);
+        for(String testClass : testClasses) {
+            ServiceTargetAssociation.clearServiceTarget(testClass);
+        }
     }
 
     @Override

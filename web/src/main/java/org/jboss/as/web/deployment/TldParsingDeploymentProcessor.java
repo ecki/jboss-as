@@ -21,10 +21,13 @@
  */
 package org.jboss.as.web.deployment;
 
+import static org.jboss.as.web.WebMessages.MESSAGES;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import javax.xml.stream.XMLInputFactory;
@@ -40,7 +43,7 @@ import org.jboss.as.server.deployment.DeploymentUnitProcessingException;
 import org.jboss.as.server.deployment.DeploymentUnitProcessor;
 import org.jboss.as.server.deployment.module.ResourceRoot;
 import org.jboss.metadata.parser.jsp.TldMetaDataParser;
-import org.jboss.metadata.parser.util.NoopXmlResolver;
+import org.jboss.metadata.parser.util.NoopXMLResolver;
 import org.jboss.metadata.web.spec.TldMetaData;
 import org.jboss.vfs.VirtualFile;
 
@@ -75,7 +78,7 @@ public class TldParsingDeploymentProcessor implements DeploymentUnitProcessor {
         List<ResourceRoot> resourceRoots = deploymentUnit.getAttachment(Attachments.RESOURCE_ROOTS);
         assert resourceRoots != null;
         for (ResourceRoot resourceRoot : resourceRoots) {
-            if (resourceRoot.getRoot().getLowerCaseName().endsWith(".jar")) {
+            if (resourceRoot.getRoot().getName().toLowerCase(Locale.ENGLISH).endsWith(".jar")) {
                 VirtualFile webFragment = resourceRoot.getRoot().getChild(META_INF);
                 if (webFragment.exists() && webFragment.isDirectory()) {
                     processTlds(deploymentRoot, webFragment.getChildren(), tlds);
@@ -85,8 +88,15 @@ public class TldParsingDeploymentProcessor implements DeploymentUnitProcessor {
         VirtualFile webInf = deploymentRoot.getChild(WEB_INF);
         if (webInf.exists() && webInf.isDirectory()) {
             for (VirtualFile file : webInf.getChildren()) {
-                if (file.isFile() && file.getLowerCaseName().endsWith(TLD)) {
-                    tlds.put("/" + file.getPathNameRelativeTo(deploymentRoot), parseTLD(file));
+                if (file.isFile() && file.getName().toLowerCase(Locale.ENGLISH).endsWith(TLD)) {
+                    String pathNameRelativeToRoot;
+                    try {
+                        pathNameRelativeToRoot = file.getPathNameRelativeTo(deploymentRoot);
+                    } catch (IllegalArgumentException e) {
+                        throw new DeploymentUnitProcessingException(MESSAGES.tldFileNotContainedInRoot(file.getPathName(),
+                                deploymentRoot.getPathName()), e);
+                    }
+                    tlds.put("/" + pathNameRelativeToRoot, parseTLD(file));
                 } else if (file.isDirectory() && !CLASSES.equals(file.getName()) && !LIB.equals(file.getName())) {
                     processTlds(deploymentRoot, file.getChildren(), tlds);
                 }
@@ -101,8 +111,15 @@ public class TldParsingDeploymentProcessor implements DeploymentUnitProcessor {
     private void processTlds(VirtualFile root, List<VirtualFile> files, Map<String, TldMetaData> tlds)
     throws DeploymentUnitProcessingException {
         for (VirtualFile file : files) {
-            if (file.isFile() && file.getLowerCaseName().endsWith(TLD)) {
-                tlds.put("/" + file.getPathNameRelativeTo(root), parseTLD(file));
+            if (file.isFile() && file.getName().toLowerCase(Locale.ENGLISH).endsWith(TLD)) {
+                String pathNameRelativeToRoot;
+                try {
+                    pathNameRelativeToRoot = file.getPathNameRelativeTo(root);
+                } catch (IllegalArgumentException e) {
+                    throw new DeploymentUnitProcessingException(MESSAGES.tldFileNotContainedInRoot(file.getPathName(),
+                            root.getPathName()), e);
+                }
+                tlds.put("/" + pathNameRelativeToRoot, parseTLD(file));
             } else if (file.isDirectory()) {
                 processTlds(root, file.getChildren(), tlds);
             }
@@ -119,13 +136,14 @@ public class TldParsingDeploymentProcessor implements DeploymentUnitProcessor {
         try {
             is = tld.openStream();
             final XMLInputFactory inputFactory = XMLInputFactory.newInstance();
-            inputFactory.setXMLResolver(NoopXmlResolver.create());
+            inputFactory.setXMLResolver(NoopXMLResolver.create());
             XMLStreamReader xmlReader = inputFactory.createXMLStreamReader(is);
             return TldMetaDataParser.parse(xmlReader);
         } catch (XMLStreamException e) {
-            throw new DeploymentUnitProcessingException("Failed to parse " + tld + " at [" + e.getLocation().getLineNumber() + "," +  e.getLocation().getColumnNumber() + "]");
+            throw new DeploymentUnitProcessingException(MESSAGES.failToParseXMLDescriptor(tld, e.getLocation().getLineNumber(),
+                    e.getLocation().getColumnNumber()));
         } catch (IOException e) {
-            throw new DeploymentUnitProcessingException("Failed to parse " + tld, e);
+            throw new DeploymentUnitProcessingException(MESSAGES.failToParseXMLDescriptor(tld), e);
         } finally {
             try {
                 if (is != null) {

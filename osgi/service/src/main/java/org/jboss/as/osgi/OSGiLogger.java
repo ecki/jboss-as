@@ -22,7 +22,6 @@
 
 package org.jboss.as.osgi;
 
-import org.jboss.as.osgi.service.ConfigAdminListener;
 import org.jboss.as.server.deployment.DeploymentUnit;
 import org.jboss.logging.BasicLogger;
 import org.jboss.logging.Cause;
@@ -34,141 +33,64 @@ import org.jboss.modules.Module;
 import org.jboss.osgi.deployment.deployer.Deployment;
 import org.osgi.framework.Bundle;
 
-import java.io.File;
-
 import static org.jboss.logging.Logger.Level.ERROR;
 import static org.jboss.logging.Logger.Level.INFO;
 import static org.jboss.logging.Logger.Level.WARN;
 
 /**
- * Date: 27.06.2011
+ * Logging Id ranges: 11900-11949
+ *
+ * https://community.jboss.org/wiki/LoggingIds
  *
  * @author <a href="mailto:jperkins@redhat.com">James R. Perkins</a>
+ * @author Thomas.Diesler@jboss.com
  */
 @MessageLogger(projectCode = "JBAS")
 public interface OSGiLogger extends BasicLogger {
-    /**
-     * The root logger with a category of the package.
-     */
-    OSGiLogger ROOT_LOGGER = Logger.getMessageLogger(OSGiLogger.class, OSGiLogger.class.getPackage().getName());
 
-    /**
-     * Logs an informational message indicating the OSGi subsystem is being activated.
-     */
-    @LogMessage(level = INFO)
-    @Message(id = 11910, value = "Activating OSGi Subsystem")
-    void activatingSubsystem();
+    OSGiLogger LOGGER = Logger.getMessageLogger(OSGiLogger.class, OSGiLogger.class.getPackage().getName());
 
-    /**
-     * Logs a warning message indicating the composite annotation index could not be found in the deployment unit.
-     *
-     * @param deploymentUnit the deployment unit.
-     */
-    @LogMessage(level = WARN)
-    @Message(id = 11911, value = "Cannot find composite annotation index in: %s")
-    void cannotFindAnnotationIndex(DeploymentUnit deploymentUnit);
-
-    /**
-     * Logs an error message indicating the bundle cannot start.
-     *
-     * @param cause  the cause of the error.
-     * @param bundle the bundle that failed to start.
-     */
     @LogMessage(level = ERROR)
-    @Message(id = 11912, value = "Cannot start bundle: %s")
-    void cannotStart(@Cause Throwable cause, Bundle bundle);
+    @Message(id = 11900, value = "Cannot start bundle: %s")
+    void errorCannotStartBundle(@Cause Throwable cause, Bundle bundle);
 
-    /**
-     * Logs a warning message indicating the bundle could not be undeployed.
-     *
-     * @param cause      the cause of the error.
-     * @param deployment the deployment.
-     */
-    @LogMessage(level = WARN)
-    @Message(id = 11913, value = "Cannot undeploy bundle: %s")
-    void cannotUndeployBundle(@Cause Throwable cause, Deployment deployment);
-
-    /**
-     * Logs an error message indicating an error in the configuration listener.
-     *
-     * @param cause    the cause of the error.
-     * @param listener the configuration listener.
-     */
     @LogMessage(level = ERROR)
-    @Message(id = 11914, value = "Error in configuration listener: %s")
-    void configurationListenerError(@Cause Throwable cause, ConfigAdminListener listener);
-
-    /**
-     * Logs an error message indicating there was a problem adding the module represented by the {@code moduleId}
-     * parameter.
-     *
-     * @param cause    the cause of the error.
-     * @param moduleId the module id.
-     */
-    @LogMessage(level = ERROR)
-    @Message(id = 11915, value = "Problem adding module: %s")
+    @Message(id = 11901, value = "Problem adding module: %s")
     void errorAddingModule(@Cause Throwable cause, String moduleId);
 
-    /**
-     * Logs an error message indicating the deployment failed to uninstall.
-     *
-     * @param cause      the cause of the error.
-     * @param deployment the deployment that failed.
-     */
     @LogMessage(level = ERROR)
-    @Message(id = 11916, value = "Failed to uninstall deployment: %s")
-    void failedToUninstallDeployment(@Cause Throwable cause, Deployment deployment);
+    @Message(id = 11902, value = "Failed to uninstall deployment: %s")
+    void errorFailedToUninstallDeployment(@Cause Throwable cause, Deployment deployment);
 
-    /**
-     * Logs an error message indicating the deployment failed to uninstall.
-     *
-     * @param cause  the cause of the error.
-     * @param module the module that failed to unregister.
-     */
     @LogMessage(level = ERROR)
-    @Message(id = 11917, value = "Failed to uninstall module: %s")
-    void failedToUninstallModule(@Cause Throwable cause, Module module);
+    @Message(id = 11903, value = "Cannot add module as it was not found: %s")
+    void errorModuleNotFound(String moduleId);
 
-    /**
-     * Logs a warning message indicating the OSGi bundle in the modules hierarchy was found.
-     *
-     * @param modulesFile the modules file.
-     */
     @LogMessage(level = WARN)
-    @Message(id = 11918, value = "Found OSGi bundle in modules hierarchy: %s")
-    void foundOsgiBundle(File modulesFile);
+    @Message(id = 11904, value = "Cannot find composite annotation index in: %s")
+    void warnCannotFindAnnotationIndex(DeploymentUnit deploymentUnit);
 
-    /**
-     * Logs a warning message indicating the module could not be added as it was not found.
-     *
-     * @param moduleId the module id.
-     */
+    @LogMessage(level = WARN)
+    @Message(id = 11905, value = "Cannot undeploy bundle: %s")
+    void warnCannotUndeployBundle(@Cause Throwable cause, Deployment deployment);
+
+    @LogMessage(level = INFO)
+    @Message(id = 11906, value = "Activating OSGi Subsystem")
+    void infoActivatingSubsystem();
+
+    @LogMessage(level = INFO)
+    @Message(id = 11907, value = "Register module: %s")
+    void infoRegisterModule(Module module);
+
+    @LogMessage(level = INFO)
+    @Message(id = 11908, value = "Unregister module: %s")
+    void infoUnregisterModule(Module module);
+
     @LogMessage(level = ERROR)
-    @Message(id = 11919, value = "Cannot add module as it was not found: %s")
-    void moduleNotFound(String moduleId);
+    @Message(id = 11909, value = "Management operation '%s' failed")
+    void errorInOperationHandler(@Cause Throwable cause, String opname);
 
-    /**
-     * Logs an informational message indicating the module is attempting to be registered.
-     *
-     * @param module the module that is registering.
-     */
-    @LogMessage(level = INFO)
-    @Message(id = 11920, value = "Register module: %s")
-    void registerModule(Module module);
-
-    /**
-     * Logs an informational message indicating the OSGi framework is stopping.
-     */
-    @LogMessage(level = INFO)
-    @Message(id = 11921, value = "Stopping OSGi Framework")
-    void stoppingOsgiFramework();
-
-    /**
-     * Logs an informational message indicating the module is attempting to be unregistered.
-     *
-     * @param module the module that attempting to be unregistered.
-     */
-    @LogMessage(level = INFO)
-    @Message(id = 11922, value = "Unregister module: %s")
-    void unregisterModule(Module module);
+    @LogMessage(level = ERROR)
+    @Message(id = 11910, value = "Cannot stop bundle: %s")
+    void errorCannotStopBundle(@Cause Throwable cause, Bundle bundle);
 }

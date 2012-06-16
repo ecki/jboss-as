@@ -86,15 +86,22 @@ public class EEApplicationDescription {
      * @param viewType The view type
      * @return All views of the given type
      */
-    public Set<ViewDescription> getComponentsForViewName(final String viewType) {
+    public Set<ViewDescription> getComponentsForViewName(final String viewType, final VirtualFile deploymentRoot) {
         final List<ViewInformation> info = componentsByViewName.get(viewType);
 
         if (info == null) {
             return Collections.<ViewDescription>emptySet();
         }
         final Set<ViewDescription> ret = new HashSet<ViewDescription>();
+        final Set<ViewDescription> currentDep = new HashSet<ViewDescription>();
         for (ViewInformation i : info) {
+            if (deploymentRoot.equals(i.deploymentRoot)) {
+                currentDep.add(i.viewDescription);
+            }
             ret.add(i.viewDescription);
+        }
+        if(!currentDep.isEmpty()) {
+            return currentDep;
         }
         return ret;
     }
@@ -107,15 +114,18 @@ public class EEApplicationDescription {
      * @return A set of all views for the given component name and type
      */
     public Set<ComponentDescription> getComponents(final String componentName, final VirtualFile deploymentRoot) {
-        final List<Description> info = componentsByName.get(componentName);
-        if (info == null) {
-            return Collections.emptySet();
-        }
         if (componentName.contains("#")) {
             final String[] parts = componentName.split("#");
-            final String path = parts[0];
+            String path = parts[0];
+            if (!path.startsWith("../")) {
+                path = "../" + path;
+            }
             final VirtualFile virtualPath = deploymentRoot.getChild(path);
             final String name = parts[1];
+            final List<Description> info = componentsByName.get(name);
+            if (info == null) {
+                return Collections.emptySet();
+            }
             final Set<ComponentDescription> ret = new HashSet<ComponentDescription>();
             for (Description i : info) {
                 //now we need to check the path
@@ -125,6 +135,10 @@ public class EEApplicationDescription {
             }
             return ret;
         } else {
+            final List<Description> info = componentsByName.get(componentName);
+            if (info == null) {
+                return Collections.emptySet();
+            }
             final Set<ComponentDescription> all = new HashSet<ComponentDescription>();
             final Set<ComponentDescription> thisDeployment = new HashSet<ComponentDescription>();
             for (Description i : info) {

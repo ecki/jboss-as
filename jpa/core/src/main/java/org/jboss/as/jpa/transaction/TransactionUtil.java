@@ -29,16 +29,14 @@ import java.util.Map;
 
 import javax.persistence.EntityManager;
 import javax.persistence.EntityManagerFactory;
-import javax.persistence.PersistenceException;
-import javax.transaction.RollbackException;
 import javax.transaction.Synchronization;
 import javax.transaction.SystemException;
 import javax.transaction.Transaction;
 import javax.transaction.TransactionManager;
 import javax.transaction.TransactionSynchronizationRegistry;
 
-import org.jboss.as.jpa.container.EntityManagerMetadata;
 import org.jboss.as.jpa.container.EntityManagerUtil;
+import org.jboss.as.jpa.container.ExtendedEntityManager;
 import org.jboss.tm.TxUtils;
 
 /**
@@ -48,14 +46,8 @@ import org.jboss.tm.TxUtils;
  */
 public class TransactionUtil {
 
-    private static final TransactionUtil INSTANCE = new TransactionUtil();
-
     private static volatile TransactionSynchronizationRegistry transactionSynchronizationRegistry;
     private static volatile TransactionManager transactionManager;
-
-    public static TransactionUtil getInstance() {
-        return INSTANCE;
-    }
 
     public static void setTransactionManager(TransactionManager tm) {
         if (transactionManager == null) {
@@ -73,7 +65,7 @@ public class TransactionUtil {
         }
     }
 
-    public boolean isInTx() {
+    public static boolean isInTx() {
         Transaction tx = getTransaction();
         if (tx == null || !TxUtils.isActive(tx))
             return false;
@@ -88,7 +80,7 @@ public class TransactionUtil {
      * @param xpc                     is the entity manager (a org.jboss.as.jpa class) to register
      * @param underlyingEntityManager is the underlying entity manager obtained from the persistence provider
      */
-    public void registerExtendedUnderlyingWithTransaction(String scopedPuName, EntityManager xpc, EntityManager underlyingEntityManager) {
+    public static void registerExtendedUnderlyingWithTransaction(String scopedPuName, EntityManager xpc, EntityManager underlyingEntityManager) {
         // xpc invoked this method, we cannot call xpc because it will recurse back to here, join with underloying em instead
         registerSynchronization(xpc, scopedPuName, false);
         underlyingEntityManager.joinTransaction();
@@ -101,7 +93,7 @@ public class TransactionUtil {
      * @param puScopedName
      * @return
      */
-    public EntityManager getTransactionScopedEntityManager(String puScopedName) {
+    public static EntityManager getTransactionScopedEntityManager(String puScopedName) {
         return getEntityManagerInTransactionRegistry(puScopedName);
     }
 
@@ -114,7 +106,7 @@ public class TransactionUtil {
      * @param properties
      * @return
      */
-    public EntityManager getOrCreateTransactionScopedEntityManager(EntityManagerFactory emf, String scopedPuName, Map properties) {
+    public static EntityManager getOrCreateTransactionScopedEntityManager(EntityManagerFactory emf, String scopedPuName, Map properties) {
         EntityManager entityManager = getEntityManagerInTransactionRegistry(scopedPuName);
         if (entityManager == null) {
             entityManager = EntityManagerUtil.createEntityManager(emf, properties);
@@ -133,18 +125,11 @@ public class TransactionUtil {
         return entityManager;
     }
 
-    private void registerSynchronization(EntityManager entityManager, String puScopedName, boolean closeEMAtTxEnd) {
-        Transaction tx = getTransaction();
-        try {
-            tx.registerSynchronization(new SessionSynchronization(entityManager, closeEMAtTxEnd, puScopedName));
-        } catch (RollbackException e) {
-            throw new RuntimeException(e);
-        } catch (SystemException e) {
-            throw new RuntimeException(e);
-        }
+    private static void registerSynchronization(EntityManager entityManager, String puScopedName, boolean closeEMAtTxEnd) {
+        getTransactionSynchronizationRegistry().registerInterposedSynchronization(new SessionSynchronization(entityManager, closeEMAtTxEnd, puScopedName));
     }
 
-    private Transaction getTransaction() {
+    private static Transaction getTransaction() {
         try {
             return transactionManager.getTransaction();
         } catch (SystemException e) {
@@ -163,25 +148,16 @@ public class TransactionUtil {
 
     private static String getEntityManagerDetails(EntityManager manager) {
         String result = currentThread() + ":";  // show the thread for correlation with other modules
-        EntityManagerMetadata metadata;
-        try {
-            if ((metadata = manager.unwrap(EntityManagerMetadata.class)) != null) {
-                result += metadata.getPuName() +
-                    ((metadata.isTransactionScopedEntityManager()) ? " [XPC]" : " [transactional]"
-                    );
-            }
-        } catch (PersistenceException ignoreUnhandled) {  // TODO:  switch to a different way to lookup EntityManagerMetadata
-            // so that we don't get this error on TransactionalEntityManager
-            // (because the EntityManager is the underlying provider that
-            // doesn't have the metadata.)
-        } catch (AbstractMethodError ignore) {          // JPA 1.0 provider won't have unwrap
-
+        if (manager instanceof ExtendedEntityManager) {
+            result += manager.toString();
         }
-
+        else {
+            result += "[transaction scoped EntityManager]";
+        }
         return result;
     }
 
-    private EntityManager getEntityManagerInTransactionRegistry(String scopedPuName) {
+    private static EntityManager getEntityManagerInTransactionRegistry(String scopedPuName) {
         return (EntityManager) getTransactionSynchronizationRegistry().getResource(scopedPuName);
     }
 
@@ -192,10 +168,9 @@ public class TransactionUtil {
      * @param scopedPuName
      * @param entityManager
      */
-    private void putEntityManagerInTransactionRegistry(String scopedPuName, EntityManager entityManager) {
+    private static void putEntityManagerInTransactionRegistry(String scopedPuName, EntityManager entityManager) {
         getTransactionSynchronizationRegistry().putResource(scopedPuName, entityManager);
     }
-
 
     private static class SessionSynchronization implements Synchronization {
         private EntityManager manager;
@@ -217,8 +192,8 @@ public class TransactionUtil {
                     JPA_LOGGER.debugf("%s: closing entity managersession", getEntityManagerDetails(manager));
                 manager.close();
             }
-            // clear TX reference to entity manager
-            getInstance().putEntityManagerInTransactionRegistry(scopedPuName, null);
+            // The TX reference to the entity manager, should be cleared by the TM
+
         }
     }
 

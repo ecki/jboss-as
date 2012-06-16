@@ -98,7 +98,7 @@
          <xs:element name="jsse" type="jsseType" minOccurs="0" maxOccurs="1"/>
       </xs:sequence>
       <xs:attribute name="name" type="xs:string" use="required"/>
-      <xs:attribute name="cache-type" type="xs:string" use="optional"/>
+      <xs:attribute name="cache-type" type="cacheTypeType" use="optional"/>
    </xs:complexType>
 
    <xs:complexType name="authenticationType">
@@ -249,6 +249,7 @@
       </xs:sequence>
       <xs:attribute name="code" type="xs:string" use="required"/>
       <xs:attribute name="flag" type="module-option-flag" use="required"/>
+      <xs:attribute name="module" type="xs:string" use="optional"/>
    </xs:complexType>
 
    <xs:complexType name="propertyType">
@@ -283,6 +284,7 @@
       </xs:sequence>
       <xs:attribute name="code" type="xs:string" use="required"/>
       <xs:attribute name="login-module-stack-ref" type="xs:string" use="optional"/>
+      <xs:attribute name="module" type="xs:string" use="optional"/>
    </xs:complexType>
 
    <xs:complexType name="policyModuleType">
@@ -298,6 +300,7 @@
       </xs:sequence>
       <xs:attribute name="code" type="xs:string" use="required"/>
       <xs:attribute name="flag" type="module-option-flag" use="required"/>
+      <xs:attribute name="module" type="xs:string" use="optional"/>
    </xs:complexType>
 
    <xs:complexType name="aclModuleType">
@@ -313,6 +316,7 @@
       </xs:sequence>
       <xs:attribute name="code" type="xs:string" use="required"/>
       <xs:attribute name="flag" type="module-option-flag" use="required"/>
+      <xs:attribute name="module" type="xs:string" use="optional"/>
    </xs:complexType>
 
    <xs:complexType name="mappingModuleType">
@@ -328,6 +332,7 @@
       </xs:sequence>
       <xs:attribute name="type" type="xs:string" use="optional"/>
       <xs:attribute name="code" type="xs:string" use="required"/>
+      <xs:attribute name="module" type="xs:string" use="optional"/>
    </xs:complexType>
 
    <xs:complexType name="providerModuleType">
@@ -342,6 +347,7 @@
           <xs:element name="module-option" type="propertyType" minOccurs="0" maxOccurs="unbounded"/>
       </xs:sequence>
       <xs:attribute name="code" type="xs:string" use="required"/>
+      <xs:attribute name="module" type="xs:string" use="optional"/>
    </xs:complexType>
 
    <xs:complexType name="trustModuleType">
@@ -357,6 +363,7 @@
       </xs:sequence>
       <xs:attribute name="code" type="xs:string" use="required"/>
       <xs:attribute name="flag" type="module-option-flag" use="required"/>
+      <xs:attribute name="module" type="xs:string" use="optional"/>
    </xs:complexType>
 
    <xs:complexType name="jsseType">
@@ -411,4 +418,18 @@
       </xs:sequence>
       <xs:attribute name="code" type="xs:string" use="optional"/>
    </xs:complexType>
+
+   <xs:simpleType name="cacheTypeType">
+      <xs:annotation>
+         <xs:documentation>
+               <![CDATA[
+                    Cache type configuration. Default value is "default".
+                ]]>
+         </xs:documentation>
+      </xs:annotation>
+      <xs:restriction base="xs:token">
+         <xs:enumeration value="default"/>
+         <xs:enumeration value="infinispan"/>
+      </xs:restriction>
+   </xs:simpleType>
 </xs:schema>

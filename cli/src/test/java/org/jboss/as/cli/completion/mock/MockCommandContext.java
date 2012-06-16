@@ -21,13 +21,16 @@
  */
 package org.jboss.as.cli.completion.mock;
 
+import java.io.File;
 import java.util.Collection;
 
+import org.jboss.as.cli.CliConfig;
 import org.jboss.as.cli.CliEventListener;
 import org.jboss.as.cli.CommandContext;
 import org.jboss.as.cli.CommandFormatException;
 import org.jboss.as.cli.CommandHistory;
 import org.jboss.as.cli.CommandLineCompleter;
+import org.jboss.as.cli.CommandLineException;
 import org.jboss.as.cli.batch.BatchManager;
 import org.jboss.as.cli.batch.BatchedCommand;
 import org.jboss.as.cli.operation.OperationCandidatesProvider;
@@ -35,13 +38,14 @@ import org.jboss.as.cli.operation.OperationFormatException;
 import org.jboss.as.cli.operation.OperationRequestAddress;
 import org.jboss.as.cli.operation.CommandLineParser;
 import org.jboss.as.cli.operation.ParsedCommandLine;
-import org.jboss.as.cli.operation.PrefixFormatter;
+import org.jboss.as.cli.operation.NodePathFormatter;
 import org.jboss.as.cli.operation.impl.DefaultCallbackHandler;
 import org.jboss.as.cli.operation.impl.DefaultOperationCandidatesProvider;
 import org.jboss.as.cli.operation.impl.DefaultOperationRequestAddress;
 import org.jboss.as.cli.operation.impl.DefaultOperationRequestParser;
 import org.jboss.as.cli.operation.impl.DefaultPrefixFormatter;
 import org.jboss.as.controller.client.ModelControllerClient;
+import org.jboss.dmr.ModelNode;
 
 /**
  *
@@ -49,13 +53,18 @@ import org.jboss.as.controller.client.ModelControllerClient;
  */
 public class MockCommandContext implements CommandContext {
 
+    private MockCliConfig config = new MockCliConfig();
     private ModelControllerClient mcc;
     //private CommandLineParser operationParser;
     private OperationRequestAddress prefix;
-    private PrefixFormatter prefixFormatter;
+    private NodePathFormatter prefixFormatter;
     private OperationCandidatesProvider operationCandidatesProvider;
 
     private DefaultCallbackHandler parsedCmd = new DefaultCallbackHandler();
+
+    private int exitCode;
+
+    private File curDir = new File("");
 
     public void parseCommandLine(String buffer) throws CommandFormatException {
         try {
@@ -141,7 +150,7 @@ public class MockCommandContext implements CommandContext {
      * @see org.jboss.as.cli.CommandContext#getPrefix()
      */
     @Override
-    public OperationRequestAddress getPrefix() {
+    public OperationRequestAddress getCurrentNodePath() {
         if(prefix == null) {
             prefix = new DefaultOperationRequestAddress();
         }
@@ -152,7 +161,7 @@ public class MockCommandContext implements CommandContext {
      * @see org.jboss.as.cli.CommandContext#getPrefixFormatter()
      */
     @Override
-    public PrefixFormatter getPrefixFormatter() {
+    public NodePathFormatter getNodePathFormatter() {
         if(prefixFormatter == null) {
             prefixFormatter = new DefaultPrefixFormatter();
         }
@@ -178,6 +187,12 @@ public class MockCommandContext implements CommandContext {
     public void connectController(String host, int port) {
         throw new UnsupportedOperationException();
     }
+
+    @Override
+    public void bindClient(ModelControllerClient newClient) {
+        throw new UnsupportedOperationException();
+    }
+
 
     @Override
     public void disconnectController() {
@@ -261,5 +276,56 @@ public class MockCommandContext implements CommandContext {
     public void addEventListener(CliEventListener listener) {
         // TODO Auto-generated method stub
 
+    }
+
+    @Override
+    public CliConfig getConfig() {
+        return config;
+    }
+
+    @Override
+    public int getExitCode() {
+        return exitCode;
+    }
+
+    @Override
+    public void handle(String line) throws CommandLineException {
+        // TODO Auto-generated method stub
+    }
+
+    @Override
+    public File getCurrentDir() {
+        return curDir;
+    }
+
+    @Override
+    public void setCurrentDir(File dir) {
+        if(dir == null) {
+            throw new IllegalArgumentException("dir is null");
+        }
+        this.curDir = dir;
+    }
+
+    @Override
+    public void handleSafe(String line) {
+        // TODO Auto-generated method stub
+
+    }
+
+    @Override
+    public void interact() {
+        // TODO Auto-generated method stub
+
+    }
+
+    @Override
+    public ModelNode buildRequest(String line) throws CommandFormatException {
+        // TODO Auto-generated method stub
+        return null;
+    }
+
+    @Override
+    public void connectController() {
+        connectController(null, -1);
     }
 }

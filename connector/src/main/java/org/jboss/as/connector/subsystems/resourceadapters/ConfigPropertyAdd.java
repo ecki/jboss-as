@@ -29,8 +29,8 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_
 import java.util.List;
 import java.util.Locale;
 
-import org.jboss.as.connector.ConnectorServices;
-import org.jboss.as.controller.AbstractBoottimeAddStepHandler;
+import org.jboss.as.connector.util.ConnectorServices;
+import org.jboss.as.controller.AbstractAddStepHandler;
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.PathAddress;
@@ -45,7 +45,7 @@ import org.jboss.msc.service.ServiceTarget;
  * Adds a recovery-environment to the Transactions subsystem
  *
  */
-public class ConfigPropertyAdd extends AbstractBoottimeAddStepHandler implements DescriptionProvider {
+public class ConfigPropertyAdd extends AbstractAddStepHandler implements DescriptionProvider {
 
     public static final ConfigPropertyAdd INSTANCE = new ConfigPropertyAdd();
 
@@ -68,7 +68,7 @@ public class ConfigPropertyAdd extends AbstractBoottimeAddStepHandler implements
     }
 
     @Override
-    protected void performBoottime(OperationContext context, ModelNode operation, ModelNode recoveryEnvModel,
+    protected void performRuntime(OperationContext context, ModelNode operation, ModelNode recoveryEnvModel,
                                   ServiceVerificationHandler verificationHandler,
                                   List<ServiceController<?>> serviceControllers) throws OperationFailedException {
 
@@ -88,7 +88,7 @@ public class ConfigPropertyAdd extends AbstractBoottimeAddStepHandler implements
                     .addDependency(raServiceName, ModifiableResourceAdapter.class, service.getRaInjector() )
                     .addListener(verificationHandler).install();
 
-        context.addStep(verificationHandler, OperationContext.Stage.VERIFY);
+
     }
 
 }

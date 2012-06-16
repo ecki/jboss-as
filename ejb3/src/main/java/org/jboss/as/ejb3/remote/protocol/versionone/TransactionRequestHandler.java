@@ -22,19 +22,20 @@
 
 package org.jboss.as.ejb3.remote.protocol.versionone;
 
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.util.concurrent.ExecutorService;
+
+import org.jboss.as.ejb3.EjbMessages;
 import org.jboss.as.ejb3.remote.EJBRemoteTransactionsRepository;
 import org.jboss.ejb.client.TransactionID;
 import org.jboss.ejb.client.UserTransactionID;
 import org.jboss.ejb.client.XidTransactionID;
 import org.jboss.ejb.client.remoting.PackedInteger;
-import org.jboss.logging.Logger;
-import org.jboss.remoting3.Channel;
+import org.jboss.marshalling.MarshallerFactory;
 import org.jboss.remoting3.MessageInputStream;
-
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.IOException;
-import java.util.concurrent.ExecutorService;
+import org.jboss.remoting3.MessageOutputStream;
 
 /**
  * Handles a transaction message which complies with the EJB remote protocol specification
@@ -43,13 +44,12 @@ import java.util.concurrent.ExecutorService;
  */
 class TransactionRequestHandler extends AbstractMessageHandler {
 
-    private static final Logger logger = Logger.getLogger(TransactionRequestHandler.class);
-
     private static final byte HEADER_TX_INVOCATION_RESPONSE = 0x14;
 
     private final ExecutorService executorService;
     private final EJBRemoteTransactionsRepository transactionsRepository;
-    private TransactionRequestType txRequestType;
+    private final TransactionRequestType txRequestType;
+    private final MarshallerFactory marshallerFactory;
 
 
     enum TransactionRequestType {
@@ -60,15 +60,16 @@ class TransactionRequestHandler extends AbstractMessageHandler {
         BEFORE_COMPLETION
     }
 
-    TransactionRequestHandler(final EJBRemoteTransactionsRepository transactionsRepository, final ExecutorService executorService, final TransactionRequestType txRequestType, final String marshallingStrategy) {
-        super(marshallingStrategy);
+    TransactionRequestHandler(final EJBRemoteTransactionsRepository transactionsRepository, final MarshallerFactory marshallerFactory,
+                              final ExecutorService executorService, final TransactionRequestType txRequestType) {
         this.executorService = executorService;
         this.transactionsRepository = transactionsRepository;
         this.txRequestType = txRequestType;
+        this.marshallerFactory = marshallerFactory;
     }
 
     @Override
-    public void processMessage(final Channel channel, final MessageInputStream messageInputStream) throws IOException {
+    public void processMessage(final ChannelAssociation channelAssociation, final MessageInputStream messageInputStream) throws IOException {
         final DataInputStream input = new DataInputStream(messageInputStream);
         // read the invocation id
         final short invocationId = input.readShort();
@@ -91,13 +92,13 @@ class TransactionRequestHandler extends AbstractMessageHandler {
             final UserTransactionManagementTask userTransactionManagementTask;
             switch (this.txRequestType) {
                 case COMMIT:
-                    userTransactionManagementTask = new UserTransactionCommitTask(this, this.transactionsRepository, (UserTransactionID) transactionID, channel, invocationId);
+                    userTransactionManagementTask = new UserTransactionCommitTask(this, this.transactionsRepository, this.marshallerFactory, (UserTransactionID) transactionID, channelAssociation, invocationId);
                     break;
                 case ROLLBACK:
-                    userTransactionManagementTask = new UserTransactionRollbackTask(this, this.transactionsRepository, (UserTransactionID) transactionID, channel, invocationId);
+                    userTransactionManagementTask = new UserTransactionRollbackTask(this, this.transactionsRepository, this.marshallerFactory, (UserTransactionID) transactionID, channelAssociation, invocationId);
                     break;
                 default:
-                    throw new IllegalArgumentException("Unknown transaction request type " + this.txRequestType);
+                    throw EjbMessages.MESSAGES.unknownTransactionRequestType(this.txRequestType.name());
             }
             // submit to a seperate thread for processing the request
             this.executorService.submit(userTransactionManagementTask);
@@ -108,22 +109,22 @@ class TransactionRequestHandler extends AbstractMessageHandler {
             final XidTransactionManagementTask xidTransactionManagementTask;
             switch (this.txRequestType) {
                 case COMMIT:
-                    xidTransactionManagementTask = new XidTransactionCommitTask(this, this.transactionsRepository, xidTransactionID, channel, invocationId, onePhaseCommit);
+                    xidTransactionManagementTask = new XidTransactionCommitTask(this, this.transactionsRepository, this.marshallerFactory, xidTransactionID, channelAssociation, invocationId, onePhaseCommit);
                     break;
                 case PREPARE:
-                    xidTransactionManagementTask = new XidTransactionPrepareTask(this, this.transactionsRepository, xidTransactionID, channel, invocationId);
+                    xidTransactionManagementTask = new XidTransactionPrepareTask(this, this.transactionsRepository, this.marshallerFactory, xidTransactionID, channelAssociation, invocationId);
                     break;
                 case ROLLBACK:
-                    xidTransactionManagementTask = new XidTransactionRollbackTask(this, this.transactionsRepository, xidTransactionID, channel, invocationId);
+                    xidTransactionManagementTask = new XidTransactionRollbackTask(this, this.transactionsRepository, this.marshallerFactory, xidTransactionID, channelAssociation, invocationId);
                     break;
                 case FORGET:
-                    xidTransactionManagementTask = new XidTransactionForgetTask(this, this.transactionsRepository, xidTransactionID, channel, invocationId);
+                    xidTransactionManagementTask = new XidTransactionForgetTask(this, this.transactionsRepository, this.marshallerFactory, xidTransactionID, channelAssociation, invocationId);
                     break;
                 case BEFORE_COMPLETION:
-                    xidTransactionManagementTask = new XidTransactionBeforeCompletionTask(this, this.transactionsRepository, xidTransactionID, channel, invocationId);
+                    xidTransactionManagementTask = new XidTransactionBeforeCompletionTask(this, this.transactionsRepository, this.marshallerFactory, xidTransactionID, channelAssociation, invocationId);
                     break;
                 default:
-                    throw new IllegalArgumentException("Unknown transaction request type " + this.txRequestType);
+                    throw EjbMessages.MESSAGES.unknownTransactionRequestType(this.txRequestType.name());
             }
             // submit to a separate thread for processing the request
             this.executorService.submit(xidTransactionManagementTask);
@@ -131,8 +132,15 @@ class TransactionRequestHandler extends AbstractMessageHandler {
     }
 
 
-    protected void writeTxPrepareResponseMessage(final Channel channel, final short invocationId, final int xaResourceStatusCode) throws IOException {
-        final DataOutputStream dataOutputStream = new DataOutputStream(channel.writeMessage());
+    protected void writeTxPrepareResponseMessage(final ChannelAssociation channelAssociation, final short invocationId, final int xaResourceStatusCode) throws IOException {
+        final DataOutputStream dataOutputStream;
+        final MessageOutputStream messageOutputStream;
+        try {
+            messageOutputStream = channelAssociation.acquireChannelMessageOutputStream();
+        } catch (Exception e) {
+            throw EjbMessages.MESSAGES.failedToOpenMessageOutputStream(e);
+        }
+        dataOutputStream = new DataOutputStream(messageOutputStream);
         try {
             // write header
             dataOutputStream.writeByte(HEADER_TX_INVOCATION_RESPONSE);
@@ -144,12 +152,20 @@ class TransactionRequestHandler extends AbstractMessageHandler {
             // write the XAResource status
             PackedInteger.writePackedInteger(dataOutputStream, xaResourceStatusCode);
         } finally {
+            channelAssociation.releaseChannelMessageOutputStream(messageOutputStream);
             dataOutputStream.close();
         }
     }
 
-    protected void writeTxInvocationResponseMessage(final Channel channel, final short invocationId) throws IOException {
-        final DataOutputStream dataOutputStream = new DataOutputStream(channel.writeMessage());
+    protected void writeTxInvocationResponseMessage(final ChannelAssociation channelAssociation, final short invocationId) throws IOException {
+        final DataOutputStream dataOutputStream;
+        final MessageOutputStream messageOutputStream;
+        try {
+            messageOutputStream = channelAssociation.acquireChannelMessageOutputStream();
+        } catch (Exception e) {
+            throw EjbMessages.MESSAGES.failedToOpenMessageOutputStream(e);
+        }
+        dataOutputStream = new DataOutputStream(messageOutputStream);
         try {
             // write header
             dataOutputStream.writeByte(HEADER_TX_INVOCATION_RESPONSE);
@@ -159,6 +175,7 @@ class TransactionRequestHandler extends AbstractMessageHandler {
             // "prepare" invocation
             dataOutputStream.writeBoolean(false);
         } finally {
+            channelAssociation.releaseChannelMessageOutputStream(messageOutputStream);
             dataOutputStream.close();
         }
     }

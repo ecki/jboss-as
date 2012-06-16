@@ -24,6 +24,9 @@
 
 <!-- contains the JPA integration classes for Hibernate 3.x --> 
 <module xmlns="urn:jboss:module:1.1" name="org.jboss.as.jpa.hibernate" slot="3">
+    <properties>
+        <property name="jboss.api" value="private"/>
+    </properties>
 
     <resources>
         <!-- Insert resources here -->
@@ -33,10 +36,13 @@
         <module name="javax.annotation.api"/>
         <module name="javax.persistence.api"/>
         <module name="javax.transaction.api"/>
-        <module name="org.hibernate" slot="3" optional="true"/>  <!-- org.hibernate:3 must be created manually with Hibernate 3 jars -->
+        <module name="org.hibernate" slot="3" optional="true" services="import"/>  <!-- org.hibernate:3 must be created manually with Hibernate 3 jars -->
         <module name="org.hibernate.validator"/>
+        <module name="org.infinispan"/>
+        <module name="org.jboss.as.clustering.infinispan"/>
         <module name="org.jboss.as.jpa.spi"/>
         <module name="org.jboss.as.naming"/>
+        <module name="org.jboss.as.server"/>
         <module name="org.jboss.jandex"/>
         <module name="org.jboss.logging"/>
         <module name="org.jboss.msc"/>

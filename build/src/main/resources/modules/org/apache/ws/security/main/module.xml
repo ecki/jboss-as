@@ -23,7 +23,6 @@
   -->
 
 <module xmlns="urn:jboss:module:1.1" name="org.apache.ws.security">
-
     <resources>
         <!-- Insert resources here -->
     </resources>
@@ -34,5 +33,7 @@
       <module name="org.apache.commons.logging" />
       <module name="org.apache.santuario.xmlsec" />
       <module name="org.apache.xalan" />
+      <module name="org.joda.time" />
+      <module name="org.opensaml" />
     </dependencies>
 </module>

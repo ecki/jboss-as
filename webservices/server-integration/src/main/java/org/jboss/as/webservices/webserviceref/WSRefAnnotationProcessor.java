@@ -32,6 +32,7 @@ import static org.jboss.as.webservices.webserviceref.WSRefUtils.processType;
 
 import java.lang.reflect.AccessibleObject;
 import java.util.List;
+import java.util.Locale;
 
 import javax.xml.ws.Service;
 
@@ -121,7 +122,7 @@ public class WSRefAnnotationProcessor implements DeploymentUnitProcessor {
         }
         final String injectionType = isEmpty(annotation.type()) || annotation.type().equals(Object.class.getName()) ? methodInfo.args()[0].name().toString() : annotation.type();
         final InjectionTarget injectionTarget = new MethodInjectionTarget(methodInfo.declaringClass().name().toString(), methodName, injectionType);
-        final String bindingName = isEmpty(annotation.name()) ? methodInfo.declaringClass().name().toString() + "/" + methodName.substring(3, 4).toLowerCase() + methodName.substring(4) : annotation.name();
+        final String bindingName = isEmpty(annotation.name()) ? methodInfo.declaringClass().name().toString() + "/" + methodName.substring(3, 4).toLowerCase(Locale.ENGLISH) + methodName.substring(4) : annotation.name();
         processRef(unit, injectionType, annotation, methodInfo.declaringClass(), injectionTarget, bindingName);
     }
 
@@ -139,6 +140,7 @@ public class WSRefAnnotationProcessor implements DeploymentUnitProcessor {
         boolean isEJB = false;
         final EEModuleDescription moduleDescription = unit.getAttachment(Attachments.EE_MODULE_DESCRIPTION);
         final String componentClassName = classInfo.name().toString();
+        final Module module = unit.getAttachment(org.jboss.as.server.deployment.Attachments.MODULE);
         for (final ComponentDescription componentDescription : moduleDescription.getComponentsByClassName(componentClassName)) {
             if (componentDescription instanceof SessionBeanComponentDescription) {
                 isEJB = true;
@@ -148,7 +150,7 @@ public class WSRefAnnotationProcessor implements DeploymentUnitProcessor {
                 processWSFeatures(unit, serviceRefUMDM, injectionTarget, classInfo);
 
                 // Create the binding from whence our injection comes.
-                final InjectionSource serviceRefSource = new WSRefValueSource(serviceRefUMDM);
+                final InjectionSource serviceRefSource = new WSRefValueSource(serviceRefUMDM, module.getClassLoader());
                 final BindingConfiguration bindingConfiguration = new BindingConfiguration(bindingName, serviceRefSource);
                 componentDescription.getBindingConfigurations().add(bindingConfiguration);
                 // our injection comes from the local lookup, no matter what.
@@ -166,7 +168,7 @@ public class WSRefAnnotationProcessor implements DeploymentUnitProcessor {
             // TODO: class hierarchies? shared bindings?
             final EEModuleClassDescription classDescription = moduleDescription.addOrGetLocalClassDescription(classInfo.name().toString());
             // Create the binding from whence our injection comes.
-            final InjectionSource serviceRefSource = new WSRefValueSource(serviceRefUMDM);
+            final InjectionSource serviceRefSource = new WSRefValueSource(serviceRefUMDM, module.getClassLoader());
             final BindingConfiguration bindingConfiguration = new BindingConfiguration(bindingName, serviceRefSource);
             classDescription.getBindingConfigurations().add(bindingConfiguration);
             // our injection comes from the local lookup, no matter what.
@@ -228,7 +230,7 @@ public class WSRefAnnotationProcessor implements DeploymentUnitProcessor {
         if (injectionTarget instanceof FieldInjectionTarget) {
             return name;
         } else if (injectionTarget instanceof MethodInjectionTarget) {
-            return name.substring(3, 4).toUpperCase() + name.substring(4);
+            return name.substring(3, 4).toUpperCase(Locale.ENGLISH) + name.substring(4);
         }
         throw new UnsupportedOperationException();
     }

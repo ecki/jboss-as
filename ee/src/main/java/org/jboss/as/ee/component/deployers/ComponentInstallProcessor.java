@@ -35,6 +35,7 @@ import org.jboss.as.ee.component.Component;
 import org.jboss.as.ee.component.ComponentConfiguration;
 import org.jboss.as.ee.component.ComponentNamingMode;
 import org.jboss.as.ee.component.ComponentStartService;
+import org.jboss.as.ee.component.ComponentView;
 import org.jboss.as.ee.component.DependencyConfigurator;
 import org.jboss.as.ee.component.EEApplicationClasses;
 import org.jboss.as.ee.component.EEModuleClassDescription;
@@ -91,6 +92,11 @@ public final class ComponentInstallProcessor implements DeploymentUnitProcessor 
             try {
                 ROOT_LOGGER.tracef("Installing component %s", configuration.getComponentClass().getName());
                 deployComponent(phaseContext, configuration, dependencies, bindingDependencyService);
+
+                //we need to make sure that the web deployment has a dependency on all components it the app, so web components are started
+                //when the web subsystem is starting
+                //we only add a dependency on components in the same sub deployment, otherwise we get circular dependencies when initialize-in-order is used
+                deploymentUnit.addToAttachmentList(org.jboss.as.server.deployment.Attachments.WEB_DEPENDENCIES, configuration.getComponentDescription().getStartServiceName());
             } catch (Exception e) {
                 throw MESSAGES.failedToInstallComponent(e, configuration.getComponentName());
             }
@@ -138,7 +144,7 @@ public final class ComponentInstallProcessor implements DeploymentUnitProcessor 
         //don't start components until all bindings are up
         startBuilder.addDependency(bindingDependencyService);
         final ServiceName contextServiceName;
-        //set up the naming context if nessesary
+        //set up the naming context if necessary
         if (configuration.getComponentDescription().getNamingMode() == ComponentNamingMode.CREATE) {
             final NamingStoreService contextService = new NamingStoreService();
             contextServiceName = configuration.getComponentDescription().getContextServiceName();
@@ -158,10 +164,14 @@ public final class ComponentInstallProcessor implements DeploymentUnitProcessor 
         for (ViewConfiguration viewConfiguration : configuration.getViews()) {
             final ServiceName serviceName = viewConfiguration.getViewServiceName();
             final ViewService viewService = new ViewService(viewConfiguration);
-            serviceTarget.addService(serviceName, viewService)
-                    .addDependency(createServiceName, Component.class, viewService.getComponentInjector())
-                    .install();
-
+            final ServiceBuilder<ComponentView> componentViewServiceBuilder = serviceTarget.addService(serviceName, viewService);
+            componentViewServiceBuilder
+                    .addDependency(createServiceName, Component.class, viewService.getComponentInjector());
+            for(final DependencyConfigurator<ViewService> depConfig : viewConfiguration.getDependencies()) {
+                depConfig.configureDependency(componentViewServiceBuilder, viewService);
+            }
+            componentViewServiceBuilder.install();
+            startBuilder.addDependency(serviceName);
             // The bindings for the view
             for (BindingConfiguration bindingConfiguration : viewConfiguration.getBindingConfigurations()) {
                 final String bindingName = bindingConfiguration.getName();

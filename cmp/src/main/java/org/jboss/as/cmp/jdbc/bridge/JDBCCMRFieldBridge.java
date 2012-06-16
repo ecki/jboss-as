@@ -36,11 +36,12 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
 import javax.ejb.EJBException;
-import javax.ejb.EJBLocalHome;
 import javax.ejb.EJBLocalObject;
 import javax.ejb.NoSuchObjectLocalException;
 import javax.ejb.RemoveException;
+import javax.ejb.TransactionRolledbackLocalException;
 import javax.sql.DataSource;
 import javax.transaction.RollbackException;
 import javax.transaction.Status;
@@ -48,6 +49,9 @@ import javax.transaction.Synchronization;
 import javax.transaction.SystemException;
 import javax.transaction.Transaction;
 import javax.transaction.TransactionManager;
+
+import org.jboss.as.cmp.CmpMessages;
+import static org.jboss.as.cmp.CmpMessages.MESSAGES;
 import org.jboss.as.cmp.bridge.EntityBridge;
 import org.jboss.as.cmp.bridge.FieldBridge;
 import org.jboss.as.cmp.component.CmpEntityBeanComponent;
@@ -98,11 +102,11 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
      */
     private final JDBCRelationshipRoleMetaData metadata;
     /**
-     * The data source used to acess the relation table if relevant.
+     * The data source used to access the relation table if relevant.
      */
     private DataSource dataSource;
     /**
-     * The relation table name if relevent.
+     * The relation table name if relevant.
      */
     private String qualifiedTableName;
     private String tableName;
@@ -196,7 +200,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
         this.metadata = metadata;
         this.jdbcContextIndex = ((JDBCEntityBridge) manager.getEntityBridge()).getNextJDBCContextIndex();
 
-        //  Creat the log
+        //  Create the log
         String categoryName = this.getClass().getName() +
                 "." + manager.getMetaData().getName() + ".";
         if (metadata.getCMRFieldName() != null) {
@@ -225,14 +229,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
         Catalog catalog = manager.getCatalog();
         relatedEntity = (JDBCEntityBridge) catalog.getEntityByEJBName(relatedEntityName);
         if (relatedEntity == null) {
-            throw new RuntimeException("Related entity not found: " +
-                    "entity=" +
-                    entity.getEntityName() +
-                    ", " +
-                    "cmrField=" +
-                    getFieldName() +
-                    ", " +
-                    "relatedEntity=" + relatedEntityName);
+            throw CmpMessages.MESSAGES.relatedEntityNotFound(getEntity().getEntityName(), getFieldName(), relatedEntityName);
         }
 
         // Related CMR Field
@@ -247,26 +244,9 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
 
         // if we didn't find the related CMR field throw an exception
         // with a detailed message
-        if (relatedCMRField == null) {
-            String message = "Related CMR field not found in " +
-                    relatedEntity.getEntityName() + " for relationship from";
-
-            message += entity.getEntityName() + ".";
-            if (getFieldName() != null) {
-                message += getFieldName();
-            } else {
-                message += "<no-field>";
-            }
-
-            message += " to ";
-            message += relatedEntityName + ".";
-            if (metadata.getRelatedRole().getCMRFieldName() != null) {
-                message += metadata.getRelatedRole().getCMRFieldName();
-            } else {
-                message += "<no-field>";
-            }
-
-            throw new RuntimeException(message);
+    if (relatedCMRField == null) {
+            throw MESSAGES.relatedCmrFieldNotFound(relatedEntityName, entity.getEntityName(), getFieldName() != null ? getFieldName() : "<no-field>",
+                    relatedEntityName, metadata.getRelatedRole().getCMRFieldName() != null ? metadata.getRelatedRole().getCMRFieldName() : "<no-field>");
         }
 
         // Related Manager
@@ -283,9 +263,8 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
             relatedFindByPrimaryKey =
                     homeClass.getMethod("findByPrimaryKey", new Class[]{relatedEntity.getPrimaryKeyClass()});
         } catch (Exception e) {
-            throw new RuntimeException("findByPrimaryKey(" +
-                    relatedEntity.getPrimaryKeyClass().getName()
-                    + " pk) was not found in " + homeClass.getName());
+            throw CmpMessages.MESSAGES.findByPrimaryKeyNotFound(relatedEntity.getPrimaryKeyClass().getName(), homeClass.getName());
+
         }
 
         //
@@ -302,7 +281,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
                 JDBCCMPFieldMetaData cmpFieldMetaData = (JDBCCMPFieldMetaData) i.next();
                 FieldBridge pkField = entity.getFieldByName(cmpFieldMetaData.getFieldName());
                 if (pkField == null) {
-                    throw new RuntimeException("Primary key not found for key-field " + cmpFieldMetaData.getFieldName());
+                    throw MESSAGES.pkNotFoundForKeyField(cmpFieldMetaData.getFieldName());
                 }
                 pkFieldsToFKFields.put(pkField, new JDBCCMP2xFieldBridge(manager, cmpFieldMetaData));
             }
@@ -311,7 +290,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
             for (int i = 0; i < pkFields.length; ++i) {
                 Object fkField = pkFieldsToFKFields.get(pkFields[i]);
                 if (fkField == null) {
-                    throw new RuntimeException("Primary key " + pkFields[i].getFieldName() + " is not mapped.");
+                    throw MESSAGES.primaryKeyNotMapped(pkFields[i].getFieldName());
                 }
                 keyFieldsList.add(fkField);
             }
@@ -350,8 +329,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
                 try {
                     return transactionManager.getTransaction();
                 } catch (SystemException e) {
-                    throw new IllegalStateException("An error occured while getting the " +
-                            "transaction associated with the current thread: " + e);
+                    throw CmpMessages.MESSAGES.errorGettingCurrentTransaction(e);
                 }
             }
         };
@@ -422,7 +400,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
     }
 
     /**
-     * Gets the name of the relation table if relevent.
+     * Gets the name of the relation table if relevant.
      */
     public String getQualifiedTableName() {
         return qualifiedTableName;
@@ -433,7 +411,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
     }
 
     /**
-     * Gets the datasource of the relation table if relevent.
+     * Gets the datasource of the relation table if relevant.
      */
     public DataSource getDataSource() {
         return dataSource;
@@ -610,29 +588,16 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
      */
     public void setValue(CmpEntityBeanContext ctx, Object value) {
         if (isReadOnly()) {
-            throw new EJBException("Field is read-only: fieldName=" + getFieldName());
+            throw MESSAGES.fieldIsReadOnly(getFieldName());
         }
 
         if (!JDBCEntityBridge.isEjbCreateDone(ctx)) {
-            throw new IllegalStateException("A CMR field cannot be set " +
-                    "in ejbCreate; this should be done in the ejbPostCreate " +
-                    "method instead [EJB 2.0 Spec. 10.5.2].");
+            throw MESSAGES.cmrFieldCannotBeSetInEjbCreate();
         }
 
         if (isCollectionValued() && value == null) {
-            throw new IllegalArgumentException("null cannot be assigned to a " +
-                    "collection-valued cmr-field [EJB 2.0 Spec. 10.3.8].");
+            throw MESSAGES.cmrCollectionFieldsCanNotBeSetToNull();
         }
-        /*
-        if(allFKFieldsMappedToPKFields)
-        {
-           throw new IllegalStateException(
-              "Can't modify relationship: CMR field "
-              + entity.getEntityName() + "." + getFieldName()
-              + " has foreign key fields mapped to the primary key columns."
-              + " Primary key may only be set once in ejbCreate [EJB 2.0 Spec. 10.3.5].");
-        }
-        */
         setInstanceValue(ctx, value);
     }
 
@@ -664,7 +629,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
         } catch (EJBException e) {
             throw e;
         } catch (Exception e) {
-            throw new EJBException(e);
+            throw MESSAGES.errorGettingInstanceValue(e);
         }
     }
 
@@ -684,12 +649,12 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
 
         if (hasFKFieldsMappedToCMPFields && relatedManager.getReadAheadCache().getPreloadDataMap(fk, false) == null) {  // not in preload cache
             try {
-                relatedLocalObject = relatedContainer.getEjbLocalObject(fk);
+                relatedLocalObject = relatedContainer.getEJBLocalObject(fk);
             } catch (Exception ignore) {
                 // no such entity. it is ok to ignore
             }
         } else {
-            relatedLocalObject = relatedContainer.getEjbLocalObject(fk);
+            relatedLocalObject = relatedContainer.getEJBLocalObject(fk);
         }
 
         return relatedLocalObject;
@@ -708,7 +673,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
             valid = true;
         } else {
             try {
-                Object result = getRelatedComponent().getEjbLocalObject(fk);
+                Object result = getRelatedComponent().getEJBLocalObject(fk);
                 valid = result != null;
             } catch (Exception ignore) {
                 // no such entity. it is ok to ignore
@@ -732,14 +697,20 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
                 for (Iterator iter = col.iterator(); iter.hasNext(); ) {
                     Object localObject = iter.next();
                     if (localObject != null) {
-                        Object relatedId = getRelatedPrimaryKey(localObject);
-
+                        Object relatedId;
+                        try {
+                            relatedId = getRelatedPrimaryKey(localObject);
+                        } catch (TransactionRolledbackLocalException e) {
+                            //if the instance has been removed we need to throw IllegalArgumentException
+                            throw MESSAGES.instanceAlreadyRemoved(e);
+                        }
                         // check whether new value modifies the primary key if there are FK fields mapped to PK fields
                         if (relatedPKFieldsByMyPKFields.size() > 0) {
                             checkSetForeignKey(myCtx, relatedId);
                         }
 
                         newPks.add(relatedId);
+
                     }
                 }
             } else {
@@ -747,7 +718,12 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
             }
         } else {
             if (newValue != null) {
-                newPks = Collections.singletonList(getRelatedPrimaryKey(newValue));
+                try {
+                    //if the instance has been removed we need to throw IllegalArgumentException
+                    newPks = Collections.singletonList(getRelatedPrimaryKey(newValue));
+                } catch (TransactionRolledbackLocalException e) {
+                    throw MESSAGES.instanceAlreadyRemoved(e);
+                }
             } else {
                 newPks = Collections.EMPTY_LIST;
             }
@@ -779,7 +755,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
-            throw new EJBException(e);
+            throw new RuntimeException(e);
         }
     }
 
@@ -804,19 +780,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
 
                 // they shouldn't be null
                 if (!comingValue.equals(currentValue)) {
-                    throw new IllegalStateException("Can't create relationship: CMR field "
-                            +
-                            entity.getEntityName() +
-                            "." +
-                            getFieldName()
-                            +
-                            " has foreign key fields mapped to the primary key columns."
-                            +
-                            " Primary key may only be set once in ejbCreate [EJB 2.0 Spec. 10.3.5]."
-                            +
-                            " primary key value is " +
-                            currentValue
-                            + " overriding value is " + comingValue);
+                    throw MESSAGES.cannotCreateRelationship(entity.getEntityName(), getFieldName(), currentValue, comingValue);
                 }
             }
         }
@@ -834,7 +798,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
 
     public void createRelationLinks(CmpEntityBeanContext myCtx, Object relatedId, boolean updateForeignKey) {
         if (isReadOnly()) {
-            throw new EJBException("Field is read-only: " + getFieldName());
+            throw MESSAGES.fieldIsReadOnly(getFieldName());
         }
 
         // If my multiplicity is one, then we need to free the new related context
@@ -881,7 +845,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
                                      boolean updateValueCollection,
                                      boolean updateForeignKey) {
         if (isReadOnly()) {
-            throw new EJBException("Field is read-only: " + getFieldName());
+            throw MESSAGES.fieldIsReadOnly(getFieldName());
         }
 
         removeRelation(myCtx, relatedId, updateValueCollection, updateForeignKey);
@@ -925,7 +889,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
         try {
             getManager().getComponent().invoke(CMRMessage.SCHEDULE_FOR_CASCADE_DELETE, myId, this);
         } catch (Exception e) {
-            throw new EJBException("Error in scheduleForCascadeDelete", e);
+            throw MESSAGES.errorInScheduleCascadeDelete(e);
         }
     }
 
@@ -936,7 +900,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
         try {
             getManager().getComponent().invoke(CMRMessage.SCHEDULE_FOR_BATCH_CASCADE_DELETE, myId, this);
         } catch (Exception e) {
-            throw new EJBException("Error in scheduleForBatchCascadeDelete", e);
+            throw MESSAGES.errorInScheduleBatchCascadeDelete(e);
         }
     }
 
@@ -948,7 +912,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
         try {
             return getManager().getComponent().invoke(CMRMessage.GET_RELATED_ID, myId, this);
         } catch (Exception e) {
-            throw new EJBException("Error in getRelatedId", e);
+            throw MESSAGES.errorGetRelatedId(e);
         }
     }
 
@@ -956,7 +920,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
         try {
             getManager().getComponent().invoke(CMRMessage.ADD_RELATION, myId, this, relatedId);
         } catch (Exception e) {
-            throw new EJBException("Error in addRelation", e);
+            throw MESSAGES.errorAddRelation(e);
         }
     }
 
@@ -964,7 +928,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
         try {
             getManager().getComponent().invoke(CMRMessage.REMOVE_RELATION, myId, this, relatedId);
         } catch (Exception e) {
-            throw new EJBException("Error in removeRelation", e);
+            throw MESSAGES.errorRemoveRelation(e);
         }
     }
 
@@ -973,7 +937,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
      */
     public Object getRelatedId(CmpEntityBeanContext myCtx) {
         if (isCollectionValued()) {
-            throw new EJBException("getRelatedId may only be called on a cmr-field with a multiplicity of one.");
+            throw MESSAGES.getRelatedOnlyForMuliOfOne();
         }
 
         load(myCtx);
@@ -1013,13 +977,11 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
         checkSetForeignKey(myCtx, fk);
 
         if (isReadOnly()) {
-            throw new EJBException("Field is read-only: " + getFieldName());
+            throw MESSAGES.fieldIsReadOnly(getFieldName());
         }
 
         if (!JDBCEntityBridge.isEjbCreateDone(myCtx)) {
-            throw new IllegalStateException("A CMR field cannot be set or added " +
-                    "to a relationship in ejbCreate; this should be done in the " +
-                    "ejbPostCreate method instead [EJB 2.0 Spec. 10.5.2].");
+            throw MESSAGES.cmrFieldCannotBeSetOrAddedInEjbCreate();
         }
         // add to current related set
         FieldState myState = getFieldState(myCtx);
@@ -1044,7 +1006,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
                                 boolean updateValueCollection,
                                 boolean updateForeignKey) {
         if (isReadOnly()) {
-            throw new EJBException("Field is read-only: " + getFieldName());
+            throw MESSAGES.fieldIsReadOnly(getFieldName());
         }
 
         // remove from current related set
@@ -1074,7 +1036,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
 
         // check the preload cache
         if (log.isTraceEnabled()) {
-            log.trace("Read ahead cahce load: cmrField=" + getFieldName() + " pk=" + myCtx.getPrimaryKey());
+            log.trace("Read ahead cache load: cmrField=" + getFieldName() + " pk=" + myCtx.getPrimaryKey());
         }
 
         manager.getReadAheadCache().load(myCtx);
@@ -1125,7 +1087,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
     public void load(CmpEntityBeanContext myCtx, Collection values) {
         // did we get more then one value for a single valued field
         if (isSingleValued() && values.size() > 1) {
-            throw new EJBException("Data contains multiple values, but this cmr field is single valued: " + values);
+            throw MESSAGES.singleValuedFieldHasMultipleValues(values);
         }
 
         // add the new values
@@ -1158,7 +1120,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
      */
     public void setForeignKey(CmpEntityBeanContext myCtx, Object fk) {
         if (!hasForeignKey()) {
-            throw new EJBException(getFieldName() + " CMR field does not have a foreign key to set.");
+            throw MESSAGES.cmrFieldNoForeignKeySet(getFieldName());
         }
 
         for (int i = 0; i < foreignKeyFields.length; ++i) {
@@ -1292,7 +1254,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
                         field.getPrimaryKeyField().set(fkRef[0], argumentRef[0]);
                     } catch (Exception e) {
                         // Non recoverable internal exception
-                        throw new EJBException("Internal error setting foreign-key field " + getFieldName(), e);
+                        throw MESSAGES.errorSettingFk(getFieldName(), e);
                     }
                 }
             } else {
@@ -1325,7 +1287,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
      * - from m:m relationship, added/removed key pairs are cleared in application tx data map on sync.
      */
     public void setClean(CmpEntityBeanContext ctx) {
-        throw new UnsupportedOperationException();
+        throw MESSAGES.setCleanNotSupported();
     }
 
     public boolean isCMPField() {
@@ -1461,7 +1423,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
             TransactionManager tm = component.getTransactionManager();
             return tm.getTransaction();
         } catch (SystemException e) {
-            throw new EJBException("Error getting transaction from the transaction manager", e);
+            throw MESSAGES.errorGettingTxFromManager(e);
         }
     }
 
@@ -1490,18 +1452,10 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
             try {
                 relatedId = local.getPrimaryKey();
             } catch (NoSuchObjectLocalException e) {
-                throw new IllegalArgumentException(e.getMessage());
+                throw MESSAGES.noSuchRelatedObject(e);
             }
-
-            /*
-            if(relatedManager.wasCascadeDeleted(relatedId))
-            {
-               throw new IllegalArgumentException("The instance was cascade-deleted: pk=" + relatedId);
-            }
-            */
         } else {
-            throw new IllegalArgumentException("The values of this field must be of type " +
-                    relatedEntity.getLocalInterface().getName());
+            throw MESSAGES.invalidCmrFieldValue(relatedEntity.getLocalInterface().getName());
         }
         return relatedId;
     }
@@ -1531,7 +1485,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
          */
         public List getValue() {
             if (!isLoaded) {
-                throw new EJBException("CMR field value not loaded yet");
+                throw MESSAGES.cmrFieldNotLoaded();
             }
             return Collections.unmodifiableList(setHandle[0]);
         }
@@ -1589,9 +1543,9 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
          * loads the collection of related ids
          */
         public void loadRelations(Collection values) {
-            // check if we are aleready loaded
+            // check if we are already loaded
             if (isLoaded) {
-                throw new EJBException("CMR field value is already loaded");
+                throw MESSAGES.cmrFieldAlreadyLoaded();
             }
 
             // just in the case where there are lingering values
@@ -1623,7 +1577,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
          */
         public Set getRelationSet() {
             if (!isLoaded) {
-                throw new EJBException("CMR field value not loaded yet");
+                throw MESSAGES.cmrFieldNotLoaded();
             }
 
             if (ctx.isReadOnly()) {
@@ -1634,14 +1588,14 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
                         true);
             }
 
-            // if we already have a relationset use it
+            // if we already have a relationSet use it
             if (relationSet != null) {
                 return relationSet;
             }
 
-            // construct a new relationshet
+            // construct a new relationSet
             try {
-                // get the curent transaction
+                // get the current transaction
                 CmpEntityBeanComponent component = getJDBCStoreManager().getComponent();
                 TransactionManager tm = component.getTransactionManager();
                 Transaction tx = tm.getTransaction();
@@ -1659,9 +1613,9 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
 
                 return relationSet;
             } catch (SystemException e) {
-                throw new EJBException("Error while creating RelationSet", e);
+                throw MESSAGES.errorCreatingRelationSet(e);
             } catch (RollbackException e) {
-                throw new EJBException("Error while creating RelationSet", e);
+                throw MESSAGES.errorCreatingRelationSet(e);
             }
         }
 
@@ -1755,28 +1709,28 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
         }
 
         public Object getColumnValue(int index, Object value) {
-            throw new UnsupportedOperationException();
+            throw MESSAGES.getColumnValueNotSupported();
         }
 
         public Object setColumnValue(int index, Object value, Object columnValue) {
-            throw new UnsupportedOperationException();
+            throw MESSAGES.setColumnValueNotSupported();
         }
 
         public boolean hasMapper() {
-            throw new UnsupportedOperationException("hasMapper is not implemented.");
+            throw MESSAGES.hasMapperNotSupported();
         }
 
         public boolean isSearchable() {
-            throw new UnsupportedOperationException("isSearchable is not implemented.");
+            throw MESSAGES.isSearchableNotSupported();
         }
 
         public JDBCResultSetReader[] getResultSetReaders() {
             // foreign key fields has their result set readers
-            throw new UnsupportedOperationException();
+            throw MESSAGES.getResultSetReadersNotSupported();
         }
 
         public JDBCParameterSetter[] getParameterSetter() {
-            throw new UnsupportedOperationException();
+            throw MESSAGES.getParamSetterNotSupported();
         }
     }
 
@@ -1785,7 +1739,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
 
         private TxSynchronization(FieldState fieldState) {
             if (fieldState == null) {
-                throw new IllegalArgumentException("fieldState is null");
+                throw MESSAGES.fieldStateIsNull();
             }
             this.fieldStateRef = new WeakReference(fieldState);
         }
@@ -1830,7 +1784,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
         }
 
         public RelationData getRelationData() {
-            throw new UnsupportedOperationException();
+            throw MESSAGES.getRelationDataNotSupported();
         }
     };
 
@@ -1853,8 +1807,7 @@ public final class JDBCCMRFieldBridge extends JDBCAbstractCMRFieldBridge {
                     try {
                         return transactionManager.getTransaction();
                     } catch (SystemException e) {
-                        throw new IllegalStateException("An error occured while getting the " +
-                                "transaction associated with the current thread: " + e);
+                        throw MESSAGES.errorGettingCurrentTransaction(e);
                     }
                 }
             };

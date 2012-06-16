@@ -26,6 +26,7 @@ import java.util.Arrays;
 import java.util.Set;
 
 import org.jboss.as.controller.client.helpers.MeasurementUnit;
+import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
 import org.jboss.as.controller.operations.validation.ParameterValidator;
 import org.jboss.as.controller.registry.AttributeAccess;
 import org.jboss.dmr.ModelNode;
@@ -50,6 +51,29 @@ public class SimpleAttributeDefinitionBuilder {
         return new SimpleAttributeDefinitionBuilder(basis);
     }
 
+      /*
+     "code" => {
+         "type" => STRING,
+         "description" => "Fully Qualified Name of the Security Vault Implementation.",
+         "expressions-allowed" => false,
+         "nillable" => true,
+         "min-length" => 1L,
+         "max-length" => 2147483647L,
+         "access-type" => "read-write",
+         "storage" => "configuration",
+         "restart-required" => "no-services"
+     },
+     */
+      public static SimpleAttributeDefinitionBuilder create(final String name, final ModelNode node) {
+          ModelType type = node.get(ModelDescriptionConstants.TYPE).asType();
+          boolean nillable = node.get(ModelDescriptionConstants.NILLABLE).asBoolean(true);
+          boolean expressionAllowed = node.get(ModelDescriptionConstants.EXPRESSIONS_ALLOWED).asBoolean(false);
+          ModelNode defaultValue = node.get(ModelDescriptionConstants.DEFAULT);
+          return SimpleAttributeDefinitionBuilder.create(name, type, nillable)
+                  .setDefaultValue(defaultValue)
+                  .setAllowExpression(expressionAllowed);
+      }
+
     private final String name;
     private final ModelType type;
     private String xmlName;
@@ -61,6 +85,8 @@ public class SimpleAttributeDefinitionBuilder {
     private String[] requires;
     private ParameterCorrector corrector;
     private ParameterValidator validator;
+    private boolean validateNull = true;
+
     private AttributeAccess.Flag[] flags;
 
     public SimpleAttributeDefinitionBuilder(final String attributeName, final ModelType type) {
@@ -91,7 +117,7 @@ public class SimpleAttributeDefinitionBuilder {
 
     public SimpleAttributeDefinition build() {
         return new SimpleAttributeDefinition(name, xmlName, defaultValue, type, allowNull, allowExpression, measurementUnit,
-                                     corrector, validator, alternatives, requires, flags);
+                                     corrector, validator, validateNull, alternatives, requires, flags);
     }
 
     public SimpleAttributeDefinitionBuilder setXmlName(String xmlName) {
@@ -126,6 +152,21 @@ public class SimpleAttributeDefinitionBuilder {
 
     public SimpleAttributeDefinitionBuilder setValidator(ParameterValidator validator) {
         this.validator = validator;
+        return this;
+    }
+
+    /**
+     * Sets whether the attribute definition should check for {@link ModelNode#isDefined() undefined} values if
+     * {@link #setAllowNull(boolean) null is not allowed} in addition to any validation provided by any
+     * {@link #setValidator(ParameterValidator) configured validator}. The default if not set is {@code true}. The use
+     * case for setting this to {@code false} would be to ignore undefined values in the basic validation performed
+     * by the {@link AttributeDefinition} and instead let operation handlers validate using more complex logic
+     * (e.g. checking for {@link #setAlternatives(String...) alternatives}.
+     *
+     * @param validateNull {@code true} if additional validation should be performed; {@false} otherwise
+     */
+    public SimpleAttributeDefinitionBuilder setValidateNull(boolean validateNull) {
+        this.validateNull = validateNull;
         return this;
     }
 
@@ -167,6 +208,7 @@ public class SimpleAttributeDefinitionBuilder {
     }
 
     public SimpleAttributeDefinitionBuilder removeFlag(final AttributeAccess.Flag flag) {
+        if (!isFlagPresent(flag))return this; //if not present no need to remove
         if (flags != null && flags.length > 0) {
             final int length = flags.length;
             final AttributeAccess.Flag[] newFlags = new AttributeAccess.Flag[length - 1];
@@ -182,6 +224,13 @@ public class SimpleAttributeDefinitionBuilder {
             }
         }
         return this;
+    }
+    private boolean isFlagPresent(final AttributeAccess.Flag flag){
+        if (flags==null)return false;
+        for (AttributeAccess.Flag f: flags){
+            if (f.equals(flag))return true;
+        }
+        return false;
     }
 
     public SimpleAttributeDefinitionBuilder setStorageRuntime() {

@@ -22,6 +22,20 @@
 
 package org.jboss.as.connector.subsystems.datasources;
 
+import org.jboss.as.controller.SimpleAttributeDefinition;
+import org.jboss.as.controller.descriptions.DescriptionProvider;
+import org.jboss.as.controller.descriptions.OverrideDescriptionProvider;
+import org.jboss.dmr.ModelNode;
+import org.jboss.dmr.ModelType;
+import org.jboss.jca.adapters.jdbc.statistics.JdbcStatisticsPlugin;
+import org.jboss.jca.core.connectionmanager.pool.mcp.ManagedConnectionPoolStatisticsImpl;
+
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
+import java.util.ResourceBundle;
+
 import static org.jboss.as.connector.subsystems.datasources.Constants.CONNECTION_PROPERTIES;
 import static org.jboss.as.connector.subsystems.datasources.Constants.CONNECTION_PROPERTY_VALUE;
 import static org.jboss.as.connector.subsystems.datasources.Constants.DATA_SOURCE;
@@ -33,16 +47,15 @@ import static org.jboss.as.connector.subsystems.datasources.Constants.DRIVER_MIN
 import static org.jboss.as.connector.subsystems.datasources.Constants.DRIVER_MODULE_NAME;
 import static org.jboss.as.connector.subsystems.datasources.Constants.DRIVER_NAME;
 import static org.jboss.as.connector.subsystems.datasources.Constants.DRIVER_XA_DATASOURCE_CLASS_NAME;
-import static org.jboss.as.connector.subsystems.datasources.Constants.ENABLED;
 import static org.jboss.as.connector.subsystems.datasources.Constants.INSTALLED_DRIVERS;
 import static org.jboss.as.connector.subsystems.datasources.Constants.JDBC_COMPLIANT;
 import static org.jboss.as.connector.subsystems.datasources.Constants.JDBC_DRIVER_NAME;
 import static org.jboss.as.connector.subsystems.datasources.Constants.MODULE_SLOT;
+import static org.jboss.as.connector.subsystems.datasources.Constants.STATISTICS;
 import static org.jboss.as.connector.subsystems.datasources.Constants.XADATASOURCECLASS;
 import static org.jboss.as.connector.subsystems.datasources.Constants.XADATASOURCE_PROPERTIES;
 import static org.jboss.as.connector.subsystems.datasources.Constants.XADATASOURCE_PROPERTY_VALUE;
 import static org.jboss.as.connector.subsystems.datasources.Constants.XA_DATASOURCE;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ACCESS_TYPE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADD;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ATTRIBUTES;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.CHILDREN;
@@ -56,7 +69,6 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.NIL
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OPERATIONS;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OPERATION_NAME;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PERSISTENT;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.READ_ONLY;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.REMOVE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.REPLY_PROPERTIES;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.REQUEST_PROPERTIES;
@@ -64,17 +76,6 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.REQ
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.TAIL_COMMENT_ALLOWED;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.TYPE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.VALUE_TYPE;
-
-import java.util.Locale;
-import java.util.ResourceBundle;
-
-import org.jboss.as.connector.pool.PoolMetrics;
-import org.jboss.as.controller.SimpleAttributeDefinition;
-import org.jboss.as.controller.descriptions.DescriptionProvider;
-import org.jboss.dmr.ModelNode;
-import org.jboss.dmr.ModelType;
-import org.jboss.jca.adapters.jdbc.statistics.JdbcStatisticsPlugin;
-import org.jboss.jca.core.connectionmanager.pool.mcp.ManagedConnectionPoolStatisticsImpl;
 
 /**
  * @author @author <a href="mailto:stefano.maestri@redhat.com">Stefano
@@ -88,22 +89,23 @@ class DataSourcesSubsystemProviders {
             Constants.DATASOURCE_DRIVER,
             Constants.NEW_CONNECTION_SQL, Constants.URL_DELIMITER,
             Constants.URL_SELECTOR_STRATEGY_CLASS_NAME, Constants.USE_JAVA_CONTEXT,
-            Constants.JTA, org.jboss.as.connector.pool.Constants.MAX_POOL_SIZE,
-            org.jboss.as.connector.pool.Constants.MIN_POOL_SIZE, org.jboss.as.connector.pool.Constants.POOL_PREFILL, org.jboss.as.connector.pool.Constants.POOL_USE_STRICT_MIN,
+            Constants.JTA, org.jboss.as.connector.subsystems.common.pool.Constants.MAX_POOL_SIZE,
+            org.jboss.as.connector.subsystems.common.pool.Constants.MIN_POOL_SIZE, org.jboss.as.connector.subsystems.common.pool.Constants.POOL_PREFILL, org.jboss.as.connector.subsystems.common.pool.Constants.POOL_USE_STRICT_MIN,
             Constants.USERNAME, Constants.PASSWORD, Constants.SECURITY_DOMAIN,
             Constants.REAUTHPLUGIN_CLASSNAME, Constants.REAUTHPLUGIN_PROPERTIES,
-            org.jboss.as.connector.pool.Constants.POOL_FLUSH_STRATEGY, Constants.PREPAREDSTATEMENTSCACHESIZE,
+            org.jboss.as.connector.subsystems.common.pool.Constants.POOL_FLUSH_STRATEGY, Constants.ALLOW_MULTIPLE_USERS,
+            Constants.PREPAREDSTATEMENTSCACHESIZE,
             Constants.SHAREPREPAREDSTATEMENTS, Constants.TRACKSTATEMENTS,
             Constants.ALLOCATION_RETRY, Constants.ALLOCATION_RETRY_WAIT_MILLIS,
-            org.jboss.as.connector.pool.Constants.BLOCKING_TIMEOUT_WAIT_MILLIS, org.jboss.as.connector.pool.Constants.IDLETIMEOUTMINUTES,
+            org.jboss.as.connector.subsystems.common.pool.Constants.BLOCKING_TIMEOUT_WAIT_MILLIS, org.jboss.as.connector.subsystems.common.pool.Constants.IDLETIMEOUTMINUTES,
             Constants.QUERYTIMEOUT, Constants.USETRYLOCK, Constants.SETTXQUERYTIMEOUT,
             Constants.TRANSACTION_ISOLATION, Constants.CHECKVALIDCONNECTIONSQL,
             Constants.EXCEPTIONSORTERCLASSNAME, Constants.EXCEPTIONSORTER_PROPERTIES,
             Constants.STALECONNECTIONCHECKERCLASSNAME, Constants.STALECONNECTIONCHECKER_PROPERTIES,
             Constants.VALIDCONNECTIONCHECKERCLASSNAME, Constants.VALIDCONNECTIONCHECKER_PROPERTIES,
-            org.jboss.as.connector.pool.Constants.BACKGROUNDVALIDATIONMILLIS,
-            org.jboss.as.connector.pool.Constants.BACKGROUNDVALIDATION,
-            org.jboss.as.connector.pool.Constants.USE_FAST_FAIL,
+            org.jboss.as.connector.subsystems.common.pool.Constants.BACKGROUNDVALIDATIONMILLIS,
+            org.jboss.as.connector.subsystems.common.pool.Constants.BACKGROUNDVALIDATION,
+            org.jboss.as.connector.subsystems.common.pool.Constants.USE_FAST_FAIL,
             Constants.VALIDATEONMATCH, Constants.SPY,
             Constants.USE_CCM};
 
@@ -111,29 +113,30 @@ class DataSourcesSubsystemProviders {
             Constants.XADATASOURCECLASS, Constants.JNDINAME, Constants.DATASOURCE_DRIVER,
             Constants.NEW_CONNECTION_SQL, Constants.URL_DELIMITER,
             Constants.URL_SELECTOR_STRATEGY_CLASS_NAME, Constants.USE_JAVA_CONTEXT,
-            org.jboss.as.connector.pool.Constants.MAX_POOL_SIZE, org.jboss.as.connector.pool.Constants.MIN_POOL_SIZE,
-            org.jboss.as.connector.pool.Constants.POOL_PREFILL, org.jboss.as.connector.pool.Constants.POOL_USE_STRICT_MIN, Constants.INTERLEAVING,
+            org.jboss.as.connector.subsystems.common.pool.Constants.MAX_POOL_SIZE, org.jboss.as.connector.subsystems.common.pool.Constants.MIN_POOL_SIZE,
+            org.jboss.as.connector.subsystems.common.pool.Constants.POOL_PREFILL, org.jboss.as.connector.subsystems.common.pool.Constants.POOL_USE_STRICT_MIN, Constants.INTERLEAVING,
             Constants.NOTXSEPARATEPOOL, Constants.PAD_XID, Constants.SAME_RM_OVERRIDE,
             Constants.WRAP_XA_RESOURCE, Constants.USERNAME, Constants.PASSWORD,
             Constants.SECURITY_DOMAIN,
             Constants.REAUTHPLUGIN_CLASSNAME, Constants.REAUTHPLUGIN_PROPERTIES,
-            org.jboss.as.connector.pool.Constants.POOL_FLUSH_STRATEGY, Constants.PREPAREDSTATEMENTSCACHESIZE,
+            org.jboss.as.connector.subsystems.common.pool.Constants.POOL_FLUSH_STRATEGY, Constants.ALLOW_MULTIPLE_USERS,
+            Constants.PREPAREDSTATEMENTSCACHESIZE,
             Constants.SHAREPREPAREDSTATEMENTS, Constants.TRACKSTATEMENTS,
             Constants.ALLOCATION_RETRY, Constants.ALLOCATION_RETRY_WAIT_MILLIS,
-            org.jboss.as.connector.pool.Constants.BLOCKING_TIMEOUT_WAIT_MILLIS, org.jboss.as.connector.pool.Constants.IDLETIMEOUTMINUTES,
+            org.jboss.as.connector.subsystems.common.pool.Constants.BLOCKING_TIMEOUT_WAIT_MILLIS, org.jboss.as.connector.subsystems.common.pool.Constants.IDLETIMEOUTMINUTES,
             Constants.QUERYTIMEOUT, Constants.USETRYLOCK, Constants.SETTXQUERYTIMEOUT,
             Constants.TRANSACTION_ISOLATION, Constants.CHECKVALIDCONNECTIONSQL,
             Constants.EXCEPTIONSORTERCLASSNAME, Constants.EXCEPTIONSORTER_PROPERTIES,
             Constants.STALECONNECTIONCHECKERCLASSNAME, Constants.STALECONNECTIONCHECKER_PROPERTIES,
             Constants.VALIDCONNECTIONCHECKERCLASSNAME, Constants.VALIDCONNECTIONCHECKER_PROPERTIES,
-            org.jboss.as.connector.pool.Constants.BACKGROUNDVALIDATIONMILLIS,
-            org.jboss.as.connector.pool.Constants.BACKGROUNDVALIDATION,
-            org.jboss.as.connector.pool.Constants.USE_FAST_FAIL,
+            org.jboss.as.connector.subsystems.common.pool.Constants.BACKGROUNDVALIDATIONMILLIS,
+            org.jboss.as.connector.subsystems.common.pool.Constants.BACKGROUNDVALIDATION,
+            org.jboss.as.connector.subsystems.common.pool.Constants.USE_FAST_FAIL,
             Constants.VALIDATEONMATCH, Constants.XA_RESOURCE_TIMEOUT,
             Constants.SPY, Constants.USE_CCM,
             Constants.RECOVERY_USERNAME, Constants.RECOVERY_PASSWORD,
             Constants.RECOVERY_SECURITY_DOMAIN, Constants.RECOVERLUGIN_CLASSNAME,
-            Constants.RECOVERLUGIN_PROPERTIES, Constants.NO_RECOVERY};
+            Constants.RECOVERLUGIN_PROPERTIES, Constants.NO_RECOVERY, Constants.JTA};
 
     static final SimpleAttributeDefinition[] READONLY_DATASOURCE_ATTRIBUTE = new SimpleAttributeDefinition[] {Constants.ENABLED };
 
@@ -274,6 +277,22 @@ class DataSourcesSubsystemProviders {
 
             return operation;
         }
+    };
+
+    static final DescriptionProvider SUBSYSTEM_REMOVE_DESC = new DescriptionProvider() {
+
+        public ModelNode getModelDescription(final Locale locale) {
+            final ResourceBundle bundle = getResourceBundle(locale);
+            final ModelNode operation = new ModelNode();
+
+            operation.get(OPERATION_NAME).set("remove");
+            operation.get(DESCRIPTION).set(bundle.getString("datasources.remove"));
+            operation.get(REQUEST_PROPERTIES).setEmptyObject();
+            operation.get(REPLY_PROPERTIES).setEmptyObject();
+
+            return operation;
+        }
+
     };
 
     static DescriptionProvider ADD_CONNECTION_PROPERTIES_DESC = new DescriptionProvider() {
@@ -515,7 +534,7 @@ class DataSourcesSubsystemProviders {
 
             operation.get(REQUEST_PROPERTIES, DRIVER_NAME.getName(), DESCRIPTION).set(bundle.getString("installed-drivers.driver-name"));
             operation.get(REQUEST_PROPERTIES, DRIVER_NAME.getName(), TYPE).set(ModelType.STRING);
-            operation.get(REQUEST_PROPERTIES, DRIVER_NAME.getName(), REQUIRED).set(true);
+            operation.get(REQUEST_PROPERTIES, DRIVER_NAME.getName(), REQUIRED).set(false);
             operation.get(REQUEST_PROPERTIES, DEPLOYMENT_NAME, DESCRIPTION).set(bundle.getString("installed-drivers.deployment-name"));
             operation.get(REQUEST_PROPERTIES, DEPLOYMENT_NAME, TYPE).set(ModelType.STRING);
             operation.get(REQUEST_PROPERTIES, DEPLOYMENT_NAME, REQUIRED).set(false);
@@ -571,43 +590,18 @@ class DataSourcesSubsystemProviders {
             node.get(TAIL_COMMENT_ALLOWED).set(true);
 
             for (SimpleAttributeDefinition propertyType : DATASOURCE_ATTRIBUTE) {
-                node.get(ATTRIBUTES, propertyType.getName(), DESCRIPTION).set(bundle.getString(propertyType.getName()));
-                node.get(ATTRIBUTES, propertyType.getName(), TYPE).set(propertyType.getType());
-                node.get(ATTRIBUTES, propertyType.getName(), REQUIRED).set(! propertyType.isAllowNull());
-                if (propertyType.getDefaultValue() != null)
-                    node.get(ATTRIBUTES, propertyType.getName(), DEFAULT).set(propertyType.getDefaultValue().toString());
+                if (propertyType.getType() == ModelType.OBJECT) {
+                    node.get(ATTRIBUTES, propertyType.getName(), DESCRIPTION).set(bundle.getString(propertyType.getName()));
+                    node.get(ATTRIBUTES, propertyType.getName(), TYPE).set(propertyType.getType());
+                    node.get(ATTRIBUTES, propertyType.getName(), VALUE_TYPE).set(ModelType.STRING);
+                    node.get(ATTRIBUTES, propertyType.getName(), REQUIRED).set(false);
+                } else {
+                    propertyType.addResourceAttributeDescription(bundle,null,node);
+                }
             }
 
             for (SimpleAttributeDefinition propertyType : READONLY_DATASOURCE_ATTRIBUTE) {
-                node.get(ATTRIBUTES, propertyType.getName(), DESCRIPTION).set(bundle.getString(propertyType.getName()));
-                node.get(ATTRIBUTES, propertyType.getName(), TYPE).set(propertyType.getType());
-                node.get(ATTRIBUTES, propertyType.getName(), ACCESS_TYPE, READ_ONLY).set(true);
-            }
-
-            for (String name : LocalAndXaDataSourcesJdbcMetrics.ATTRIBUTES) {
-                node.get(ATTRIBUTES, name, DESCRIPTION).set(jdbcMetrics.getDescription(name));
-                ModelType modelType = ModelType.STRING;
-                if (jdbcMetrics.getType(name) == int.class) {
-                    modelType = ModelType.INT;
-                }
-                if (jdbcMetrics.getType(name) == long.class) {
-                    modelType = ModelType.LONG;
-                }
-                node.get(ATTRIBUTES, name, TYPE).set(modelType);
-                node.get(ATTRIBUTES, name, REQUIRED).set(false);
-            }
-
-            for (String name : PoolMetrics.ATTRIBUTES) {
-                node.get(ATTRIBUTES, name, DESCRIPTION).set(poolMetrics.getDescription(name));
-                ModelType modelType = ModelType.STRING;
-                if (poolMetrics.getType(name) == int.class) {
-                    modelType = ModelType.INT;
-                }
-                if (poolMetrics.getType(name) == long.class) {
-                    modelType = ModelType.LONG;
-                }
-                node.get(ATTRIBUTES, name, TYPE).set(modelType);
-                node.get(ATTRIBUTES, name, REQUIRED).set(false);
+                propertyType.addResourceAttributeDescription(bundle,null,node);
             }
 
             node.get(CHILDREN, CONNECTION_PROPERTIES.getName(), DESCRIPTION).set(bundle.getString(CONNECTION_PROPERTIES.getName()));
@@ -627,12 +621,14 @@ class DataSourcesSubsystemProviders {
             operation.get(DESCRIPTION).set(bundle.getString("data-source.add"));
 
             for (SimpleAttributeDefinition propertyType : DATASOURCE_ATTRIBUTE) {
-                operation.get(REQUEST_PROPERTIES, propertyType.getName(), DESCRIPTION).set(
-                        bundle.getString(propertyType.getName()));
-                operation.get(REQUEST_PROPERTIES, propertyType.getName(), TYPE).set(propertyType.getType());
-                operation.get(REQUEST_PROPERTIES, propertyType.getName(), REQUIRED).set(!propertyType.isAllowNull());
-                if (propertyType.getDefaultValue() != null)
-                    operation.get(REQUEST_PROPERTIES, propertyType.getName(), DEFAULT).set(propertyType.getDefaultValue().toString());
+                if (propertyType.getType() == ModelType.OBJECT) {
+                    operation.get(REQUEST_PROPERTIES, propertyType.getName(), DESCRIPTION).set(bundle.getString(propertyType.getName()));
+                    operation.get(REQUEST_PROPERTIES, propertyType.getName(), TYPE).set(propertyType.getType());
+                    operation.get(REQUEST_PROPERTIES, propertyType.getName(), VALUE_TYPE).set(ModelType.STRING);
+                    operation.get(REQUEST_PROPERTIES, propertyType.getName(), REQUIRED).set(false);
+                } else {
+                    propertyType.addOperationParameterDescription(bundle, null, operation);
+                }
             }
             return operation;
         }
@@ -709,6 +705,18 @@ class DataSourcesSubsystemProviders {
         }
     };
 
+     static DescriptionProvider CLEAR_STATISTICS_DESC = new DescriptionProvider() {
+        @Override
+        public ModelNode getModelDescription(final Locale locale) {
+            final ResourceBundle bundle = getResourceBundle(locale);
+            final ModelNode operation = new ModelNode();
+            operation.get(OPERATION_NAME).set("clear-statistics");
+            operation.get(DESCRIPTION).set(bundle.getString("data-source.clear-statistics"));
+            return operation;
+        }
+    };
+
+
     static DescriptionProvider XA_DATA_SOURCE_DESC = new DescriptionProvider() {
         @Override
         public ModelNode getModelDescription(final Locale locale) {
@@ -720,43 +728,20 @@ class DataSourcesSubsystemProviders {
             node.get(TAIL_COMMENT_ALLOWED).set(true);
 
             for (SimpleAttributeDefinition propertyType : XA_DATASOURCE_ATTRIBUTE) {
-                node.get(ATTRIBUTES, propertyType.getName(), DESCRIPTION).set(bundle.getString(propertyType.getName()));
-                node.get(ATTRIBUTES, propertyType.getName(), TYPE).set(propertyType.getType());
-                node.get(ATTRIBUTES, propertyType.getName(), REQUIRED).set(! propertyType.isAllowNull());
-                if (propertyType.getDefaultValue() != null)
-                    node.get(ATTRIBUTES, propertyType.getName(), DEFAULT).set(propertyType.getDefaultValue().toString());
+                if (propertyType.getType() == ModelType.OBJECT) {
+                    node.get(ATTRIBUTES, propertyType.getName(), DESCRIPTION).set(bundle.getString(propertyType.getName()));
+                    node.get(ATTRIBUTES, propertyType.getName(), TYPE).set(propertyType.getType());
+                    node.get(ATTRIBUTES, propertyType.getName(), VALUE_TYPE).set(ModelType.STRING);
+                    node.get(ATTRIBUTES, propertyType.getName(), REQUIRED).set(false);
+                } else {
+                    propertyType.addResourceAttributeDescription(bundle,null,node);
+                }
             }
 
             for (SimpleAttributeDefinition propertyType : READONLY_XA_DATASOURCE_ATTRIBUTE) {
-                node.get(ATTRIBUTES, propertyType.getName(), DESCRIPTION).set(bundle.getString(propertyType.getName()));
-                node.get(ATTRIBUTES, propertyType.getName(), TYPE).set(propertyType.getType());
-                node.get(ATTRIBUTES, propertyType.getName(), ACCESS_TYPE, READ_ONLY).set(true);
+                propertyType.addResourceAttributeDescription(bundle,null,node);
             }
 
-            for (String name : LocalAndXaDataSourcesJdbcMetrics.ATTRIBUTES) {
-                node.get(ATTRIBUTES, name, DESCRIPTION).set(jdbcMetrics.getDescription(name));
-                ModelType modelType = ModelType.STRING;
-                if (jdbcMetrics.getType(name) == int.class) {
-                    modelType = ModelType.INT;
-                }
-                if (jdbcMetrics.getType(name) == long.class) {
-                    modelType = ModelType.LONG;
-                }
-                node.get(ATTRIBUTES, name, TYPE).set(modelType);
-                node.get(ATTRIBUTES, name, REQUIRED).set(false);
-            }
-            for (String name : PoolMetrics.ATTRIBUTES) {
-                node.get(ATTRIBUTES, name, DESCRIPTION).set(poolMetrics.getDescription(name));
-                ModelType modelType = ModelType.STRING;
-                if (poolMetrics.getType(name) == int.class) {
-                    modelType = ModelType.INT;
-                }
-                if (poolMetrics.getType(name) == long.class) {
-                    modelType = ModelType.LONG;
-                }
-                node.get(ATTRIBUTES, name, TYPE).set(modelType);
-                node.get(ATTRIBUTES, name, REQUIRED).set(false);
-            }
             node.get(CHILDREN, XADATASOURCE_PROPERTIES.getName(), DESCRIPTION).set(bundle.getString(XADATASOURCE_PROPERTIES.getName()));
 
             return node;
@@ -772,16 +757,38 @@ class DataSourcesSubsystemProviders {
             operation.get(DESCRIPTION).set(bundle.getString("xa-data-source.add"));
 
             for (SimpleAttributeDefinition propertyType : XA_DATASOURCE_ATTRIBUTE) {
-                operation.get(REQUEST_PROPERTIES, propertyType.getName(), DESCRIPTION).set(
-                        bundle.getString(propertyType.getName()));
-                operation.get(REQUEST_PROPERTIES, propertyType.getName(), TYPE).set(propertyType.getType());
-                operation.get(REQUEST_PROPERTIES, propertyType.getName(), REQUIRED).set(! propertyType.isAllowNull());
-                if (propertyType.getDefaultValue() != null)
-                    operation.get(REQUEST_PROPERTIES, propertyType.getName(), DEFAULT).set(propertyType.getDefaultValue().toString());
+                if (propertyType.getType() == ModelType.OBJECT) {
+                    operation.get(REQUEST_PROPERTIES, propertyType.getName(), DESCRIPTION).set(bundle.getString(propertyType.getName()));
+                    operation.get(REQUEST_PROPERTIES, propertyType.getName(), TYPE).set(propertyType.getType());
+                    operation.get(REQUEST_PROPERTIES, propertyType.getName(), VALUE_TYPE).set(ModelType.STRING);
+                    operation.get(REQUEST_PROPERTIES, propertyType.getName(), REQUIRED).set(false);
+                } else {
+                    propertyType.addOperationParameterDescription(bundle, null, operation);
+                }
             }
             return operation;
         }
     };
+
+    static OverrideDescriptionProvider OVERRIDE_DS_DESC = new OverrideDescriptionProvider() {
+
+        @Override
+        public Map<String, ModelNode> getAttributeOverrideDescriptions(Locale locale) {
+            return Collections.emptyMap();
+        }
+
+        @Override
+        public Map<String, ModelNode> getChildTypeOverrideDescriptions(Locale locale) {
+            final ResourceBundle bundle = getResourceBundle(locale);
+
+            Map<String, ModelNode> children = new HashMap<String, ModelNode>();
+            ModelNode node = new ModelNode();
+            node.get(DESCRIPTION).set(bundle.getString("statistics"));
+            children.put(STATISTICS, node);
+            return children;
+        }
+    };
+
 
     static DescriptionProvider REMOVE_XA_DATA_SOURCE_DESC = new DescriptionProvider() {
         @Override
@@ -801,6 +808,11 @@ class DataSourcesSubsystemProviders {
             final ModelNode operation = new ModelNode();
             operation.get(OPERATION_NAME).set(ENABLE);
             operation.get(DESCRIPTION).set(bundle.getString("xa-data-source.enable"));
+            operation.get(REQUEST_PROPERTIES, PERSISTENT, DESCRIPTION).set(
+                    bundle.getString(PERSISTENT));
+            operation.get(REQUEST_PROPERTIES, PERSISTENT, TYPE).set(ModelType.BOOLEAN);
+            operation.get(REQUEST_PROPERTIES, PERSISTENT, REQUIRED).set(false);
+            operation.get(REQUEST_PROPERTIES, PERSISTENT, DEFAULT).set(true);
             return operation;
         }
     };

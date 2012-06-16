@@ -22,66 +22,42 @@
 
 package org.jboss.as.clustering.infinispan.subsystem;
 
+import static org.jboss.as.clustering.infinispan.InfinispanLogger.ROOT_LOGGER;
+
 import java.util.List;
-import java.util.Locale;
-import org.infinispan.manager.EmbeddedCacheManager;
+
 import org.jboss.as.controller.AbstractAddStepHandler;
 import org.jboss.as.controller.OperationContext;
+import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.ServiceVerificationHandler;
-import org.jboss.as.controller.descriptions.DescriptionProvider;
 import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
 import org.jboss.as.controller.operations.common.Util;
 import org.jboss.dmr.ModelNode;
 import org.jboss.msc.service.ServiceController;
-import org.jboss.msc.service.ServiceTarget;
-import org.jboss.msc.service.ValueService;
-import org.jboss.msc.value.InjectedValue;
-
-import static org.jboss.as.clustering.infinispan.InfinispanLogger.ROOT_LOGGER;
 
 /**
  * @author Paul Ferraro
  */
-public class InfinispanSubsystemAdd extends AbstractAddStepHandler implements DescriptionProvider {
+public class InfinispanSubsystemAdd extends AbstractAddStepHandler {
 
-    static ModelNode createOperation(ModelNode address, ModelNode existing) {
+    public static final InfinispanSubsystemAdd INSTANCE = new InfinispanSubsystemAdd();
+
+    static ModelNode createOperation(ModelNode address, ModelNode existing) throws OperationFailedException {
         ModelNode operation = Util.getEmptyOperation(ModelDescriptionConstants.ADD, address);
         populate(existing, operation);
         return operation;
     }
 
-    private static void populate(ModelNode source, ModelNode target) {
-        target.get(ModelKeys.DEFAULT_CACHE_CONTAINER).set(source.require(ModelKeys.DEFAULT_CACHE_CONTAINER));
+    private static void populate(ModelNode source, ModelNode target) throws OperationFailedException {
         target.get(ModelKeys.CACHE_CONTAINER).setEmptyObject();
     }
 
-    /**
-     * {@inheritDoc}
-     *
-     * @see org.jboss.as.controller.descriptions.DescriptionProvider#getModelDescription(java.util.Locale)
-     */
-    @Override
-    public ModelNode getModelDescription(Locale locale) {
-        return InfinispanDescriptions.getSubsystemAddDescription(locale);
-    }
-
-    protected void populateModel(ModelNode operation, ModelNode model) {
+    protected void populateModel(ModelNode operation, ModelNode model) throws OperationFailedException {
         populate(operation, model);
     }
 
-    protected void performRuntime(OperationContext context, ModelNode operation, ModelNode model, ServiceVerificationHandler verificationHandler, List<ServiceController<?>> newControllers) {
+    protected void performRuntime(OperationContext context, ModelNode operation, ModelNode model, ServiceVerificationHandler verificationHandler, List<ServiceController<?>> newControllers) throws OperationFailedException {
         ROOT_LOGGER.activatingSubsystem();
-        ServiceTarget target = context.getServiceTarget();
-        newControllers.add(target.addService(EmbeddedCacheManagerDefaultsService.SERVICE_NAME, new EmbeddedCacheManagerDefaultsService())
-                .setInitialMode(ServiceController.Mode.ON_DEMAND)
-                .install());
-        String defaultContainer = operation.require(ModelKeys.DEFAULT_CACHE_CONTAINER).asString();
-        InjectedValue<EmbeddedCacheManager> container = new InjectedValue<EmbeddedCacheManager>();
-        ValueService<EmbeddedCacheManager> service = new ValueService<EmbeddedCacheManager>(container);
-        newControllers.add(target.addService(EmbeddedCacheManagerService.getServiceName(null), service)
-                .addDependency(EmbeddedCacheManagerService.getServiceName(defaultContainer), EmbeddedCacheManager.class, container)
-                .setInitialMode(ServiceController.Mode.ON_DEMAND)
-                .install());
     }
 
     protected boolean requiresRuntimeVerification() {

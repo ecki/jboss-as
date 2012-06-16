@@ -22,11 +22,28 @@
 
 package org.jboss.as.domain.management.security;
 
-import javax.net.ssl.SSLContext;
-import javax.security.auth.callback.Callback;
-import javax.security.auth.callback.UnsupportedCallbackException;
-import java.io.IOException;
+import static org.jboss.as.domain.management.DomainManagementLogger.ROOT_LOGGER;
+import static org.jboss.as.domain.management.DomainManagementMessages.MESSAGES;
+import static org.jboss.as.domain.management.RealmConfigurationConstants.SUBJECT_CALLBACK_SUPPORTED;
 
+import java.io.IOException;
+import java.security.Principal;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
+
+import javax.net.ssl.SSLContext;
+import javax.security.auth.Subject;
+import javax.security.auth.callback.Callback;
+import javax.security.auth.callback.CallbackHandler;
+import javax.security.auth.callback.UnsupportedCallbackException;
+import javax.security.sasl.AuthorizeCallback;
+
+import org.jboss.as.controller.security.SubjectUserInfo;
+import org.jboss.as.domain.management.AuthenticationMechanism;
+import org.jboss.as.domain.management.AuthorizingCallbackHandler;
 import org.jboss.as.domain.management.CallbackHandlerFactory;
 import org.jboss.as.domain.management.SecurityRealm;
 import org.jboss.msc.service.Service;
@@ -34,10 +51,8 @@ import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.service.StartContext;
 import org.jboss.msc.service.StartException;
 import org.jboss.msc.service.StopContext;
+import org.jboss.msc.value.InjectedSetValue;
 import org.jboss.msc.value.InjectedValue;
-
-import static org.jboss.as.domain.management.DomainManagementLogger.ROOT_LOGGER;
-import static org.jboss.as.domain.management.DomainManagementMessages.MESSAGES;
 
 /**
  * The service representing the security realm, this service will be injected into any management interfaces
@@ -45,26 +60,41 @@ import static org.jboss.as.domain.management.DomainManagementMessages.MESSAGES;
  *
  * @author <a href="mailto:darran.lofthouse@jboss.com">Darran Lofthouse</a>
  */
-public class SecurityRealmService implements Service<SecurityRealmService>, SecurityRealm {
+public class SecurityRealmService implements Service<SecurityRealm>, SecurityRealm {
 
     public static final ServiceName BASE_SERVICE_NAME = ServiceName.JBOSS.append("server", "controller", "management", "security_realm");
 
-    private final InjectedValue<DomainCallbackHandler> callbackHandler = new InjectedValue<DomainCallbackHandler>();
+    private final InjectedValue<SubjectSupplementalService> subjectSupplemental = new InjectedValue<SubjectSupplementalService>();
     private final InjectedValue<SSLIdentityService> sslIdentity = new InjectedValue<SSLIdentityService>();
     private final InjectedValue<CallbackHandlerFactory> secretCallbackFactory = new InjectedValue<CallbackHandlerFactory>();
+    private final InjectedSetValue<CallbackHandlerService> callbackHandlerServices = new InjectedSetValue<CallbackHandlerService>();
 
     private final String name;
+    private final Map<AuthenticationMechanism, CallbackHandlerService> registeredServices = new HashMap<AuthenticationMechanism, CallbackHandlerService>();
 
     public SecurityRealmService(String name) {
         this.name = name;
     }
 
+    /*
+     * Service Methods
+     */
+
     public void start(StartContext context) throws StartException {
         ROOT_LOGGER.debugf("Starting '%s' Security Realm Service", name);
+        for (CallbackHandlerService current : callbackHandlerServices.getValue()) {
+            AuthenticationMechanism mechanism = current.getPreferredMechanism();
+            if (registeredServices.containsKey(mechanism)) {
+                registeredServices.clear();
+                throw MESSAGES.multipleCallbackHandlerForMechanism(mechanism.name());
+            }
+            registeredServices.put(mechanism, current);
+        }
     }
 
     public void stop(StopContext context) {
         ROOT_LOGGER.debugf("Stopping '%s' Security Realm Service", name);
+        registeredServices.clear();
     }
 
     public SecurityRealmService getValue() throws IllegalStateException, IllegalArgumentException {
@@ -75,8 +105,114 @@ public class SecurityRealmService implements Service<SecurityRealmService>, Secu
         return name;
     }
 
-    public InjectedValue<DomainCallbackHandler> getCallbackHandlerInjector() {
-        return callbackHandler;
+
+    /*
+     * SecurityRealm Methods
+     */
+
+    public Set<AuthenticationMechanism> getSupportedAuthenticationMechanisms() {
+        Set<AuthenticationMechanism> response = new TreeSet<AuthenticationMechanism>();
+        response.addAll(registeredServices.keySet());
+        return response;
+    }
+
+    public Map<String, String> getMechanismConfig(final AuthenticationMechanism mechanism) {
+        CallbackHandlerService service = getCallbackHandlerService(mechanism);
+
+        return service.getConfigurationOptions();
+    }
+
+    public boolean isReady() {
+        for (CallbackHandlerService current : registeredServices.values()) {
+            // Only takes one to not be ready for us to return false.
+            if (current.isReady() == false) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public AuthorizingCallbackHandler getAuthorizingCallbackHandler(AuthenticationMechanism mechanism) {
+        /*
+         * The returned AuthorizingCallbackHandler is used for a single authentication request - this means that state can be
+         * shared to combine the authentication step and the loading of authorization data.
+         */
+        final CallbackHandlerService handlerService = getCallbackHandlerService(mechanism);
+        final Map<String, Object> sharedState = new HashMap<String, Object>();
+        return new AuthorizingCallbackHandler() {
+            CallbackHandler handler = handlerService.getCallbackHandler(sharedState);
+            Map<String, String> options = handlerService.getConfigurationOptions();
+            final boolean subjectCallbackSupported;
+
+            {
+                if (options.containsKey(SUBJECT_CALLBACK_SUPPORTED)) {
+                    subjectCallbackSupported = Boolean.parseBoolean(options.get(SUBJECT_CALLBACK_SUPPORTED));
+                } else {
+                    subjectCallbackSupported = false;
+                }
+            }
+
+            Subject subject;
+
+            public void handle(Callback[] callbacks) throws IOException, UnsupportedCallbackException {
+                // For a follow up call just for AuthorizeCallback we don't want to insert a SubjectCallback
+                if (subjectCallbackSupported && notAuthorizeCallback(callbacks)) {
+                    Callback[] newCallbacks = new Callback[callbacks.length + 1];
+                    System.arraycopy(callbacks, 0, newCallbacks, 0, callbacks.length);
+                    SubjectCallback subjectCallBack = new SubjectCallback();
+                    newCallbacks[newCallbacks.length - 1] = subjectCallBack;
+                    handler.handle(newCallbacks);
+                    subject = subjectCallBack.getSubject();
+                } else {
+                    handler.handle(callbacks);
+                }
+            }
+
+            private boolean notAuthorizeCallback(Callback[] callbacks) {
+                return (callbacks.length == 1 && callbacks[0] instanceof AuthorizeCallback) == false;
+            }
+
+            public SubjectUserInfo createSubjectUserInfo(Collection<Principal> userPrincipals) throws IOException {
+                Subject subject = this.subject == null ? new Subject() : this.subject;
+                Collection<Principal> allPrincipals = subject.getPrincipals();
+                for (Principal userPrincipal : userPrincipals) {
+                    allPrincipals.add(userPrincipal);
+                    allPrincipals.add(new RealmUser(getName(), userPrincipal.getName()));
+                }
+
+                SubjectSupplementalService subjectSupplementalService = subjectSupplemental.getOptionalValue();
+                if (subjectSupplementalService != null) {
+                    SubjectSupplemental subjectSupplemental = subjectSupplementalService.getSubjectSupplemental(sharedState);
+                    subjectSupplemental.supplementSubject(subject);
+                }
+
+                return new RealmSubjectUserInfo(subject);
+            }
+        };
+    }
+
+    private CallbackHandlerService getCallbackHandlerService(final AuthenticationMechanism mechanism) {
+        if (registeredServices.containsKey(mechanism)) {
+            return registeredServices.get(mechanism);
+        }
+        // As the service is started we do not expect any updates to the registry.
+
+        // We didn't find a service that prefers this mechanism so now search for a service that also supports it.
+        for (CallbackHandlerService current : registeredServices.values()) {
+            if (current.getSupplementaryMechanisms().contains(mechanism)) {
+                return current;
+            }
+        }
+
+        throw MESSAGES.noCallbackHandlerForMechanism(mechanism.toString(), name);
+    }
+
+    /*
+     * Injectors
+     */
+
+    public InjectedValue<SubjectSupplementalService> getSubjectSupplementalInjector() {
+        return subjectSupplemental;
     }
 
     public InjectedValue<SSLIdentityService> getSSLIdentityInjector() {
@@ -87,43 +223,50 @@ public class SecurityRealmService implements Service<SecurityRealmService>, Secu
         return secretCallbackFactory;
     }
 
-    /**
-     * Used to obtain the callback handler for the configured 'authorizations'.
-     *
-     * @return The CallbackHandler to be used for verifying the identity of the caller.
-     */
-    public DomainCallbackHandler getCallbackHandler() {
-        DomainCallbackHandler response = callbackHandler.getOptionalValue();
-        if (response == null) {
-            response = new DomainCallbackHandler() {
-                public Class[] getSupportedCallbacks() {
-                    return new Class[0];
-                }
-
-                public void handle(Callback[] callbacks) throws IOException, UnsupportedCallbackException {
-                    throw MESSAGES.noAuthenticationDefined();
-                }
-
-                @Override
-                public boolean isReady() {
-                    return false;
-                }
-            };
-        }
-
-        return response;
+    public InjectedSetValue<CallbackHandlerService> getCallbackHandlerService() {
+        return callbackHandlerServices;
     }
 
     public SSLContext getSSLContext() {
         SSLIdentityService service = sslIdentity.getOptionalValue();
-        if (sslIdentity != null) {
+        if (service != null) {
             return service.getSSLContext();
         }
 
         return null;
     }
 
+    public boolean hasTrustStore() {
+        SSLIdentityService service;
+        return ((service = sslIdentity.getOptionalValue()) != null && service.hasTrustStore());
+    }
+
     public CallbackHandlerFactory getSecretCallbackHandlerFactory() {
-        return secretCallbackFactory.getValue();
+        return secretCallbackFactory.getOptionalValue();
+    }
+
+    private static class RealmSubjectUserInfo implements SubjectUserInfo {
+
+        private final String userName;
+        private final Subject subject;
+
+        private RealmSubjectUserInfo(Subject subject) {
+            this.subject = subject;
+            Set<RealmUser> users = subject.getPrincipals(RealmUser.class);
+            userName = users.isEmpty() ? null : users.iterator().next().getName();
+        }
+
+        public String getUserName() {
+            return userName;
+        }
+
+        public Collection<Principal> getPrincipals() {
+            return subject.getPrincipals();
+        }
+
+        public Subject getSubject() {
+            return subject;
+        }
+
     }
 }

@@ -22,6 +22,8 @@
 
 package org.jboss.as.host.controller.operations;
 
+import static org.jboss.as.host.controller.HostControllerLogger.AS_ROOT_LOGGER;
+
 import java.security.AccessController;
 import java.util.List;
 import java.util.concurrent.Executors;
@@ -29,12 +31,15 @@ import java.util.concurrent.ThreadFactory;
 
 import org.jboss.as.controller.AbstractAddStepHandler;
 import org.jboss.as.controller.AttributeDefinition;
+import org.jboss.as.controller.ControlledProcessStateService;
 import org.jboss.as.controller.ModelController;
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
+import org.jboss.as.controller.RunningMode;
 import org.jboss.as.controller.ServiceVerificationHandler;
 import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
 import org.jboss.as.domain.controller.LocalHostControllerInfo;
+import org.jboss.as.domain.http.server.ConsoleMode;
 import org.jboss.as.domain.management.security.SecurityRealmService;
 import org.jboss.as.host.controller.DomainModelControllerService;
 import org.jboss.as.host.controller.HostControllerEnvironment;
@@ -43,7 +48,6 @@ import org.jboss.as.network.NetworkInterfaceBinding;
 import org.jboss.as.server.mgmt.HttpManagementService;
 import org.jboss.as.server.services.net.NetworkInterfaceService;
 import org.jboss.dmr.ModelNode;
-import org.jboss.logging.Logger;
 import org.jboss.msc.service.ServiceBuilder;
 import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceTarget;
@@ -84,11 +88,9 @@ public class HttpManagementAddHandler extends AbstractAddStepHandler {
     protected void performRuntime(OperationContext context, ModelNode operation, ModelNode model, ServiceVerificationHandler verificationHandler, List<ServiceController<?>> newControllers) throws OperationFailedException {
 
         populateHostControllerInfo(hostControllerInfo, context, model);
-
-        if (!context.isBooting()) {
-            installHttpManagementServices(context.getServiceTarget(), hostControllerInfo, environment, verificationHandler);
-        }
-        // else DomainModelControllerService does the service install
+        // DomainModelControllerService requires this service
+        final boolean onDemand = context.isBooting();
+        installHttpManagementServices(context.getRunningMode(), context.getServiceTarget(), hostControllerInfo, environment, verificationHandler, onDemand);
     }
 
     @Override
@@ -110,33 +112,34 @@ public class HttpManagementAddHandler extends AbstractAddStepHandler {
         hostControllerInfo.setHttpManagementSecurityRealm(realmNode.isDefined() ? realmNode.asString() : null);
     }
 
-    public static void installHttpManagementServices(final ServiceTarget serviceTarget, final LocalHostControllerInfo hostControllerInfo,
+    public static void installHttpManagementServices(final RunningMode runningMode, final ServiceTarget serviceTarget, final LocalHostControllerInfo hostControllerInfo,
                                                final HostControllerEnvironment environment,
-                                               final ServiceVerificationHandler verificationHandler) {
+                                               final ServiceVerificationHandler verificationHandler, boolean onDemand) {
 
         String interfaceName = hostControllerInfo.getHttpManagementInterface();
         int port = hostControllerInfo.getHttpManagementPort();
         int securePort = hostControllerInfo.getHttpManagementSecurePort();
         String securityRealm = hostControllerInfo.getHttpManagementSecurityRealm();
 
-        StringBuilder sb = new StringBuilder();
-        sb.append("creating http management service using network interface (").append(interfaceName).append(")");
-        if (port > -1) {
-            sb.append(" port (").append(port).append(")");
-        }
-        if (securePort > -1) {
-            sb.append(" securePort (").append(securePort).append(")");
-        }
-        Logger.getLogger("org.jboss.as").info(sb.toString());
+        AS_ROOT_LOGGER.creatingHttpManagementService(interfaceName, port, securePort);
 
         final ThreadFactory httpMgmtThreads = new JBossThreadFactory(new ThreadGroup("HttpManagementService-threads"),
                 Boolean.FALSE, null, "%G - %t", null, null, AccessController.getContext());
-        final HttpManagementService service = new HttpManagementService();
-        ServiceBuilder builder = serviceTarget.addService(HttpManagementService.SERVICE_NAME, service)
+
+        ConsoleMode consoleMode = ConsoleMode.CONSOLE;
+        if (runningMode == RunningMode.ADMIN_ONLY) {
+            consoleMode = ConsoleMode.ADMIN_ONLY;
+        } else if (!hostControllerInfo.isMasterDomainController()) {
+            consoleMode = ConsoleMode.SLAVE_HC;
+        }
+
+        final HttpManagementService service = new HttpManagementService(consoleMode, environment.getProductConfig().getConsoleSlot());
+        ServiceBuilder<?> builder = serviceTarget.addService(HttpManagementService.SERVICE_NAME, service)
                 .addDependency(
                         NetworkInterfaceService.JBOSS_NETWORK_INTERFACE.append(interfaceName),
                         NetworkInterfaceBinding.class, service.getInterfaceInjector())
                 .addDependency(DomainModelControllerService.SERVICE_NAME, ModelController.class, service.getModelControllerInjector())
+                .addDependency(ControlledProcessStateService.SERVICE_NAME, ControlledProcessStateService.class, service.getControlledProcessStateServiceInjector())
                 .addInjection(service.getPortInjector(), port)
                 .addInjection(service.getSecurePortInjector(), securePort)
                 .addInjection(service.getExecutorServiceInjector(), Executors.newCachedThreadPool(httpMgmtThreads));
@@ -144,13 +147,13 @@ public class HttpManagementAddHandler extends AbstractAddStepHandler {
         if (securityRealm != null) {
             builder.addDependency(SecurityRealmService.BASE_SERVICE_NAME.append(securityRealm), SecurityRealmService.class, service.getSecurityRealmInjector());
         } else {
-            Logger.getLogger("org.jboss.as").warn("No security realm defined for http management service, all access will be unrestricted.");
+            AS_ROOT_LOGGER.noSecurityRealmDefined();
         }
         if (verificationHandler != null) {
             builder.addListener(verificationHandler);
         }
 
-        builder.setInitialMode(ServiceController.Mode.ACTIVE)
+        builder.setInitialMode(onDemand ? ServiceController.Mode.ON_DEMAND : ServiceController.Mode.ACTIVE)
                 .install();
 
     }

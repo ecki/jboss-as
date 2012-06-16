@@ -43,6 +43,8 @@ import org.jboss.invocation.Interceptors;
 import org.jboss.invocation.proxy.MethodIdentifier;
 import org.jboss.invocation.proxy.ProxyFactory;
 import org.jboss.msc.service.ServiceName;
+import org.jboss.msc.value.Value;
+import org.jboss.msc.value.Values;
 
 import static org.jboss.as.server.deployment.Attachments.REFLECTION_INDEX;
 
@@ -162,8 +164,9 @@ public class ViewDescription {
      * Create the injection source
      *
      * @param serviceName The view service name
+     * @param viewClassLoader
      */
-    protected InjectionSource createInjectionSource(final ServiceName serviceName) {
+    protected InjectionSource createInjectionSource(final ServiceName serviceName, Value<ClassLoader> viewClassLoader) {
         return new ViewBindingInjectionSource(serviceName);
     }
 
@@ -206,7 +209,7 @@ public class ViewDescription {
             // Create view bindings
             final List<BindingConfiguration> bindingConfigurations = configuration.getBindingConfigurations();
             for (String bindingName : description.getBindingNames()) {
-                bindingConfigurations.add(new BindingConfiguration(bindingName, description.createInjectionSource(description.getServiceName())));
+                bindingConfigurations.add(new BindingConfiguration(bindingName, description.createInjectionSource(description.getServiceName(), Values.immediateValue(componentConfiguration.getModuleClassLoader()))));
             }
         }
     }
@@ -225,5 +228,33 @@ public class ViewDescription {
 
     public void setUseWriteReplace(final boolean useWriteReplace) {
         this.useWriteReplace = useWriteReplace;
+    }
+
+    @Override
+    public String toString() {
+        return "View of type " + viewClassName + " for " + componentDescription;
+    }
+
+    @Override
+    public boolean equals(final Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+
+        final ViewDescription that = (ViewDescription) o;
+
+        //compare the component description based on ==
+        if (componentDescription != that.componentDescription)
+            return false;
+        if (viewClassName != null ? !viewClassName.equals(that.viewClassName) : that.viewClassName != null)
+            return false;
+
+        return true;
+    }
+
+    @Override
+    public int hashCode() {
+        int result = viewClassName != null ? viewClassName.hashCode() : 0;
+        result = 31 * result + (componentDescription != null ? componentDescription.hashCode() : 0);
+        return result;
     }
 }

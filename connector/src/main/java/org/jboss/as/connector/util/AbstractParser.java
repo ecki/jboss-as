@@ -23,18 +23,17 @@ package org.jboss.as.connector.util;
 
 import static javax.xml.stream.XMLStreamConstants.END_ELEMENT;
 import static javax.xml.stream.XMLStreamConstants.START_ELEMENT;
-import static org.jboss.as.controller.parsing.ParseUtils.readStringAttributeElement;
 import static org.jboss.as.controller.parsing.ParseUtils.requireSingleAttribute;
 
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.Map;
 
-import javax.xml.stream.Location;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 
 import org.jboss.as.controller.SimpleAttributeDefinition;
+import org.jboss.as.controller.parsing.ParseUtils;
 import org.jboss.dmr.ModelNode;
 import org.jboss.jca.common.CommonBundle;
 import org.jboss.jca.common.CommonLogger;
@@ -66,13 +65,13 @@ public abstract class AbstractParser {
      * FIXME Comment this
      *
      * @param reader
-     * @return the string representing the raw eleemnt text
+     * @return the string representing the raw element text
      * @throws XMLStreamException
      */
     public String rawElementText(XMLStreamReader reader) throws XMLStreamException {
-        String elementtext = reader.getElementText();
-        elementtext = elementtext == null || elementtext.trim().length() == 0 ? null : elementtext.trim();
-        return elementtext;
+        String elementText = reader.getElementText();
+        elementText = elementText == null || elementText.trim().length() == 0 ? null : elementText.trim();
+        return elementText;
     }
 
     /**
@@ -80,7 +79,7 @@ public abstract class AbstractParser {
      *
      * @param reader
      * @param attributeName
-     * @return the string representing raw attribute textx
+     * @return the string representing raw attribute text
      */
     public String rawAttributeText(XMLStreamReader reader, String attributeName) {
         String attributeString = reader.getAttributeValue("", attributeName) == null ? null : reader.getAttributeValue(
@@ -91,7 +90,7 @@ public abstract class AbstractParser {
 
 
     protected void parseExtension(XMLExtendedStreamReader reader, String enclosingTag, final ModelNode operation,
-                                  final SimpleAttributeDefinition extensionclassname, final SimpleAttributeDefinition extensionProperties)
+                                  final SimpleAttributeDefinition extensionClassName, final SimpleAttributeDefinition extensionProperties)
             throws XMLStreamException, ParserException, ValidateException {
 
         String className = null;
@@ -100,10 +99,9 @@ public abstract class AbstractParser {
         for (Extension.Attribute attribute : Extension.Attribute.values()) {
             switch (attribute) {
                 case CLASS_NAME: {
-                    final Location location = reader.getLocation();
                     requireSingleAttribute(reader, attribute.getLocalName());
                     final String value = reader.getAttributeValue(0);
-                    extensionclassname.parseAndSetParameter(value, operation, location);
+                    extensionClassName.parseAndSetParameter(value, operation, reader);
                     break;
 
                 }
@@ -128,11 +126,18 @@ public abstract class AbstractParser {
                 case START_ELEMENT: {
                     switch (Extension.Tag.forName(reader.getLocalName())) {
                         case CONFIG_PROPERTY: {
-                            final Location location = reader.getLocation();
                             requireSingleAttribute(reader, "name");
                             final String name = reader.getAttributeValue(0);
                             String value = rawElementText(reader);
-                            ModelNode node = extensionProperties.parse(value, location);
+                            final String trimmed = value == null ? null : value.trim();
+                            ModelNode node = new ModelNode();
+                            if (trimmed != null ) {
+                                if (extensionProperties.isAllowExpression()) {
+                                    node = ParseUtils.parsePossibleExpression(trimmed);
+                                } else {
+                                    node = new ModelNode().set(trimmed);
+                                }
+                            }
                             operation.get(extensionProperties.getName(), name).set(node);
                             break;
                         }

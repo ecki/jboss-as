@@ -31,13 +31,13 @@ import java.io.IOException;
 import java.util.Arrays;
 
 /**
- * DomainClientProtocol header used to send the required information to establish a request with a remote host controller.  The primary
+ * ManagementProtocol header used to send the required information to establish a request with a remote controller.  The primary
  * pieces of the request are the protocol signature and the protocol version being used.
  *
  * @author John Bailey
  * @author <a href="kabir.khan@jboss.com">Kabir Khan</a>
  */
-abstract class ManagementProtocolHeader {
+public abstract class ManagementProtocolHeader {
 
     private int version;
 
@@ -77,7 +77,7 @@ abstract class ManagementProtocolHeader {
      *
      * @return the protocol byte identifying the type
      */
-    abstract byte getType();
+    public abstract byte getType();
 
 
     /**
@@ -94,12 +94,18 @@ abstract class ManagementProtocolHeader {
         }
     }
 
+    protected <T extends ManagementProtocolHeader> T cast(Class<T> expected) {
+        return expected.cast(this);
+    }
 
     /**
      * Parses the input stream to read the header
      *
+     * @param input data input to read from
+     * @return the parsed protocol header
+     * @throws IOException
      */
-    static ManagementProtocolHeader parse(DataInput input) throws IOException {
+    public static ManagementProtocolHeader parse(DataInput input) throws IOException {
         validateSignature(input);
         expectHeader(input, ManagementProtocol.VERSION_FIELD);
         int version = input.readInt();

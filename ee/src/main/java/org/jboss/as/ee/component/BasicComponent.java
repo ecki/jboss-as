@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.jboss.as.ee.component.interceptors.InvocationType;
 import org.jboss.as.naming.ManagedReference;
 import org.jboss.as.naming.ValueManagedReference;
 import org.jboss.as.naming.context.NamespaceContextSelector;
@@ -37,6 +38,7 @@ import org.jboss.invocation.InterceptorContext;
 import org.jboss.invocation.InterceptorFactory;
 import org.jboss.invocation.InterceptorFactoryContext;
 import org.jboss.invocation.SimpleInterceptorFactoryContext;
+import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.service.StopContext;
 import org.jboss.msc.value.ImmediateValue;
 
@@ -56,6 +58,7 @@ public class BasicComponent implements Component {
     private final InterceptorFactory preDestroy;
     private final Map<Method, InterceptorFactory> interceptorFactoryMap;
     private final NamespaceContextSelector namespaceContextSelector;
+    private final ServiceName createServiceName;
 
     private volatile boolean gate;
     private final AtomicBoolean stopping = new AtomicBoolean();
@@ -72,14 +75,14 @@ public class BasicComponent implements Component {
         preDestroy = createService.getPreDestroy();
         interceptorFactoryMap = createService.getComponentInterceptors();
         namespaceContextSelector = createService.getNamespaceContextSelector();
+        createServiceName = createService.getServiceName();
     }
 
     /**
      * {@inheritDoc}
      */
     public ComponentInstance createInstance() {
-        waitForComponentStart();
-        BasicComponentInstance instance = constructComponentInstance(null);
+        BasicComponentInstance instance = constructComponentInstance(null, true, new SimpleInterceptorFactoryContext());
         return instance;
     }
 
@@ -89,8 +92,7 @@ public class BasicComponent implements Component {
      * @return The new ComponentInstance
      */
     public ComponentInstance createInstance(Object instance) {
-        waitForComponentStart();
-        BasicComponentInstance obj = constructComponentInstance(new ValueManagedReference(new ImmediateValue<Object>(instance)));
+        BasicComponentInstance obj = constructComponentInstance(new ValueManagedReference(new ImmediateValue<Object>(instance)), true, new SimpleInterceptorFactoryContext());
         return obj;
     }
 
@@ -121,9 +123,9 @@ public class BasicComponent implements Component {
      * @param instance An instance to be wrapped, or null if a new instance should be created
      * @return the component instance
      */
-    protected final BasicComponentInstance constructComponentInstance(ManagedReference instance) {
+    protected BasicComponentInstance constructComponentInstance(ManagedReference instance, boolean invokePostConstruct, InterceptorFactoryContext context) {
+        waitForComponentStart();
         // Interceptor factory context
-        final SimpleInterceptorFactoryContext context = new SimpleInterceptorFactoryContext();
         context.getContextData().put(Component.class, this);
 
         // Create the post-construct interceptors for the ComponentInstance
@@ -131,6 +133,7 @@ public class BasicComponent implements Component {
         // create the pre-destroy interceptors
         final Interceptor componentInstancePreDestroyInterceptor = this.getPreDestroy().create(context);
 
+        @SuppressWarnings("unchecked")
         final AtomicReference<ManagedReference> instanceReference = (AtomicReference<ManagedReference>) context.getContextData().get(BasicComponentInstance.INSTANCE_KEY);
 
         instanceReference.set(instance);
@@ -146,33 +149,44 @@ public class BasicComponent implements Component {
         // create the component instance
         final BasicComponentInstance basicComponentInstance = this.instantiateComponentInstance(instanceReference, componentInstancePreDestroyInterceptor, interceptorMap, context);
 
-        // now invoke the postconstruct interceptors
-        final InterceptorContext interceptorContext = new InterceptorContext();
-        interceptorContext.putPrivateData(Component.class, this);
-        interceptorContext.putPrivateData(ComponentInstance.class, basicComponentInstance);
-        interceptorContext.setContextData(new HashMap<String, Object>());
+        if (invokePostConstruct) {
+            // now invoke the postconstruct interceptors
+            final InterceptorContext interceptorContext = new InterceptorContext();
+            interceptorContext.putPrivateData(Component.class, this);
+            interceptorContext.putPrivateData(ComponentInstance.class, basicComponentInstance);
+            interceptorContext.putPrivateData(InvocationType.class, InvocationType.POST_CONSTRUCT);
+            interceptorContext.setContextData(new HashMap<String, Object>());
 
-
-
-        try {
-            componentInstancePostConstructInterceptor.processInvocation(interceptorContext);
-        } catch (Exception e) {
-            throw MESSAGES.componentConstructionFailure(e);
+            try {
+                componentInstancePostConstructInterceptor.processInvocation(interceptorContext);
+            } catch (Exception e) {
+                throw MESSAGES.componentConstructionFailure(e);
+            }
         }
+        componentInstanceCreated(basicComponentInstance, context);
         // return the component instance
         return basicComponentInstance;
+    }
+
+    /**
+     * Method that can be overridden to perform setup on the instance after it has been created
+     * @param basicComponentInstance The component instance
+     * @param context The interceptor factory context used to construct the instance
+     */
+    protected void componentInstanceCreated(final BasicComponentInstance basicComponentInstance, final InterceptorFactoryContext context) {
+
     }
 
 
     /**
      * Responsible for instantiating the {@link BasicComponentInstance}. This method is *not* responsible for
      * handling the post construct activities like injection and lifecycle invocation. That is handled by
-     * {@link #constructComponentInstance(ManagedReference)}.
+     * {@link #constructComponentInstance(ManagedReference, boolean, InterceptorFactoryContext)}.
      * <p/>
      *
-     * @return
+     * @return the component instance
      */
-    protected BasicComponentInstance instantiateComponentInstance(final AtomicReference<ManagedReference> instanceReference, final Interceptor preDestroyInterceptor, final Map<Method, Interceptor> methodInterceptors, final InterceptorFactoryContext interceptorContext) {
+    protected BasicComponentInstance instantiateComponentInstance(final AtomicReference<ManagedReference> instanceReference, final Interceptor preDestroyInterceptor, final Map<Method, Interceptor> methodInterceptors, final InterceptorFactoryContext context) {
         // create and return the component instance
         return new BasicComponentInstance(this, instanceReference, preDestroyInterceptor, methodInterceptors);
     }
@@ -193,6 +207,10 @@ public class BasicComponent implements Component {
      */
     public String getComponentName() {
         return componentName;
+    }
+
+    public ServiceName getCreateServiceName() {
+        return createServiceName;
     }
 
     /**
@@ -220,6 +238,8 @@ public class BasicComponent implements Component {
             //TODO: only run this if there is no instances
             //TODO: trigger destruction of all component instances
             //TODO: this has lots of potential for race conditions unless we are careful
+            //TODO: using stopContext.asynchronous() and then executing synchronously is pointless.
+            // Use org.jboss.as.server.Services#addServerExecutorDependency to inject an executor to do this async
             stopContext.complete();
         }
     }
@@ -252,5 +272,9 @@ public class BasicComponent implements Component {
     @Override
     public NamespaceContextSelector getNamespaceContextSelector() {
         return namespaceContextSelector;
+    }
+
+    public static ServiceName serviceNameOf(final ServiceName deploymentUnitServiceName, final String componentName) {
+        return deploymentUnitServiceName.append("component").append(componentName);
     }
 }

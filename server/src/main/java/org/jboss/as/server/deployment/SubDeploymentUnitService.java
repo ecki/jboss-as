@@ -24,9 +24,12 @@ package org.jboss.as.server.deployment;
 
 import org.jboss.as.controller.ServiceVerificationHandler;
 import org.jboss.as.controller.registry.ImmutableManagementResourceRegistration;
+import org.jboss.as.controller.registry.ManagementResourceRegistration;
 import org.jboss.as.controller.registry.Resource;
+import org.jboss.as.server.ServerMessages;
 import org.jboss.as.server.deployment.module.ModuleSpecification;
 import org.jboss.as.server.deployment.module.ResourceRoot;
+import org.jboss.as.server.services.security.AbstractVaultReader;
 import org.jboss.msc.service.ServiceRegistry;
 
 /**
@@ -38,17 +41,21 @@ public class SubDeploymentUnitService extends AbstractDeploymentUnitService {
     private final ResourceRoot deploymentRoot;
     private final DeploymentUnit parent;
     private final ImmutableManagementResourceRegistration registration;
+    private final ManagementResourceRegistration mutableRegistration;
     private final ServiceVerificationHandler serviceVerificationHandler;
     private Resource resource;
+    private final AbstractVaultReader vaultReader;
 
-    public SubDeploymentUnitService(ResourceRoot deploymentRoot, DeploymentUnit parent, ImmutableManagementResourceRegistration registration, Resource resource, final ServiceVerificationHandler serviceVerificationHandler) {
+    public SubDeploymentUnitService(ResourceRoot deploymentRoot, DeploymentUnit parent, ImmutableManagementResourceRegistration registration, final ManagementResourceRegistration mutableRegistration, Resource resource, final ServiceVerificationHandler serviceVerificationHandler, final AbstractVaultReader vaultReader) {
         this.serviceVerificationHandler = serviceVerificationHandler;
-        if (deploymentRoot == null) throw new IllegalArgumentException("Deployment root is required");
+        if (deploymentRoot == null) throw ServerMessages.MESSAGES.deploymentRootRequired();
         this.deploymentRoot = deploymentRoot;
-        if (parent == null) throw new IllegalArgumentException("Sub-deployments require a parent deployment unit");
+        if (parent == null) throw ServerMessages.MESSAGES.subdeploymentsRequireParent();
         this.parent = parent;
         this.registration = registration;
+        this.mutableRegistration = mutableRegistration;
         this.resource = resource;
+        this.vaultReader = vaultReader;
     }
 
     protected DeploymentUnit createAndInitializeDeploymentUnit(ServiceRegistry registry) {
@@ -57,8 +64,10 @@ public class SubDeploymentUnitService extends AbstractDeploymentUnitService {
         deploymentUnit.putAttachment(Attachments.DEPLOYMENT_ROOT, deploymentRoot);
         deploymentUnit.putAttachment(Attachments.MODULE_SPECIFICATION, new ModuleSpecification());
         deploymentUnit.putAttachment(DeploymentModelUtils.REGISTRATION_ATTACHMENT, registration);
+        deploymentUnit.putAttachment(DeploymentModelUtils.MUTABLE_REGISTRATION_ATTACHMENT, mutableRegistration);
         deploymentUnit.putAttachment(DeploymentModelUtils.DEPLOYMENT_RESOURCE, resource);
         deploymentUnit.putAttachment(Attachments.SERVICE_VERIFICATION_HANDLER, serviceVerificationHandler);
+        deploymentUnit.putAttachment(Attachments.VAULT_READER_ATTACHMENT_KEY, vaultReader);
         this.resource = null;
         return deploymentUnit;
     }

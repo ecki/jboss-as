@@ -74,6 +74,7 @@ public interface Constants {
     String MAPPING_MANAGER_CLASS_NAME = "mapping-manager-class-name";
     String MAPPING_MODULE = "mapping-module";
     String MAPPING_MODULES = "mapping-modules";
+    String MODULE = "module";
     String MODULE_OPTIONS = "module-options";
     String NAME = "name";
     String OPTIONAL = "optional";
@@ -112,7 +113,7 @@ public interface Constants {
     String VALUE = "value";
     String VAULT = "vault";
     String VAULT_OPTION = "vault-option";
-    String OPTIONS = "options";
+    String VAULT_OPTIONS = "vault-options";
     String LIST_CACHED_PRINCIPALS = "list-cached-principals";
     String FLUSH_CACHE = "flush-cache";
     String PRINCIPAL_ARGUMENT = "principal";

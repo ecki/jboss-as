@@ -23,29 +23,41 @@
 package org.jboss.as.domain.http.server.security;
 
 import static org.jboss.as.domain.http.server.Constants.AUTHORIZATION_HEADER;
+import static org.jboss.as.domain.http.server.Constants.INTERNAL_SERVER_ERROR;
 import static org.jboss.as.domain.http.server.Constants.UNAUTHORIZED;
 import static org.jboss.as.domain.http.server.Constants.VIA;
 import static org.jboss.as.domain.http.server.Constants.WWW_AUTHENTICATE_HEADER;
 import static org.jboss.as.domain.http.server.HttpServerLogger.ROOT_LOGGER;
 import static org.jboss.as.domain.http.server.HttpServerMessages.MESSAGES;
 
-import javax.security.auth.callback.Callback;
-import javax.security.auth.callback.CallbackHandler;
-import javax.security.auth.callback.NameCallback;
-import javax.security.auth.callback.PasswordCallback;
-import javax.security.auth.callback.UnsupportedCallbackException;
-import javax.security.sasl.RealmCallback;
 import java.io.IOException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.security.Principal;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
-import org.jboss.as.domain.management.security.UserNotFoundException;
+import javax.net.ssl.SSLPeerUnverifiedException;
+import javax.net.ssl.SSLSession;
+import javax.security.auth.Subject;
+import javax.security.auth.callback.Callback;
+import javax.security.auth.callback.NameCallback;
+import javax.security.auth.callback.PasswordCallback;
+import javax.security.sasl.RealmCallback;
+
+import org.jboss.as.controller.security.SubjectUserInfo;
+import org.jboss.as.domain.management.AuthenticationMechanism;
+import org.jboss.as.domain.management.AuthorizingCallbackHandler;
+import org.jboss.as.domain.management.SecurityRealm;
 import org.jboss.com.sun.net.httpserver.Authenticator;
 import org.jboss.com.sun.net.httpserver.Headers;
 import org.jboss.com.sun.net.httpserver.HttpExchange;
+import org.jboss.com.sun.net.httpserver.HttpExchange.AttributeScope;
 import org.jboss.com.sun.net.httpserver.HttpPrincipal;
+import org.jboss.com.sun.net.httpserver.HttpsExchange;
 import org.jboss.sasl.callback.DigestHashCallback;
 import org.jboss.sasl.util.HexConverter;
 
@@ -56,11 +68,16 @@ import org.jboss.sasl.util.HexConverter;
  */
 public class DigestAuthenticator extends Authenticator {
 
-    private final NonceFactory nonceFactory = new NonceFactory();
+    private static final String USE_CONNECTION_LOCAL_NONCES_PROPERTY = "org.jboss.domain.http.USE_LOCAL_NONCES";
 
-    private final CallbackHandler callbackHandler;
+    private static final boolean USE_CONNECTION_LOCAL_NONCES = SecurityActions.getBoolean(USE_CONNECTION_LOCAL_NONCES_PROPERTY);
 
-    private final String realm;
+    private final NonceFactory theNonceFactory = new NonceFactory();
+
+    private final SecurityRealm securityRealm;
+    private final String realmName;
+    private final ThreadLocal<AuthorizingCallbackHandler> callbackHandler = new ThreadLocal<AuthorizingCallbackHandler>();
+
     private final boolean preDigested;
 
     private static final byte COLON = ':';
@@ -72,16 +89,77 @@ public class DigestAuthenticator extends Authenticator {
     private static final String USERNAME = "username";
     private static final String URI = "uri";
 
-    public DigestAuthenticator(CallbackHandler callbackHandler, String realm, boolean preDigested) {
-        this.callbackHandler = callbackHandler;
-        this.realm = realm;
+    public DigestAuthenticator(SecurityRealm securityRealm, boolean preDigested) {
+        this.securityRealm = securityRealm;
+        this.realmName = securityRealm.getName();
         this.preDigested = preDigested;
     }
 
     @Override
     public Result authenticate(HttpExchange httpExchange) {
+        Subject subject = (Subject) httpExchange.getAttribute(Subject.class.getName(), AttributeScope.CONNECTION);
+        // If we have a cached Subject with a HttpPrincipal this connection is already authenticated so no further action
+        // required.
+        if (subject != null) {
+            Set<HttpPrincipal> httpPrincipals = subject.getPrincipals(HttpPrincipal.class);
+            if (httpPrincipals.size() > 0) {
+                return new Success(httpPrincipals.iterator().next());
+            }
+        }
+
+        callbackHandler.set(securityRealm.getAuthorizingCallbackHandler(AuthenticationMechanism.DIGEST));
+        try {
+            return _authenticate(httpExchange);
+        } finally {
+            callbackHandler.set(null);
+        }
+    }
+
+    private Result _authenticate(HttpExchange httpExchange) {
+        Result response = null;
+        // If we already have a Principal from the SSLSession no need to continue with
+        // username / password authentication.
+        if (httpExchange instanceof HttpsExchange) {
+            HttpsExchange httpsExch = (HttpsExchange) httpExchange;
+            SSLSession session = httpsExch.getSSLSession();
+            if (session != null) {
+                try {
+                    Principal p = session.getPeerPrincipal();
+
+                    response = new Success(new HttpPrincipal(p.getName(), realmName));
+                } catch (SSLPeerUnverifiedException e) {
+                }
+            }
+        }
+
+        if (response == null) {
+            response = digestAuth(httpExchange);
+        }
+
+        if (response instanceof Success) {
+            // For this method to have been called a Subject with HttpPrincipal was not found within the HttpExchange so now
+            // create a new one.
+            HttpPrincipal principal = ((Success) response).getPrincipal();
+
+            try {
+                Collection<Principal> principalCol = new HashSet<Principal>();
+                principalCol.add(principal);
+                SubjectUserInfo userInfo = callbackHandler.get().createSubjectUserInfo(principalCol);
+                httpExchange.setAttribute(Subject.class.getName(), userInfo.getSubject(), AttributeScope.CONNECTION);
+
+            } catch (IOException e) {
+                ROOT_LOGGER.debug("Unable to create SubjectUserInfo", e);
+                response = new Authenticator.Failure(INTERNAL_SERVER_ERROR);
+            }
+        }
+
+        return response;
+    }
+
+    private Result digestAuth(HttpExchange httpExchange) {
+
         // If authentication has already completed for this connection re-use it.
-        DigestContext context = getOrCreateNegotiationContext(httpExchange);
+        DigestContext context = getOrCreateNegotiationContext(httpExchange, theNonceFactory, false);
         if (context.isAuthenticated()) {
             return new Authenticator.Success(context.getPrincipal());
         }
@@ -91,7 +169,7 @@ public class DigestAuthenticator extends Authenticator {
         if (requestHeaders.containsKey(AUTHORIZATION_HEADER) == false) {
             Headers responseHeaders = httpExchange.getResponseHeaders();
 
-            responseHeaders.add(WWW_AUTHENTICATE_HEADER, CHALLENGE + " " + createChallenge(false));
+            responseHeaders.add(WWW_AUTHENTICATE_HEADER, CHALLENGE + " " + createChallenge(context, realmName, false));
 
             return new Authenticator.Retry(UNAUTHORIZED);
         }
@@ -104,22 +182,21 @@ public class DigestAuthenticator extends Authenticator {
         Map<String, String> challengeParameters = parseDigestChallenge(challenge);
 
         // Validate Challenge, expect one of 3 responses VALID, INVALID, STALE
-
         HttpPrincipal principal = validateUser(httpExchange, challengeParameters);
 
         // INVALID - Username / Password verification failed - Nonce is irrelevant.
         if (principal == null) {
             if (challengeParameters.containsKey(NONCE)) {
-                nonceFactory.useNonce(challengeParameters.get(NONCE));
+                context.useNonce(challengeParameters.get(NONCE));
             }
 
             Headers responseHeaders = httpExchange.getResponseHeaders();
-            responseHeaders.add(WWW_AUTHENTICATE_HEADER, CHALLENGE + " " + createChallenge(false));
+            responseHeaders.add(WWW_AUTHENTICATE_HEADER, CHALLENGE + " " + createChallenge(context, realmName, false));
             return new Authenticator.Retry(UNAUTHORIZED);
         }
 
         // VALID - Verified username and password, Nonce is correct.
-        if (nonceFactory.useNonce(challengeParameters.get(NONCE))) {
+        if (context.useNonce(challengeParameters.get(NONCE))) {
             context.principal = principal;
 
             return new Authenticator.Success(principal);
@@ -127,7 +204,7 @@ public class DigestAuthenticator extends Authenticator {
 
         // STALE - Verification of username and password succeeded but Nonce now stale.
         Headers responseHeaders = httpExchange.getResponseHeaders();
-        responseHeaders.add(WWW_AUTHENTICATE_HEADER, CHALLENGE + " " + createChallenge(true));
+        responseHeaders.add(WWW_AUTHENTICATE_HEADER, CHALLENGE + " " + createChallenge(context, realmName, true));
         return new Authenticator.Retry(UNAUTHORIZED);
     }
 
@@ -148,16 +225,12 @@ public class DigestAuthenticator extends Authenticator {
 
         // Step 2 - Call CallbackHandler
         try {
-            callbackHandler.handle(callbacks);
-        } catch (UserNotFoundException e) {
+            callbackHandler.get().handle(callbacks);
+        } catch (Exception e) {
             if (ROOT_LOGGER.isDebugEnabled()) {
-                ROOT_LOGGER.debug(e.getMessage());
+                ROOT_LOGGER.debug("Callback handler failed", e);
             }
             return null;
-        } catch (IOException e) {
-            throw MESSAGES.invalidCallbackHandler();
-        } catch (UnsupportedCallbackException e) {
-            throw MESSAGES.invalidCallbackHandler();
         }
 
         // TODO - Verify that a password was set (Depending on if multiple CallbackHandlers are supported)
@@ -209,11 +282,10 @@ public class DigestAuthenticator extends Authenticator {
         return null;
     }
 
-
-    private String createChallenge(boolean stale) {
+    public static String createChallenge(DigestContext context, String realm, boolean stale) {
         StringBuilder challenge = new StringBuilder();
         challenge.append("realm=\"").append(realm).append("\",");
-        challenge.append("nonce=\"").append(nonceFactory.createNonce()).append("\"");
+        challenge.append("nonce=\"").append(context.createNonce()).append("\"");
         if (stale == true) {
             challenge.append(",stale=true");
         }
@@ -352,16 +424,18 @@ public class DigestAuthenticator extends Authenticator {
     }
 
 
-    private DigestContext getOrCreateNegotiationContext(HttpExchange httpExchange) {
+    public static DigestContext getOrCreateNegotiationContext(HttpExchange httpExchange, NonceFactory nonceFactory, boolean forceCreate) {
         Headers headers = httpExchange.getRequestHeaders();
         boolean proxied = headers.containsKey(VIA);
 
-        if (proxied) {
-            return new DigestContext();
+        if (proxied || forceCreate) {
+            // If proxied we have to assume connections could be re-used so need a fresh DigestContext
+            // each time and use of the central nonce store.
+            return new DigestContext(nonceFactory, false);
         } else {
             DigestContext context = (DigestContext) httpExchange.getAttribute(DigestContext.KEY, HttpExchange.AttributeScope.CONNECTION);
             if (context == null) {
-                context = new DigestContext();
+                context = new DigestContext(nonceFactory, USE_CONNECTION_LOCAL_NONCES);
                 httpExchange.setAttribute(DigestContext.KEY, context, HttpExchange.AttributeScope.CONNECTION);
             }
             return context;
@@ -369,11 +443,21 @@ public class DigestAuthenticator extends Authenticator {
 
     }
 
-    private class DigestContext {
+    public static class DigestContext {
 
         private static final String KEY = "DIGEST_CONTEXT";
 
+        private final NonceFactory theNonceFactory;
+
+        private final boolean localStore;
+
+        DigestContext(NonceFactory theNonceFactory, final boolean localStore) {
+            this.localStore = localStore;
+            this.theNonceFactory = theNonceFactory;
+        }
+
         private HttpPrincipal principal = null;
+        private String nonce = null;
 
         boolean isAuthenticated() {
             return principal != null;
@@ -383,32 +467,25 @@ public class DigestAuthenticator extends Authenticator {
             return principal;
         }
 
-    }
-
-    // TODO - Will do something cleaner with collections.
-    public static boolean requiredCallbacksSupported(Class[] callbacks) {
-        if (contains(NameCallback.class, callbacks) == false) {
-            return false;
-        }
-        if (contains(RealmCallback.class, callbacks) == false) {
-            return false;
+        String createNonce() {
+            String nonce = theNonceFactory.createNonce(localStore == false);
+            if (localStore) {
+                this.nonce = nonce;
+            }
+            return nonce;
         }
 
-        if (contains(PasswordCallback.class, callbacks) == false &&
-                contains(DigestHashCallback.class, callbacks) == false) {
-            return false;
-        }
-
-        return true;
-    }
-
-    private static boolean contains(Class clazz, Class[] classes) {
-        for (Class current : classes) {
-            if (current.equals(clazz)) {
-                return true;
+        public boolean useNonce(String nonceToUse) {
+            if (localStore) {
+                if (nonceToUse.equals(nonce)) {
+                    nonce = null;
+                    return true;
+                }
+                return false;
+            } else {
+                return theNonceFactory.useNonce(nonceToUse);
             }
         }
-        return false;
     }
 
 }

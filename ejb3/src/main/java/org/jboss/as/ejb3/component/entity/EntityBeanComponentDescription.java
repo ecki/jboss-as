@@ -25,9 +25,12 @@ import java.lang.reflect.Method;
 
 import javax.ejb.TransactionManagementType;
 
+import org.jboss.as.ee.component.Component;
 import org.jboss.as.ee.component.ComponentConfiguration;
 import org.jboss.as.ee.component.ComponentConfigurator;
 import org.jboss.as.ee.component.ComponentDescription;
+import org.jboss.as.ee.component.DependencyConfigurator;
+import org.jboss.as.ee.component.EEModuleDescription;
 import org.jboss.as.ee.component.ViewConfiguration;
 import org.jboss.as.ee.component.ViewConfigurator;
 import org.jboss.as.ee.component.ViewDescription;
@@ -37,10 +40,13 @@ import org.jboss.as.ejb3.component.EJBComponentDescription;
 import org.jboss.as.ejb3.component.EJBViewDescription;
 import org.jboss.as.ejb3.component.EjbHomeViewDescription;
 import org.jboss.as.ejb3.component.MethodIntf;
+import org.jboss.as.ejb3.component.entity.interceptors.EntityBeanAssociatingInterceptor;
 import org.jboss.as.ejb3.component.entity.interceptors.EntityBeanReentrancyInterceptor;
 import org.jboss.as.ejb3.component.entity.interceptors.EntityBeanRemoveInterceptor;
 import org.jboss.as.ejb3.component.entity.interceptors.EntityBeanSynchronizationInterceptor;
 import org.jboss.as.ejb3.component.interceptors.CurrentInvocationContextInterceptor;
+import org.jboss.as.ejb3.component.pool.PoolConfig;
+import org.jboss.as.ejb3.component.pool.PoolConfigService;
 import org.jboss.as.ejb3.deployment.EjbJarDescription;
 import org.jboss.as.ejb3.tx.CMTTxInterceptor;
 import org.jboss.as.ejb3.tx.TimerCMTTxInterceptor;
@@ -48,7 +54,11 @@ import org.jboss.as.server.deployment.DeploymentPhaseContext;
 import org.jboss.as.server.deployment.DeploymentUnitProcessingException;
 import org.jboss.as.server.deployment.reflect.ClassIndex;
 import org.jboss.invocation.InterceptorFactory;
+import org.jboss.metadata.ejb.spec.EntityBeanMetaData;
 import org.jboss.metadata.ejb.spec.PersistenceType;
+import org.jboss.modules.ModuleLoader;
+import org.jboss.msc.service.Service;
+import org.jboss.msc.service.ServiceBuilder;
 import org.jboss.msc.service.ServiceName;
 
 /**
@@ -61,14 +71,16 @@ public class EntityBeanComponentDescription extends EJBComponentDescription {
     private PersistenceType persistenceType;
     private boolean reentrant;
     private String primaryKeyType;
+    private String poolConfigName;
 
-    public EntityBeanComponentDescription(final String componentName, final String componentClassName, final EjbJarDescription ejbJarDescription, final ServiceName deploymentUnitServiceName) {
-        super(componentName, componentClassName, ejbJarDescription, deploymentUnitServiceName);
+    public EntityBeanComponentDescription(final String componentName, final String componentClassName, final EjbJarDescription ejbJarDescription, final ServiceName deploymentUnitServiceName, final EntityBeanMetaData descriptorData) {
+        super(componentName, componentClassName, ejbJarDescription, deploymentUnitServiceName, descriptorData);
         addSynchronizationInterceptor();
         getConfigurators().add(new ComponentConfigurator() {
             @Override
             public void configure(final DeploymentPhaseContext context, final ComponentDescription description, final ComponentConfiguration configuration) throws DeploymentUnitProcessingException {
                 configuration.addPostConstructInterceptor(EntityBeanInterceptors.POST_CONSTRUCT, InterceptorOrder.ComponentPostConstruct.SETUP_CONTEXT);
+                configuration.addTimeoutViewInterceptor(EntityBeanAssociatingInterceptor.FACTORY, InterceptorOrder.View.ASSOCIATING_INTERCEPTOR);
             }
         });
         addRemoveInterceptor();
@@ -90,7 +102,14 @@ public class EntityBeanComponentDescription extends EJBComponentDescription {
 
     @Override
     protected void addCurrentInvocationContextFactory() {
-
+        // add the current invocation context interceptor at the beginning of the component instance post construct chain
+        this.getConfigurators().add(new ComponentConfigurator() {
+            @Override
+            public void configure(DeploymentPhaseContext context, ComponentDescription description, ComponentConfiguration configuration) throws DeploymentUnitProcessingException {
+                configuration.addPostConstructInterceptor(CurrentInvocationContextInterceptor.FACTORY, InterceptorOrder.ComponentPostConstruct.EJB_SESSION_CONTEXT_INTERCEPTOR);
+                configuration.addPreDestroyInterceptor(CurrentInvocationContextInterceptor.FACTORY, InterceptorOrder.ComponentPreDestroy.EJB_SESSION_CONTEXT_INTERCEPTOR);
+            }
+        });
     }
 
     @Override
@@ -106,20 +125,21 @@ public class EntityBeanComponentDescription extends EJBComponentDescription {
 
 
     @Override
-    public final ComponentConfiguration createConfiguration(final ClassIndex classIndex, final ClassLoader moduleClassLoder) {
-        final ComponentConfiguration configuration = createEntityBeanConfiguration(classIndex, moduleClassLoder);
+    public final ComponentConfiguration createConfiguration(final ClassIndex classIndex, final ClassLoader moduleClassLoader, final ModuleLoader moduleLoader) {
+        final ComponentConfiguration configuration = createEntityBeanConfiguration(classIndex, moduleClassLoader, moduleLoader);
+        configuration.getCreateDependencies().add(new ConfigInjectingConfigurator(this));
         // add the timer interceptor
         getConfigurators().add(new ComponentConfigurator() {
             @Override
             public void configure(final DeploymentPhaseContext context, final ComponentDescription description, final ComponentConfiguration configuration) throws DeploymentUnitProcessingException {
-                configuration.addTimeoutInterceptor(TimerCMTTxInterceptor.FACTORY, InterceptorOrder.Component.COMPONENT_CMT_INTERCEPTOR);
+                configuration.addTimeoutViewInterceptor(TimerCMTTxInterceptor.FACTORY, InterceptorOrder.View.CMT_TRANSACTION_INTERCEPTOR);
             }
         });
         return configuration;
     }
 
-    protected ComponentConfiguration createEntityBeanConfiguration(final ClassIndex classIndex, final ClassLoader moduleClassLoder) {
-        final ComponentConfiguration configuration = new ComponentConfiguration(this, classIndex, moduleClassLoder);
+    protected ComponentConfiguration createEntityBeanConfiguration(final ClassIndex classIndex, final ClassLoader moduleClassLoader, final ModuleLoader moduleLoader) {
+        final ComponentConfiguration configuration = new ComponentConfiguration(this, classIndex, moduleClassLoader, moduleLoader);
         // setup the component create service
         configuration.setComponentCreateServiceFactory(EntityBeanComponentCreateService.FACTORY);
         return configuration;
@@ -153,11 +173,18 @@ public class EntityBeanComponentDescription extends EJBComponentDescription {
             view.getConfigurators().add(new ViewConfigurator() {
                 @Override
                 public void configure(final DeploymentPhaseContext context, final ComponentConfiguration componentConfiguration, final ViewDescription description, final ViewConfiguration configuration) throws DeploymentUnitProcessingException {
-                    configuration.setViewInstanceFactory(getRemoteViewInstanceFactory(componentConfiguration.getApplicationName(), componentConfiguration.getModuleName(), componentConfiguration.getComponentDescription().getModuleDescription().getDistinctName(), componentConfiguration.getComponentName()));
+                    final EEModuleDescription moduleDescription = componentConfiguration.getComponentDescription().getModuleDescription();
+                    final String appName = moduleDescription.getEarApplicationName() == null ? "" : moduleDescription.getEarApplicationName();
+                    configuration.setViewInstanceFactory(getRemoteViewInstanceFactory(appName, componentConfiguration.getModuleName(), moduleDescription.getDistinctName(), componentConfiguration.getComponentName()));
                 }
             });
         }
 
+    }
+
+    @Override
+    public boolean isEntity() {
+        return true;
     }
 
     protected EntityBeanObjectViewConfigurator getObjectViewConfigurator() {
@@ -216,6 +243,41 @@ public class EntityBeanComponentDescription extends EJBComponentDescription {
     @Override
     public boolean isTimerServiceApplicable() {
         return true;
+    }
+
+    public String getPoolConfigName() {
+        return poolConfigName;
+    }
+
+    public void setPoolConfigName(final String poolConfigName) {
+        this.poolConfigName = poolConfigName;
+    }
+
+    private class ConfigInjectingConfigurator implements DependencyConfigurator<Service<Component>> {
+
+        private final EntityBeanComponentDescription entityComponentDescription;
+
+        ConfigInjectingConfigurator(final EntityBeanComponentDescription entityComponentDescription) {
+            this.entityComponentDescription = entityComponentDescription;
+        }
+
+        @Override
+        public void configureDependency(ServiceBuilder<?> serviceBuilder, Service<Component> service) throws DeploymentUnitProcessingException {
+            final EntityBeanComponentCreateService entityBeanComponentCreateService = (EntityBeanComponentCreateService) service;
+            final String poolName = this.entityComponentDescription.getPoolConfigName();
+            // if no pool name has been explicitly set, then inject the optional "default entity bean pool config"
+            if (poolName == null) {
+                serviceBuilder.addDependency(ServiceBuilder.DependencyType.OPTIONAL, PoolConfigService.DEFAULT_ENTITY_POOL_CONFIG_SERVICE_NAME,
+                        PoolConfig.class, entityBeanComponentCreateService.getPoolConfigInjector());
+            } else {
+                // pool name has been explicitly set so the pool config is a required dependency
+                serviceBuilder.addDependency(PoolConfigService.EJB_POOL_CONFIG_BASE_SERVICE_NAME.append(poolName),
+                        PoolConfig.class, entityBeanComponentCreateService.getPoolConfigInjector());
+            }
+            //is optimistic locking configured by default
+            serviceBuilder.addDependency(ServiceBuilder.DependencyType.OPTIONAL, org.jboss.as.ejb3.subsystem.EJB3SubsystemDefaultEntityBeanOptimisticLockingWriteHandler.SERVICE_NAME,
+                    Boolean.class, entityBeanComponentCreateService.getOptimisticLockingInjector());
+        }
     }
 
 }

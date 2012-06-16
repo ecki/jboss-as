@@ -24,9 +24,10 @@ package org.jboss.as.ejb3.remote.protocol.versionone;
 
 import com.arjuna.ats.internal.jta.transaction.arjunacore.jca.SubordinateTransaction;
 import com.arjuna.ats.internal.jta.transaction.arjunacore.jca.SubordinationManager;
+import org.jboss.as.ejb3.EjbLogger;
 import org.jboss.as.ejb3.remote.EJBRemoteTransactionsRepository;
 import org.jboss.ejb.client.XidTransactionID;
-import org.jboss.remoting3.Channel;
+import org.jboss.marshalling.MarshallerFactory;
 
 import javax.transaction.HeuristicCommitException;
 import javax.transaction.HeuristicMixedException;
@@ -41,13 +42,22 @@ import javax.transaction.xa.Xid;
  */
 class XidTransactionRollbackTask extends XidTransactionManagementTask {
 
-    XidTransactionRollbackTask(final TransactionRequestHandler txRequestHandler, final EJBRemoteTransactionsRepository transactionsRepository, final XidTransactionID xidTransactionID, final Channel channel, final short invocationId) {
-        super(txRequestHandler, transactionsRepository, xidTransactionID, channel, invocationId);
+    XidTransactionRollbackTask(final TransactionRequestHandler txRequestHandler, final EJBRemoteTransactionsRepository transactionsRepository,
+                               final MarshallerFactory marshallerFactory, final XidTransactionID xidTransactionID,
+                               final ChannelAssociation channelAssociation, final short invocationId) {
+        super(txRequestHandler, transactionsRepository, marshallerFactory, xidTransactionID, channelAssociation, invocationId);
     }
 
     @Override
     protected void manageTransaction() throws Throwable {
         final Transaction transaction = this.transactionsRepository.removeTransaction(this.xidTransactionID);
+        if(transaction == null) {
+            if(EjbLogger.EJB3_INVOCATION_LOGGER.isDebugEnabled()) {
+                //this happens if no ejb invocations where made within the TX
+                EjbLogger.EJB3_INVOCATION_LOGGER.debug("Not rolling back transaction " + this.xidTransactionID + " as is was not found on the server");
+            }
+            return;
+        }
         this.resumeTransaction(transaction);
         // now rollback
         final Xid xid = this.xidTransactionID.getXid();
@@ -103,7 +113,7 @@ class XidTransactionRollbackTask extends XidTransactionManagementTask {
 
             throw new XAException(XAException.XAER_RMERR);
         } finally {
-            // disassociate the tx that was asssociated (resumed) on this thread.
+            // disassociate the tx that was associated (resumed) on this thread.
             // This needs to be done explicitly because the SubOrdinationManager isn't responsible
             // for clearing the tx context from the thread
             this.transactionsRepository.getTransactionManager().suspend();

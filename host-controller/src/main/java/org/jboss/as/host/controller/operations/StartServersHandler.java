@@ -22,21 +22,25 @@ package org.jboss.as.host.controller.operations;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.AUTO_START;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SERVER_CONFIG;
+import static org.jboss.as.host.controller.HostControllerLogger.ROOT_LOGGER;
+import static org.jboss.as.host.controller.HostControllerMessages.MESSAGES;
 
 import java.util.Locale;
 import java.util.Map;
 
 import org.jboss.as.controller.OperationContext;
-import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.OperationFailedException;
+import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.PathAddress;
+import org.jboss.as.controller.RunningMode;
 import org.jboss.as.controller.descriptions.DescriptionProvider;
 import org.jboss.as.controller.registry.Resource;
 import org.jboss.as.host.controller.HostControllerEnvironment;
+import org.jboss.as.host.controller.HostRunningModeControl;
+import org.jboss.as.host.controller.RestartMode;
 import org.jboss.as.host.controller.ServerInventory;
 import org.jboss.as.process.ProcessInfo;
 import org.jboss.dmr.ModelNode;
-import org.jboss.logging.Logger;
 
 /**
  * Starts or reconnect all auto-start servers (at boot).
@@ -47,17 +51,17 @@ public class StartServersHandler implements OperationStepHandler, DescriptionPro
 
     public static final String OPERATION_NAME = "start-servers";
 
-    private static final Logger log = Logger.getLogger("org.jboss.as.host.controller");
-
     private final ServerInventory serverInventory;
     private final HostControllerEnvironment hostControllerEnvironment;
+    private final HostRunningModeControl runningModeControl;
 
     /**
      * Create the ServerAddHandler
      */
-    public StartServersHandler(final HostControllerEnvironment hostControllerEnvironment, final ServerInventory serverInventory) {
+    public StartServersHandler(final HostControllerEnvironment hostControllerEnvironment, final ServerInventory serverInventory, HostRunningModeControl runningModeControl) {
         this.hostControllerEnvironment = hostControllerEnvironment;
         this.serverInventory = serverInventory;
+        this.runningModeControl = runningModeControl;
     }
 
     /**
@@ -67,9 +71,15 @@ public class StartServersHandler implements OperationStepHandler, DescriptionPro
     public void execute(OperationContext context, ModelNode operation) throws OperationFailedException {
 
         if (!context.isBooting()) {
-            throw new OperationFailedException(new ModelNode().set(String.format("Cannot invoke %s after host boot", operation.require(OP))));
+            throw new OperationFailedException(new ModelNode().set(MESSAGES.invocationNotAllowedAfterBoot(operation.require(OP))));
         }
-        final ModelNode domainModel = Resource.Tools.readModel(context.getRootResource());
+
+        if (context.getRunningMode() == RunningMode.ADMIN_ONLY) {
+            throw new OperationFailedException(new ModelNode(MESSAGES.cannotStartServersInvalidMode(context.getRunningMode())));
+        }
+
+
+        final ModelNode domainModel = Resource.Tools.readModel(context.readResourceFromRoot(PathAddress.EMPTY_ADDRESS, true));
         context.addStep(new OperationStepHandler() {
             @Override
             public void execute(OperationContext context, ModelNode operation) throws OperationFailedException {
@@ -78,7 +88,7 @@ public class StartServersHandler implements OperationStepHandler, DescriptionPro
                 final ModelNode hostModel = Resource.Tools.readModel(resource);
                 if(hostModel.hasDefined(SERVER_CONFIG)) {
                     final ModelNode servers = hostModel.get(SERVER_CONFIG).clone();
-                    if (hostControllerEnvironment.isRestart()){
+                    if (hostControllerEnvironment.isRestart() || runningModeControl.getRestartMode() == RestartMode.HC_ONLY){
                         restartedHcStartOrReconnectServers(servers, domainModel);
                     } else {
                         cleanStartServers(servers, domainModel);
@@ -87,7 +97,8 @@ public class StartServersHandler implements OperationStepHandler, DescriptionPro
                 context.completeStep();
             }
         }, OperationContext.Stage.RUNTIME);
-        context.completeStep();
+
+        context.completeStep(OperationContext.RollbackHandler.NOOP_ROLLBACK_HANDLER);
     }
 
     @Override
@@ -102,7 +113,7 @@ public class StartServersHandler implements OperationStepHandler, DescriptionPro
                 try {
                     serverInventory.startServer(serverName, domainModel);
                 } catch (Exception e) {
-                    log.errorf(e, "Failed to start server (%s)", serverName);
+                    ROOT_LOGGER.failedToStartServer(e, serverName);
                 }
             }
         }
@@ -117,7 +128,7 @@ public class StartServersHandler implements OperationStepHandler, DescriptionPro
                 try {
                     serverInventory.startServer(serverName, domainModel);
                 } catch (Exception e) {
-                    log.errorf(e, "Failed to start server (%s)", serverName);
+                    ROOT_LOGGER.failedToStartServer(e, serverName);
                 }
             } else if (info != null){
                 //Reconnect the server

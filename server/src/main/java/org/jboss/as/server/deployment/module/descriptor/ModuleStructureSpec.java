@@ -3,6 +3,7 @@ package org.jboss.as.server.deployment.module.descriptor;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 import org.jboss.as.server.deployment.module.FilterSpecification;
 import org.jboss.as.server.deployment.module.ModuleDependency;
@@ -11,8 +12,8 @@ import org.jboss.modules.DependencySpec;
 import org.jboss.modules.ModuleIdentifier;
 
 /**
-* @author Stuart Douglas
-*/
+ * @author Stuart Douglas
+ */
 class ModuleStructureSpec {
 
     private ModuleIdentifier moduleIdentifier;
@@ -23,6 +24,18 @@ class ModuleStructureSpec {
     private final List<ModuleIdentifier> exclusions = new ArrayList<ModuleIdentifier>();
     private final List<String> classFileTransformers = new ArrayList<String>();
     private final List<ModuleIdentifier> aliases = new ArrayList<ModuleIdentifier>();
+    private final List<ModuleIdentifier> annotationModules = new ArrayList<ModuleIdentifier>();
+
+    /**
+     * Note that this being null is different to an empty list.
+     *
+     * Null means unspecified, while empty means specified but empty
+     *
+     * A sub deployment will inherit this from its parent if it is unspecified, but not if
+     * it is empty but specified.
+     */
+    private Set<String> excludedSubsystems;
+
     private boolean localLast = false;
 
     public ModuleIdentifier getModuleIdentifier() {
@@ -53,7 +66,7 @@ class ModuleStructureSpec {
         systemDependencies.add(dependency);
     }
 
-    public List<DependencySpec> getSytemDependencies() {
+    public List<DependencySpec> getSystemDependencies() {
         return Collections.unmodifiableList(systemDependencies);
     }
 
@@ -64,6 +77,15 @@ class ModuleStructureSpec {
     public List<ModuleIdentifier> getAliases() {
         return Collections.unmodifiableList(aliases);
     }
+
+    public void addAnnotationModule(final ModuleIdentifier dependency) {
+        annotationModules.add(dependency);
+    }
+
+    public List<ModuleIdentifier> getAnnotationModules() {
+        return Collections.unmodifiableList(annotationModules);
+    }
+
     public List<ModuleIdentifier> getExclusions() {
         return exclusions;
     }
@@ -82,5 +104,13 @@ class ModuleStructureSpec {
 
     public void setLocalLast(final boolean localLast) {
         this.localLast = localLast;
+    }
+
+    public Set<String> getExcludedSubsystems() {
+        return excludedSubsystems;
+    }
+
+    public void setExcludedSubsystems(final Set<String> excludedSubsystems) {
+        this.excludedSubsystems = excludedSubsystems;
     }
 }

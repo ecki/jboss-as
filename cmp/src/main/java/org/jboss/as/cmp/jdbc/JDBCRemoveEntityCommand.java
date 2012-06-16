@@ -26,7 +26,8 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.util.Map;
 import javax.ejb.RemoveException;
-import org.jboss.as.cmp.component.CmpEntityBeanComponent;
+
+import static org.jboss.as.cmp.CmpMessages.MESSAGES;
 import org.jboss.as.cmp.jdbc.bridge.JDBCCMRFieldBridge;
 import org.jboss.as.cmp.jdbc.bridge.JDBCEntityBridge;
 import org.jboss.as.cmp.context.CmpEntityBeanContext;
@@ -85,7 +86,7 @@ public final class JDBCRemoveEntityCommand {
 
     public void execute(CmpEntityBeanContext ctx) throws RemoveException, RemoteException {
         if (entity.isRemoved(ctx)) {
-            throw new IllegalStateException("Instance was already removed: id=" + ctx.getPrimaryKey());
+            throw MESSAGES.instanceAlreadyRemoved(ctx.getPrimaryKey());
         }
 
         entity.setIsBeingRemoved(ctx);
@@ -107,7 +108,7 @@ public final class JDBCRemoveEntityCommand {
                     log.trace("Instance is scheduled for cascade delete. id=" + ctx.getPrimaryKey());
             }
         }
-        // cascate-delete to old relations, if relation uses cascade.
+        // cascade-delete to old relations, if relation uses cascade.
         if (oldRelationsRef[0] != null) {
             Map oldRelations = (Map) oldRelationsRef[0];
             entity.cascadeDelete(ctx, oldRelations);
@@ -145,8 +146,7 @@ public final class JDBCRemoveEntityCommand {
             // execute statement
             rowsAffected = ps.executeUpdate();
         } catch (Exception e) {
-            log.error("Could not remove " + key, e);
-            throw new RemoveException("Could not remove " + key + ": " + e.getMessage());
+            throw MESSAGES.couldNotRemoveEntity(key, e);
         } finally {
             JDBCUtil.safeClose(ps);
             JDBCUtil.safeClose(con);
@@ -154,8 +154,7 @@ public final class JDBCRemoveEntityCommand {
 
         // check results
         if (rowsAffected == 0) {
-            log.error("Could not remove entity " + key);
-            throw new RemoveException("Could not remove entity");
+            throw MESSAGES.couldNotRemoveEntityNoRows(key);
         }
 
         if (log.isTraceEnabled())

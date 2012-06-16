@@ -21,6 +21,8 @@
  */
 package org.jboss.as.weld.ejb;
 
+import java.security.AccessController;
+import java.security.PrivilegedAction;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -29,6 +31,8 @@ import java.util.Set;
 
 import org.jboss.as.ee.component.ComponentView;
 import org.jboss.as.server.CurrentServiceContainer;
+import org.jboss.as.weld.WeldMessages;
+import org.jboss.msc.service.ServiceContainer;
 import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceName;
 import org.jboss.weld.ejb.api.SessionObjectReference;
@@ -41,8 +45,10 @@ import org.jboss.weld.ejb.api.SessionObjectReference;
 public class SessionObjectReferenceImpl implements SessionObjectReference {
 
     private final Map<String, ServiceName> viewServices;
+    private final String ejbName;
 
     public SessionObjectReferenceImpl(EjbDescriptorImpl<?> descriptor) {
+        ejbName = descriptor.getEjbName();
         final Map<String, ServiceName> viewServices = new HashMap<String, ServiceName>();
         for (Map.Entry<Class<?>, ServiceName> entry : descriptor.getViewServices().entrySet()) {
             final Class<?> viewClass = entry.getKey();
@@ -84,7 +90,7 @@ public class SessionObjectReferenceImpl implements SessionObjectReference {
     public synchronized <S> S getBusinessObject(Class<S> businessInterfaceType) {
         //TODO: this should be cached
         if (viewServices.containsKey(businessInterfaceType.getName())) {
-            final ServiceController<?> serviceController = CurrentServiceContainer.getServiceContainer().getRequiredService(viewServices.get(businessInterfaceType.getName()));
+            final ServiceController<?> serviceController = currentServiceContainer().getRequiredService(viewServices.get(businessInterfaceType.getName()));
             final ComponentView view = (ComponentView) serviceController.getValue();
             try {
                 return(S) view.createInstance().getInstance();
@@ -92,7 +98,7 @@ public class SessionObjectReferenceImpl implements SessionObjectReference {
                 throw new RuntimeException(e);
             }
         } else {
-            throw new IllegalArgumentException("View of type " + businessInterfaceType + " not found on bean ");
+            throw WeldMessages.MESSAGES.viewNotFoundOnEJB(businessInterfaceType.getName(), ejbName);
         }
     }
 
@@ -104,5 +110,15 @@ public class SessionObjectReferenceImpl implements SessionObjectReference {
     @Override
     public boolean isRemoved() {
         return false;
+    }
+
+
+    private static ServiceContainer currentServiceContainer() {
+        return AccessController.doPrivileged(new PrivilegedAction<ServiceContainer>() {
+            @Override
+            public ServiceContainer run() {
+                return CurrentServiceContainer.getServiceContainer();
+            }
+        });
     }
 }

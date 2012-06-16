@@ -41,15 +41,20 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import javax.ejb.EJBObject;
 import javax.ejb.Handle;
+import org.jboss.as.cmp.CmpLogger;
+import static org.jboss.as.cmp.CmpLogger.ROOT_LOGGER;
+import org.jboss.as.cmp.CmpMessages;
+import static org.jboss.as.cmp.CmpMessages.MESSAGES;
 import org.jboss.logging.Logger;
 
 /**
- * JDBCUtil takes care of some of the more anoying JDBC tasks.
- * It hanles safe closing of jdbc resources, setting statement
+ * JDBCUtil takes care of some of the more annoying JDBC tasks.
+ * It handles safe closing of jdbc resources, setting statement
  * parameters and loading query results.
  *
  * @author <a href="mailto:dain@daingroup.com">Dain Sundstrom</a>
@@ -65,7 +70,7 @@ public final class JDBCUtil {
             try {
                 con.close();
             } catch (Exception e) {
-                log.error(SQL_ERROR, e);
+                ROOT_LOGGER.sqlError(e);
             }
         }
     }
@@ -75,7 +80,7 @@ public final class JDBCUtil {
             try {
                 rs.close();
             } catch (Exception e) {
-                log.error(SQL_ERROR, e);
+                ROOT_LOGGER.sqlError(e);
             }
         }
     }
@@ -85,7 +90,7 @@ public final class JDBCUtil {
             try {
                 statement.close();
             } catch (Exception e) {
-                log.error(SQL_ERROR, e);
+                ROOT_LOGGER.sqlError(e);
             }
         }
     }
@@ -95,7 +100,7 @@ public final class JDBCUtil {
             try {
                 in.close();
             } catch (Exception e) {
-                log.error(SQL_ERROR, e);
+                ROOT_LOGGER.sqlError(e);
             }
         }
     }
@@ -105,7 +110,7 @@ public final class JDBCUtil {
             try {
                 out.close();
             } catch (Exception e) {
-                log.error(SQL_ERROR, e);
+                ROOT_LOGGER.sqlError(e);
             }
         }
     }
@@ -115,7 +120,7 @@ public final class JDBCUtil {
             try {
                 reader.close();
             } catch (Exception e) {
-                log.error(SQL_ERROR, e);
+                ROOT_LOGGER.sqlError(e);
             }
         }
     }
@@ -148,7 +153,7 @@ public final class JDBCUtil {
      *
      * @param value the value to convert into a byte array
      * @return the byte representation of the value
-     * @throws SQLException if a problem occures in the conversion
+     * @throws SQLException if a problem occurs in the conversion
      */
     public static byte[] convertObjectToByteArray(Object value)
             throws SQLException {
@@ -174,9 +179,9 @@ public final class JDBCUtil {
             oos.writeObject(value);
             return baos.toByteArray();
         } catch (RemoteException e) {
-            throw new SQLException("Cannot get Handle of EJBObject: " + e);
+            throw MESSAGES.couldNotGetEjbHandle(e);
         } catch (IOException e) {
-            throw new SQLException("Can't serialize binary object: " + e);
+            throw MESSAGES.canNotSerializeBinaryObject(e);
         } finally {
             safeClose(oos);
             safeClose(baos);
@@ -187,8 +192,8 @@ public final class JDBCUtil {
      * Coverts the input into an object.
      *
      * @param input the bytes to convert
-     * @return the object repsentation of the input stream
-     * @throws SQLException if a problem occures in the conversion
+     * @return the object representation of the input stream
+     * @throws SQLException if a problem occurs in the conversion
      */
     public static Object convertToObject(byte[] input)
             throws SQLException {
@@ -205,8 +210,8 @@ public final class JDBCUtil {
      * Coverts the input into an object.
      *
      * @param input the bytes to convert
-     * @return the object repsentation of the input stream
-     * @throws SQLException if a problem occures in the conversion
+     * @return the object representation of the input stream
+     * @throws SQLException if a problem occurs in the conversion
      */
     public static Object convertToObject(InputStream input)
             throws SQLException {
@@ -231,11 +236,11 @@ public final class JDBCUtil {
                 }
 
             } catch (RemoteException e) {
-                throw new SQLException("Unable to load EJBObject back from Handle: " + e);
+                throw MESSAGES.couldNotLoadEjbFromHandle(e);
             } catch (IOException e) {
-                throw new SQLException("Unable to load to deserialize result: " + e);
+                throw MESSAGES.couldNotDeserializeResult(e);
             } catch (ClassNotFoundException e) {
-                throw new SQLException("Unable to load to deserialize result: " + e);
+                throw MESSAGES.couldNotDeserializeResult(e);
             } finally {
                 // ois will close the input stream it wraps
                 safeClose(ois);
@@ -268,7 +273,7 @@ public final class JDBCUtil {
                     textBuffer.append(tmpBuffer, 0, charsRead);
                 value = textBuffer.toString();
             } catch (java.io.IOException ioException) {
-                throw new SQLException(ioException.getMessage());
+                throw MESSAGES.failedToReadLongString(ioException);
             } finally {
                 safeClose(textData);
             }
@@ -299,7 +304,7 @@ public final class JDBCUtil {
                 baos.write(tmpBuffer, 0, bytesRead);
             return baos.toByteArray();
         } catch (java.io.IOException ioException) {
-            throw new SQLException(ioException.getMessage());
+            throw MESSAGES.failedToReadByteArray(ioException);
         } finally {
             safeClose(baos);
             safeClose(input);
@@ -540,7 +545,7 @@ public final class JDBCUtil {
                     CallableStatement.class.getMethod(GET_BYTES, arg));
         } catch (NoSuchMethodException e) {
             // Should never happen
-            log.error(SQL_ERROR, e);
+            ROOT_LOGGER.sqlError(e);
         }
 
         // Initializes the map between jdbcType (int) and the name of the type.
@@ -552,7 +557,7 @@ public final class JDBCUtil {
                 jdbcTypeNames.put(fields[i].get(null), fields[i].getName());
             } catch (IllegalAccessException e) {
                 // Should never happen
-                log.error(SQL_ERROR, e);
+                ROOT_LOGGER.sqlError(e);
             }
         }
     }
@@ -579,7 +584,7 @@ public final class JDBCUtil {
             case Types.LONGVARCHAR:
             case Types.BLOB:
             case Types.LONGVARBINARY:
-                throw new UnsupportedOperationException();
+                throw MESSAGES.longBinaryNotSupported();
 
                 //
                 // Small binary types
@@ -686,7 +691,7 @@ public final class JDBCUtil {
             // just return the wrapper and the vm will convert it at the proxy
             if (destination.isPrimitive()) {
                 if (value == null)
-                    throw new IllegalStateException("Loaded NULL value for a field of a primitive type.");
+                    throw MESSAGES.loadedNullFromPrimitive();
                 if ((destination.equals(Byte.TYPE) && value instanceof Byte) ||
                         (destination.equals(Short.TYPE) && value instanceof Short) ||
                         (destination.equals(Character.TYPE) && value instanceof Character) ||
@@ -703,9 +708,9 @@ public final class JDBCUtil {
             //
             // java.util.Date
             //
-            // make new copy as sub types have problems in comparions
+            // make new copy as sub types have problems in comparisons
             if (destination == java.util.Date.class && value instanceof java.util.Date) {
-                // handle timestamp special becauses it hoses the milisecond values
+                // handle timestamp special because it hoses the millisecond values
                 if (value instanceof java.sql.Timestamp) {
                     java.sql.Timestamp ts = (java.sql.Timestamp) value;
 
@@ -744,9 +749,9 @@ public final class JDBCUtil {
             if (destination == java.sql.Timestamp.class && value instanceof java.sql.Timestamp) {
                 // make a new Timestamp object; you never know
                 // what a driver will return
-                java.sql.Timestamp orignal = (java.sql.Timestamp) value;
-                java.sql.Timestamp copy = new java.sql.Timestamp(orignal.getTime());
-                copy.setNanos(orignal.getNanos());
+                java.sql.Timestamp original = (java.sql.Timestamp) value;
+                java.sql.Timestamp copy = new java.sql.Timestamp(original.getTime());
+                copy.setNanos(original.getNanos());
                 return copy;
             }
 
@@ -768,18 +773,13 @@ public final class JDBCUtil {
             }
 
             // oops got the wrong type - nothing we can do
-            throw new SQLException("Got a " + value.getClass().getName() + "[cl=" +
-                    System.identityHashCode(value.getClass().getClassLoader()) +
-                    ", value=" + value + "] while looking for a " +
-                    destination.getName() + "[cl=" +
-                    System.identityHashCode(destination) + "]");
+            throw CmpMessages.MESSAGES.foundWrongClass(value.getClass().getName(), value.getClass().getClassLoader(), Arrays.asList(value.getClass().getInterfaces()), value, destination.getName(), destination.getClassLoader());
         } catch (RemoteException e) {
-            throw new SQLException("Unable to load EJBObject back from Handle: "
-                    + e);
+            throw CmpMessages.MESSAGES.unableToLoadFromHandle(e);
         } catch (IOException e) {
-            throw new SQLException("Unable to load to deserialize result: " + e);
+            throw MESSAGES.unableToDeserializeResult(e);
         } catch (ClassNotFoundException e) {
-            throw new SQLException("Unable to load to deserialize result: " + e);
+            throw MESSAGES.unableToDeserializeResult(e);
         }
     }
 }

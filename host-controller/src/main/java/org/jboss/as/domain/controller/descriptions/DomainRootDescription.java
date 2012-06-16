@@ -29,7 +29,11 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.EXT
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.HEAD_COMMENT_ALLOWED;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.HOST;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.INTERFACE;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.LOCAL_HOST_NAME;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.MANAGEMENT_MAJOR_VERSION;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.MANAGEMENT_MINOR_VERSION;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.MAX_OCCURS;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.MIN;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.MIN_LENGTH;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.MIN_OCCURS;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.MODEL_DESCRIPTION;
@@ -38,6 +42,8 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.NIL
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OPERATIONS;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OPERATION_NAME;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PATH;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PRODUCT_NAME;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PRODUCT_VERSION;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PROFILE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RELEASE_CODENAME;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RELEASE_VERSION;
@@ -57,7 +63,7 @@ import java.util.ResourceBundle;
 import org.jboss.as.controller.descriptions.ResourceDescriptionResolver;
 import org.jboss.as.controller.descriptions.StandardResourceDescriptionResolver;
 import org.jboss.as.controller.descriptions.common.CommonDescriptions;
-import org.jboss.as.domain.controller.operations.HackDomainServerLifecycleHandlers;
+import org.jboss.as.domain.controller.operations.DomainServerLifecycleHandlers;
 import org.jboss.as.server.deployment.DeploymentRemoveHandler;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.ModelType;
@@ -76,7 +82,7 @@ public class DomainRootDescription {
     }
 
     public static ModelNode getDescription(final Locale locale) {
-
+        final ResourceDescriptionResolver resolver = getResourceDescriptionResolver("domain");
         final ResourceBundle bundle = getResourceBundle(locale);
         final ModelNode root = new ModelNode();
         root.get(DESCRIPTION).set(bundle.getString("domain"));
@@ -85,6 +91,9 @@ public class DomainRootDescription {
         root.get(ATTRIBUTES, NAMESPACES).set(CommonDescriptions.getNamespacePrefixAttribute(locale));
         root.get(ATTRIBUTES, SCHEMA_LOCATIONS).set(CommonDescriptions.getSchemaLocationAttribute(locale));
 
+        DomainAttributes.NAME.addResourceAttributeDescription(root, resolver, locale, bundle);
+
+        //TODO Convert these to use AttributeDefinition
         root.get(ATTRIBUTES, PROCESS_TYPE, DESCRIPTION).set(bundle.getString("domain.process-type"));
         root.get(ATTRIBUTES, PROCESS_TYPE, TYPE).set(ModelType.STRING);
         root.get(ATTRIBUTES, PROCESS_TYPE, REQUIRED).set(true);
@@ -104,6 +113,35 @@ public class DomainRootDescription {
         root.get(ATTRIBUTES, RELEASE_CODENAME, REQUIRED).set(true);
         root.get(ATTRIBUTES, RELEASE_CODENAME, NILLABLE).set(false);
         root.get(ATTRIBUTES, RELEASE_CODENAME, MIN_LENGTH).set(1);
+
+        root.get(ATTRIBUTES, PRODUCT_NAME, DESCRIPTION).set(bundle.getString("domain.product-name"));
+        root.get(ATTRIBUTES, PRODUCT_NAME, TYPE).set(ModelType.STRING);
+        root.get(ATTRIBUTES, PRODUCT_NAME, REQUIRED).set(true);
+        root.get(ATTRIBUTES, PRODUCT_NAME, NILLABLE).set(true);
+        root.get(ATTRIBUTES, PRODUCT_NAME, MIN_LENGTH).set(1);
+
+        root.get(ATTRIBUTES, PRODUCT_VERSION, DESCRIPTION).set(bundle.getString("domain.product-version"));
+        root.get(ATTRIBUTES, PRODUCT_VERSION, TYPE).set(ModelType.STRING);
+        root.get(ATTRIBUTES, PRODUCT_VERSION, REQUIRED).set(true);
+        root.get(ATTRIBUTES, PRODUCT_VERSION, NILLABLE).set(true);
+        root.get(ATTRIBUTES, PRODUCT_VERSION, MIN_LENGTH).set(1);
+
+        root.get(ATTRIBUTES, MANAGEMENT_MAJOR_VERSION, DESCRIPTION).set(bundle.getString("domain.management-major-version"));
+        root.get(ATTRIBUTES, MANAGEMENT_MAJOR_VERSION, TYPE).set(ModelType.INT);
+        root.get(ATTRIBUTES, MANAGEMENT_MAJOR_VERSION, REQUIRED).set(true);
+        root.get(ATTRIBUTES, MANAGEMENT_MAJOR_VERSION, NILLABLE).set(false);
+        root.get(ATTRIBUTES, MANAGEMENT_MAJOR_VERSION, MIN).set(1);
+
+        root.get(ATTRIBUTES, MANAGEMENT_MINOR_VERSION, DESCRIPTION).set(bundle.getString("domain.management-minor-version"));
+        root.get(ATTRIBUTES, MANAGEMENT_MINOR_VERSION, TYPE).set(ModelType.INT);
+        root.get(ATTRIBUTES, MANAGEMENT_MINOR_VERSION, REQUIRED).set(true);
+        root.get(ATTRIBUTES, MANAGEMENT_MINOR_VERSION, NILLABLE).set(false);
+        root.get(ATTRIBUTES, MANAGEMENT_MINOR_VERSION, MIN).set(1);
+
+        root.get(ATTRIBUTES, LOCAL_HOST_NAME, DESCRIPTION).set(bundle.getString("domain.local-host-name"));
+        root.get(ATTRIBUTES, LOCAL_HOST_NAME, TYPE).set(ModelType.STRING);
+        root.get(ATTRIBUTES, LOCAL_HOST_NAME, REQUIRED).set(true);
+        root.get(ATTRIBUTES, LOCAL_HOST_NAME, NILLABLE).set(false);
 
         root.get(OPERATIONS).setEmptyObject();
 
@@ -172,7 +210,7 @@ public class DomainRootDescription {
     public static ModelNode getRestartServersOperation(Locale locale) {
         final ResourceBundle bundle = getResourceBundle(locale);
         final ModelNode root = new ModelNode();
-        root.get(OPERATION_NAME).set(HackDomainServerLifecycleHandlers.RESTART_SERVERS_NAME);
+        root.get(OPERATION_NAME).set(DomainServerLifecycleHandlers.RESTART_SERVERS_NAME);
         root.get(DESCRIPTION).set(bundle.getString("domain.servers.restart"));
         root.get(REPLY_PROPERTIES).setEmptyObject();
         return root;
@@ -181,7 +219,7 @@ public class DomainRootDescription {
     public static ModelNode getStopServersOperation(Locale locale) {
         final ResourceBundle bundle = getResourceBundle(locale);
         final ModelNode root = new ModelNode();
-        root.get(OPERATION_NAME).set(HackDomainServerLifecycleHandlers.STOP_SERVERS_NAME);
+        root.get(OPERATION_NAME).set(DomainServerLifecycleHandlers.STOP_SERVERS_NAME);
         root.get(DESCRIPTION).set(bundle.getString("domain.servers.stop"));
         root.get(REPLY_PROPERTIES).setEmptyObject();
         return root;
@@ -190,7 +228,7 @@ public class DomainRootDescription {
     public static ModelNode getStartServersOperation(Locale locale) {
         final ResourceBundle bundle = getResourceBundle(locale);
         final ModelNode root = new ModelNode();
-        root.get(OPERATION_NAME).set(HackDomainServerLifecycleHandlers.START_SERVERS_NAME);
+        root.get(OPERATION_NAME).set(DomainServerLifecycleHandlers.START_SERVERS_NAME);
         root.get(DESCRIPTION).set(bundle.getString("domain.servers.start"));
         root.get(REPLY_PROPERTIES).setEmptyObject();
         return root;

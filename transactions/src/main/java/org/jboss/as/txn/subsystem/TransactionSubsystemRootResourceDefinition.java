@@ -22,7 +22,6 @@
 
 package org.jboss.as.txn.subsystem;
 
-import org.jboss.as.controller.PathElement;
 import org.jboss.as.controller.ReloadRequiredRemoveStepHandler;
 import org.jboss.as.controller.ReloadRequiredWriteAttributeHandler;
 import org.jboss.as.controller.ResourceDefinition;
@@ -45,8 +44,6 @@ import org.jboss.dmr.ModelType;
  * @author Brian Stansberry (c) 2011 Red Hat Inc.
  */
 public class TransactionSubsystemRootResourceDefinition extends SimpleResourceDefinition {
-
-    public static final TransactionSubsystemRootResourceDefinition INSTANCE = new TransactionSubsystemRootResourceDefinition();
 
     //recovery environment
     public static final SimpleAttributeDefinition BINDING = new SimpleAttributeDefinitionBuilder(CommonAttributes.BINDING, ModelType.STRING, false)
@@ -140,11 +137,19 @@ public class TransactionSubsystemRootResourceDefinition extends SimpleResourceDe
             .setFlags(AttributeAccess.Flag.RESTART_JVM)  //I think the use of statics in arjunta will require a JVM restart
             .build();
 
-    private TransactionSubsystemRootResourceDefinition() {
-        super(PathElement.pathElement(ModelDescriptionConstants.SUBSYSTEM, TransactionExtension.SUBSYSTEM_NAME),
-                TransactionExtension.getResourceDescriptionResolver(TransactionExtension.SUBSYSTEM_NAME),
+    public static final SimpleAttributeDefinition USEHORNETQSTORE = new SimpleAttributeDefinitionBuilder(CommonAttributes.USEHORNETQSTORE, ModelType.BOOLEAN, true)
+            .setDefaultValue(new ModelNode().set(false))
+            .setFlags(AttributeAccess.Flag.RESTART_JVM)
+            .build();
+
+    private final boolean registerRuntimeOnly;
+
+    TransactionSubsystemRootResourceDefinition(boolean registerRuntimeOnly) {
+        super(TransactionExtension.SUBSYSTEM_PATH,
+                TransactionExtension.getResourceDescriptionResolver(),
                 TransactionSubsystemAdd.INSTANCE, ReloadRequiredRemoveStepHandler.INSTANCE,
                 OperationEntry.Flag.RESTART_ALL_SERVICES, OperationEntry.Flag.RESTART_ALL_SERVICES);
+        this.registerRuntimeOnly = registerRuntimeOnly;
     }
 
 
@@ -166,7 +171,10 @@ public class TransactionSubsystemRootResourceDefinition extends SimpleResourceDe
         resourceRegistration.registerReadWriteAttribute(OBJECT_STORE_RELATIVE_TO, null, new ReloadRequiredWriteAttributeHandler(OBJECT_STORE_RELATIVE_TO));
         resourceRegistration.registerReadWriteAttribute(OBJECT_STORE_PATH, null, new ReloadRequiredWriteAttributeHandler(OBJECT_STORE_PATH));
         resourceRegistration.registerReadWriteAttribute(JTS, null, new ReloadRequiredWriteAttributeHandler(JTS));
+        resourceRegistration.registerReadWriteAttribute(USEHORNETQSTORE, null, new ReloadRequiredWriteAttributeHandler(USEHORNETQSTORE));
 
-        TxStatsHandler.INSTANCE.registerMetrics(resourceRegistration);
+        if (registerRuntimeOnly) {
+            TxStatsHandler.INSTANCE.registerMetrics(resourceRegistration);
+        }
     }
 }

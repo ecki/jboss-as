@@ -26,7 +26,7 @@ import java.lang.reflect.Method;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
-import javax.ejb.EJBException;
+import static org.jboss.as.cmp.CmpMessages.MESSAGES;
 import org.jboss.as.cmp.context.CmpEntityBeanContext;
 import org.jboss.as.cmp.jdbc.JDBCIdentityColumnCreateCommand;
 import org.jboss.as.cmp.jdbc.JDBCStoreManager;
@@ -57,20 +57,20 @@ public class JDBCInformixCreateCommand extends JDBCIdentityColumnCreateCommand {
         ClassLoader loader = GetTCLAction.getContextClassLoader();
         try {
             Class psClass = loader.loadClass(className);
-            method = psClass.getMethod(methodName, null);
+            method = psClass.getMethod(methodName);
         } catch (ClassNotFoundException e) {
-            throw new RuntimeException("Could not load driver class: " + className, e);
+            throw MESSAGES.failedToLoadDriverClass(className, e);
         } catch (NoSuchMethodException e) {
-            throw new RuntimeException("Driver does not have method: " + methodName + "()");
+            throw MESSAGES.driverDoesNotHaveMethod(className, methodName);
         }
 
         try {
             Class wrapperClass = loader.loadClass("org.jboss.resource.adapter.jdbc.StatementAccess");
-            getUnderlyingStatement = wrapperClass.getMethod("getUnderlyingStatement", null);
+            getUnderlyingStatement = wrapperClass.getMethod("getUnderlyingStatement");
         } catch (ClassNotFoundException e) {
-            throw new RuntimeException("Could not load org.jboss.resource.adapter.jdbc.StatementAccess", e);
+            throw MESSAGES.couldNotLoadStatementAccess(e);
         } catch (NoSuchMethodException e) {
-            throw new RuntimeException("StatementAccess.getUnderlyingStatement not found", e);
+            throw MESSAGES.getUnderlyingStatementNotFound(e);
         }
     }
 
@@ -107,14 +107,13 @@ public class JDBCInformixCreateCommand extends JDBCIdentityColumnCreateCommand {
         } while (stmt != null && method.getDeclaringClass().isInstance(stmt) == false);
 
         try {
-            Number pk = (Number) method.invoke(stmt, null);
+            Number pk = (Number) method.invoke(stmt);
             pkField.setInstanceValue(ctx, pk);
             return rows;
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
-            // throw EJBException to force a rollback as the row has been inserted
-            throw new EJBException("Error extracting generated keys", e);
+            throw MESSAGES.errorExtractingGeneratedKey(e);
         }
     }
 }

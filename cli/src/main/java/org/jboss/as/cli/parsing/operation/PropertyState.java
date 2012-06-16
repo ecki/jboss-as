@@ -24,6 +24,7 @@ package org.jboss.as.cli.parsing.operation;
 import org.jboss.as.cli.parsing.DefaultParsingState;
 import org.jboss.as.cli.parsing.EnterStateCharacterHandler;
 import org.jboss.as.cli.parsing.GlobalCharacterHandlers;
+import org.jboss.as.cli.parsing.WordCharacterHandler;
 
 
 /**
@@ -49,12 +50,13 @@ public class PropertyState extends DefaultParsingState {
 
     PropertyState(char propSeparator, PropertyValueState valueState, char...listEnd) {
         super(ID);
-        setEnterHandler(GlobalCharacterHandlers.CONTENT_CHARACTER_HANDLER);
+        setIgnoreWhitespaces(true);
+        setEnterHandler(WordCharacterHandler.IGNORE_LB_ESCAPE_ON);
         for(int i = 0; i < listEnd.length; ++i) {
             putHandler(listEnd[i], GlobalCharacterHandlers.LEAVE_STATE_HANDLER);
         }
         enterState('=', new NameValueSeparatorState(valueState));
-        setDefaultHandler(GlobalCharacterHandlers.CONTENT_CHARACTER_HANDLER);
+        setDefaultHandler(WordCharacterHandler.IGNORE_LB_ESCAPE_ON);
         setReturnHandler(GlobalCharacterHandlers.LEAVE_STATE_HANDLER);
     }
 

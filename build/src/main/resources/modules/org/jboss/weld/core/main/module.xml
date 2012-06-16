@@ -24,6 +24,10 @@
 
 <module xmlns="urn:jboss:module:1.1" name="org.jboss.weld.core">
 
+    <properties>
+        <property name="jboss.api" value="private"/>
+    </properties>
+
     <resources>
         <!-- Insert resources here -->
     </resources>
@@ -43,8 +47,6 @@
         <module name="javax.transaction.api"/>
         <module name="javax.validation.api"/>
         <module name="org.javassist"/>
-        <module name="org.jboss.interceptor"/>
-        <module name="org.jboss.interceptor.spi"/>
         <module name="org.jboss.weld.api" />
         <module name="org.jboss.weld.spi" />
         <module name="org.slf4j" />

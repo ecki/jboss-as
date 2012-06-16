@@ -22,34 +22,44 @@
 
 package org.jboss.as.modcluster;
 
-import java.util.Locale;
-
 import org.jboss.as.controller.AbstractAddStepHandler;
+import org.jboss.as.controller.AttributeDefinition;
+import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
-import org.jboss.as.controller.descriptions.DescriptionProvider;
+import org.jboss.as.controller.ServiceVerificationHandler;
 import org.jboss.dmr.ModelNode;
+import org.jboss.msc.service.ServiceController;
+
+import java.util.List;
 
 /**
  * {@code OperationHandler} responsible for defining the accesslog entry.
  *
  * @author Jean-Frederic Clere
  */
-class ModClusterAddSSL extends AbstractAddStepHandler implements DescriptionProvider {
+class ModClusterAddSSL extends AbstractAddStepHandler {
 
     static final ModClusterAddSSL INSTANCE = new ModClusterAddSSL();
 
-    private ModClusterAddSSL() {
-        //
+    @Override
+    protected void performRuntime(OperationContext context, ModelNode operation, ModelNode model,
+                                  ServiceVerificationHandler verificationHandler, List<ServiceController<?>> newControllers)
+            throws OperationFailedException {
+        // need to set reload-required on the server
+        context.reloadRequired();
     }
 
     @Override
-    public ModelNode getModelDescription(Locale locale) {
-        return ModClusterSubsystemDescriptions.getModClusterAddSSL(locale);
+    protected void rollbackRuntime(OperationContext context, ModelNode operation, ModelNode model, List<ServiceController<?>> controllers) {
+        // just revert the reload-required
+        context.revertReloadRequired();
     }
+
 
     @Override
     protected void populateModel(ModelNode operation, ModelNode model) throws OperationFailedException {
-        // TODO Auto-generated method stub
-
+        for (AttributeDefinition attr : ModClusterSSLResourceDefinition.ATTRIBUTES) {
+            attr.validateAndSet(operation, model);
+        }
     }
 }

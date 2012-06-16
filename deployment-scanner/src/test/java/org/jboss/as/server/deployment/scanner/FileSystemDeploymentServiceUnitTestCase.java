@@ -3,6 +3,40 @@
  */
 package org.jboss.as.server.deployment.scanner;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+
+import org.jboss.as.controller.OperationFailedException;
+import org.jboss.as.controller.PathAddress;
+import org.jboss.as.controller.client.ModelControllerClient;
+import org.jboss.as.controller.client.Operation;
+import org.jboss.as.controller.client.OperationMessageHandler;
+import org.jboss.dmr.ModelNode;
+import org.jboss.logging.Logger;
+import org.jboss.threads.AsyncFuture;
+import org.junit.After;
+import org.junit.AfterClass;
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.BeforeClass;
+import org.junit.Test;
+
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADD;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.CANCELLED;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.COMPOSITE;
@@ -24,47 +58,6 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.UND
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
-
-import java.io.Closeable;
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.PrintWriter;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Random;
-import java.util.Set;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-
-import org.jboss.as.controller.OperationFailedException;
-import org.jboss.as.controller.PathAddress;
-import org.jboss.as.controller.client.ModelControllerClient;
-import org.jboss.as.controller.client.Operation;
-import org.jboss.as.controller.client.OperationMessageHandler;
-import org.jboss.as.server.deployment.repository.api.ContentRepository;
-import org.jboss.as.server.deployment.repository.api.ServerDeploymentRepository;
-import org.jboss.dmr.ModelNode;
-import org.jboss.logging.Logger;
-import org.jboss.threads.AsyncFuture;
-import org.jboss.vfs.VirtualFile;
-import org.junit.After;
-import org.junit.AfterClass;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Test;
 
 /**
  * Unit tests of {@link FileSystemDeploymentService}.
@@ -122,10 +115,11 @@ public class FileSystemDeploymentServiceUnitTestCase {
     public void testIgnoreNoMarker() throws Exception {
         File f1 = createFile("foo.war");
         TesteeSet ts = createTestee();
+        File deployed = new File(tmpDir, "foo.war" + FileSystemDeploymentService.DEPLOYED);
 //        ts.controller.addGetDeploymentNamesResponse();
         ts.testee.scan();
-        assertTrue(ts.repo.content.isEmpty());
         assertTrue(f1.exists());
+        assertFalse(deployed.exists());
     }
 
     @Test
@@ -142,6 +136,55 @@ public class FileSystemDeploymentServiceUnitTestCase {
         assertTrue(war.exists());
         assertFalse(dodeploy.exists());
         assertTrue(deployed.exists());
+    }
+
+    @Test
+    public void testBasicXmlDeploy() throws Exception {
+        File xml = createXmlFile("foo.xml", "<rootElement/>");
+        File dodeploy = createFile("foo.xml" + FileSystemDeploymentService.DO_DEPLOY);
+        File deployed = new File(tmpDir, "foo.xml" + FileSystemDeploymentService.DEPLOYED);
+        TesteeSet ts = createTestee();
+//        ts.controller.addGetDeploymentNamesResponse();
+        ts.controller.addCompositeSuccessResponse(1);
+        ts.testee.scan();
+        // Since AS7-431 the content is no longer managed
+        //assertEquals(1, ts.repo.content.size());
+        assertTrue(xml.exists());
+        assertFalse(dodeploy.exists());
+        assertTrue(deployed.exists());
+    }
+
+    @Test
+    public void testAutoXmlDeploy() throws Exception {
+        File xml = createXmlFile("foo.xml", "<rootElement/>");
+        File deployed = new File(tmpDir, "foo.xml" + FileSystemDeploymentService.DEPLOYED);
+        TesteeSet ts = createTestee();
+//        ts.controller.addGetDeploymentNamesResponse();
+        ts.controller.addCompositeSuccessResponse(1);
+        ts.testee.setAutoDeployXMLContent(true);
+        ts.testee.scan();
+        // Since AS7-431 the content is no longer managed
+        //assertEquals(1, ts.repo.content.size());
+        assertTrue(xml.exists());
+        assertTrue(deployed.exists());
+    }
+
+
+    /**
+     * Tests that an incomplete XML deployment does not
+     * auto-deploy.
+     */
+    @Test
+    public void testIncompleteXmlDeployment() throws Exception {
+        File xml = createXmlFile("foo.xml", "<rootElement><incomplete>");
+        File deployed = new File(tmpDir, "foo.xml" + FileSystemDeploymentService.DEPLOYED);
+        TesteeSet ts = createTestee();
+//        ts.controller.addGetDeploymentNamesResponse();
+        ts.controller.addCompositeSuccessResponse(1);
+        ts.testee.setAutoDeployXMLContent(true);
+        ts.testee.scan();
+        assertTrue(xml.exists());
+        assertFalse(deployed.exists());
     }
 
     @Test
@@ -300,7 +343,7 @@ public class FileSystemDeploymentServiceUnitTestCase {
         File nestedOK = createFile(new File(tmpDir, "nested"), "nested-ok");
 
         // We expect 2 requests for children names due to subdir "nested"
-        MockServerController sc = new MockServerController(new MockDeploymentRepository(), "ok", "nested-ok");
+        MockServerController sc = new MockServerController("ok", "nested-ok");
 //        sc.responses.add(sc.responses.get(0));
         TesteeSet ts = createTestee(sc);
 
@@ -317,7 +360,7 @@ public class FileSystemDeploymentServiceUnitTestCase {
         // failed deployments should not be cleaned on initial scan - will retry
         Assert.assertTrue(f5.exists());
         Assert.assertTrue(f6.exists());
-        
+
         // The others should get cleaned in a scan
         Assert.assertFalse(f7.exists());
         Assert.assertFalse(f8.exists());
@@ -333,7 +376,7 @@ public class FileSystemDeploymentServiceUnitTestCase {
         f2 = createFile(new File(tmpDir, "nested"), "nested" + FileSystemDeploymentService.DEPLOYED);
 
         ts.testee.scan();
-        
+
         // Failed deployments should be cleaned on subsequent scans.
         Assert.assertFalse(f5.exists());
         Assert.assertFalse(f6.exists());
@@ -1335,11 +1378,11 @@ public class FileSystemDeploymentServiceUnitTestCase {
     }
 
     private TesteeSet createTestee(String... existingContent) throws OperationFailedException {
-        return createTestee(new MockServerController(new MockDeploymentRepository(), existingContent));
+        return createTestee(new MockServerController(existingContent));
     }
 
     private TesteeSet createTestee(final ScheduledExecutorService executorService, final String... existingContent) throws OperationFailedException {
-        return createTestee(new MockServerController(new MockDeploymentRepository(), existingContent), executorService);
+        return createTestee(new MockServerController(existingContent), executorService);
     }
 
     private TesteeSet createTestee(final MockServerController sc) throws OperationFailedException {
@@ -1347,10 +1390,9 @@ public class FileSystemDeploymentServiceUnitTestCase {
     }
 
     private TesteeSet createTestee(final MockServerController sc, final ScheduledExecutorService executor) throws OperationFailedException {
-        final MockDeploymentRepository repo = new MockDeploymentRepository();
-        final FileSystemDeploymentService testee = new FileSystemDeploymentService(null, tmpDir, null, sc, executor, repo, repo);
-        testee.startScanner();
-        return new TesteeSet(testee, repo, sc);
+        final FileSystemDeploymentService testee = new FileSystemDeploymentService(null, tmpDir, null, sc, executor);
+        testee.startScanner(new DefaultDeploymentOperations(sc));
+        return new TesteeSet(testee, sc);
     }
 
     private File createFile(String fileName) throws IOException {
@@ -1366,6 +1408,23 @@ public class FileSystemDeploymentServiceUnitTestCase {
         try {
             PrintWriter writer = new PrintWriter(fos);
             writer.write(fileName);
+            writer.close();
+        }
+        finally {
+            fos.close();
+        }
+        assertTrue(f.exists());
+        return f;
+    }
+
+    private File createXmlFile(String fileName, String contents) throws IOException {
+        tmpDir.mkdirs();
+
+        File f = new File(tmpDir, fileName);
+        FileOutputStream fos = new FileOutputStream(f);
+        try {
+            PrintWriter writer = new PrintWriter(fos);
+            writer.write(contents);
             writer.close();
         }
         finally {
@@ -1393,57 +1452,15 @@ public class FileSystemDeploymentServiceUnitTestCase {
 
     private static class TesteeSet {
         private final FileSystemDeploymentService testee;
-        private final MockDeploymentRepository repo;
         private final MockServerController controller;
 
-        public TesteeSet(FileSystemDeploymentService testee, MockDeploymentRepository repo, MockServerController sc) {
+        public TesteeSet(FileSystemDeploymentService testee, MockServerController sc) {
             this.testee = testee;
-            this.repo = repo;
             this.controller = sc;
         }
     }
 
-    private static class MockDeploymentRepository implements ServerDeploymentRepository, ContentRepository {
-
-        private Set<byte[]> content = new HashSet<byte[]>(2);
-
-        @Override
-        public byte[] addContent(InputStream stream) throws IOException {
-            byte[] bytes = new byte[20];
-            random.nextBytes(bytes);
-            content.add(bytes);
-            return bytes;
-        }
-
-        @Override
-        public VirtualFile getContent(byte[] hash) {
-            throw new RuntimeException("NYI: org.jboss.as.server.deployment.scanner.FileSystemDeploymentServiceUnitTestCase.MockDeploymentRepository.getContent");
-        }
-
-        @Override
-        public boolean hasContent(byte[] hash) {
-            return content.contains(hash);
-        }
-
-        @Override
-        public void removeContent(byte[] hash) {
-            throw new RuntimeException("NYI: org.jboss.as.server.deployment.scanner.FileSystemDeploymentServiceUnitTestCase.MockDeploymentRepository.removeContent");
-        }
-
-        /** {@inheritDoc} */
-        @Override
-        public Closeable mountDeploymentContent(VirtualFile contents, VirtualFile mountPoint, boolean mountExploded) throws IOException {
-            return new Closeable() {
-                @Override
-                public void close() throws IOException {
-                    //
-                }
-            };
-        }
-
-    }
-
-    private static class MockServerController implements ModelControllerClient {
+    private static class MockServerController implements ModelControllerClient, DeploymentOperations.Factory {
 
         private final List<ModelNode> requests = new ArrayList<ModelNode>(1);
         private final List<Response> responses = new ArrayList<Response>(1);
@@ -1486,6 +1503,11 @@ public class FileSystemDeploymentServiceUnitTestCase {
             throw new UnsupportedOperationException();
         }
 
+        @Override
+        public DeploymentOperations create() {
+            return new DefaultDeploymentOperations(this);
+        }
+
         private static class Response {
             private final boolean ok;
             private final ModelNode rsp;
@@ -1495,13 +1517,9 @@ public class FileSystemDeploymentServiceUnitTestCase {
             }
         }
 
-        MockServerController(ContentRepository repo, String... existingDeployments) {
+        MockServerController(String... existingDeployments) {
             for (String dep : existingDeployments) {
-                try {
-                    added.put(dep, repo.addContent(null));
-                } catch (IOException e) {
-                    // impossible
-                }
+                added.put(dep, randomHash());
             }
         }
 

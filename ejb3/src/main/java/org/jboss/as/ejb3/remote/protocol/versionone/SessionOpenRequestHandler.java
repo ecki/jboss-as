@@ -23,15 +23,18 @@
 package org.jboss.as.ejb3.remote.protocol.versionone;
 
 import org.jboss.as.ee.component.Component;
+import org.jboss.as.ejb3.EjbMessages;
 import org.jboss.as.ejb3.component.stateful.StatefulSessionComponent;
 import org.jboss.as.ejb3.deployment.DeploymentRepository;
 import org.jboss.as.ejb3.deployment.EjbDeploymentInformation;
+import org.jboss.ejb.client.Affinity;
 import org.jboss.ejb.client.SessionID;
 import org.jboss.ejb.client.remoting.PackedInteger;
-import org.jboss.ejb.client.remoting.RemotingAttachments;
 import org.jboss.logging.Logger;
-import org.jboss.remoting3.Channel;
+import org.jboss.marshalling.Marshaller;
+import org.jboss.marshalling.MarshallerFactory;
 import org.jboss.remoting3.MessageInputStream;
+import org.jboss.remoting3.MessageOutputStream;
 import org.xnio.IoUtils;
 
 import java.io.DataInputStream;
@@ -40,7 +43,7 @@ import java.io.IOException;
 import java.util.concurrent.ExecutorService;
 
 /**
- * User: jpai
+ * @author Jaikiran Pai
  */
 class SessionOpenRequestHandler extends EJBIdentifierBasedMessageHandler {
 
@@ -50,16 +53,19 @@ class SessionOpenRequestHandler extends EJBIdentifierBasedMessageHandler {
     private static final byte HEADER_EJB_NOT_STATEFUL = 0x0D;
 
     private final ExecutorService executorService;
+    private final MarshallerFactory marshallerFactory;
 
-    SessionOpenRequestHandler(final DeploymentRepository deploymentRepository, final String marshallingStrategy, final ExecutorService executorService) {
-        super(deploymentRepository, marshallingStrategy);
+    SessionOpenRequestHandler(final DeploymentRepository deploymentRepository, final MarshallerFactory marshallerFactory,
+                              final ExecutorService executorService) {
+        super(deploymentRepository);
+        this.marshallerFactory = marshallerFactory;
         this.executorService = executorService;
     }
 
     @Override
-    public void processMessage(Channel channel, MessageInputStream messageInputStream) throws IOException {
+    public void processMessage(ChannelAssociation channelAssociation, MessageInputStream messageInputStream) throws IOException {
         if (messageInputStream == null) {
-            throw new IllegalArgumentException("Cannot read from null message inputstream");
+            throw EjbMessages.MESSAGES.messageInputStreamCannotBeNull();
         }
         final DataInputStream dataInputStream = new DataInputStream(messageInputStream);
         // read invocation id
@@ -71,27 +77,31 @@ class SessionOpenRequestHandler extends EJBIdentifierBasedMessageHandler {
 
         final EjbDeploymentInformation ejbDeploymentInformation = this.findEJB(appName, moduleName, distinctName, beanName);
         if (ejbDeploymentInformation == null) {
-            this.writeNoSuchEJBFailureMessage(channel, invocationId, appName, moduleName, distinctName, beanName, null);
+            this.writeNoSuchEJBFailureMessage(channelAssociation, invocationId, appName, moduleName, distinctName, beanName, null);
             return;
         }
         final Component component = ejbDeploymentInformation.getEjbComponent();
         if (!(component instanceof StatefulSessionComponent)) {
             final String failureMessage = "EJB " + beanName + " is not a Stateful Session bean in app: " + appName + " module: " + moduleName + " distinct name:" + distinctName;
-            this.writeInvocationFailure(channel, HEADER_EJB_NOT_STATEFUL, invocationId, failureMessage);
+            this.writeInvocationFailure(channelAssociation, HEADER_EJB_NOT_STATEFUL, invocationId, failureMessage);
             return;
         }
-        // read the attachments
-        final RemotingAttachments attachments = this.readAttachments(dataInputStream);
-
         final StatefulSessionComponent statefulSessionComponent = (StatefulSessionComponent) component;
         // generate the session id and write out the response on a separate thread
-        executorService.submit(new SessionIDGeneratorTask(statefulSessionComponent, channel, invocationId, attachments));
+        executorService.submit(new SessionIDGeneratorTask(statefulSessionComponent, channelAssociation, invocationId));
 
     }
 
-    private void writeSessionId(final Channel channel, final short invocationId, final SessionID sessionID, final RemotingAttachments attachments) throws IOException {
+    private void writeSessionId(final ChannelAssociation channelAssociation, final short invocationId, final SessionID sessionID, final Affinity hardAffinity) throws IOException {
         final byte[] sessionIdBytes = sessionID.getEncodedForm();
-        final DataOutputStream dataOutputStream = new DataOutputStream(channel.writeMessage());
+        final DataOutputStream dataOutputStream;
+        final MessageOutputStream messageOutputStream;
+        try {
+            messageOutputStream = channelAssociation.acquireChannelMessageOutputStream();
+        } catch (Exception e) {
+            throw EjbMessages.MESSAGES.failedToOpenMessageOutputStream(e);
+        }
+        dataOutputStream = new DataOutputStream(messageOutputStream);
         try {
             // write out header
             dataOutputStream.writeByte(HEADER_SESSION_OPEN_RESPONSE);
@@ -101,9 +111,15 @@ class SessionOpenRequestHandler extends EJBIdentifierBasedMessageHandler {
             PackedInteger.writePackedInteger(dataOutputStream, sessionIdBytes.length);
             // write out the session id bytes
             dataOutputStream.write(sessionIdBytes);
-            // write out the attachments
-            this.writeAttachments(dataOutputStream, attachments);
+            // now marshal the hard affinity associated with this session
+            final Marshaller marshaller = this.prepareForMarshalling(this.marshallerFactory, dataOutputStream);
+            marshaller.writeObject(hardAffinity);
+
+            // finish marshalling
+            marshaller.finish();
+
         } finally {
+            channelAssociation.releaseChannelMessageOutputStream(messageOutputStream);
             dataOutputStream.close();
         }
     }
@@ -114,16 +130,14 @@ class SessionOpenRequestHandler extends EJBIdentifierBasedMessageHandler {
     private class SessionIDGeneratorTask implements Runnable {
 
         private final StatefulSessionComponent statefulSessionComponent;
-        private final Channel channel;
+        private final ChannelAssociation channelAssociation;
         private final short invocationId;
-        private final RemotingAttachments attachments;
 
 
-        SessionIDGeneratorTask(final StatefulSessionComponent statefulSessionComponent, final Channel channel, final short invocationId, final RemotingAttachments attachments) {
+        SessionIDGeneratorTask(final StatefulSessionComponent statefulSessionComponent, final ChannelAssociation channelAssociation, final short invocationId) {
             this.statefulSessionComponent = statefulSessionComponent;
             this.invocationId = invocationId;
-            this.attachments = attachments;
-            this.channel = channel;
+            this.channelAssociation = channelAssociation;
         }
 
         @Override
@@ -133,14 +147,16 @@ class SessionOpenRequestHandler extends EJBIdentifierBasedMessageHandler {
                 try {
                     sessionID = statefulSessionComponent.createSession();
                 } catch (Throwable t) {
-                    SessionOpenRequestHandler.this.writeException(channel, invocationId, t, attachments);
+                    SessionOpenRequestHandler.this.writeException(channelAssociation, SessionOpenRequestHandler.this.marshallerFactory, invocationId, t, null);
                     return;
                 }
-                SessionOpenRequestHandler.this.writeSessionId(channel, invocationId, sessionID, attachments);
+                // get the affinity of the component
+                final Affinity hardAffinity = statefulSessionComponent.getCache().getStrictAffinity();
+                SessionOpenRequestHandler.this.writeSessionId(channelAssociation, invocationId, sessionID, hardAffinity);
             } catch (IOException ioe) {
-                logger.error("IOException while generating session id for invocation id: " + invocationId + " on channel " + channel, ioe);
+                logger.error("IOException while generating session id for invocation id: " + invocationId + " on channel " + channelAssociation.getChannel(), ioe);
                 // close the channel
-                IoUtils.safeClose(this.channel);
+                IoUtils.safeClose(this.channelAssociation.getChannel());
                 return;
             }
         }

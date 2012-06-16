@@ -23,6 +23,7 @@
 package org.jboss.as.host.controller;
 
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.HOST;
+import static org.jboss.as.host.controller.HostControllerMessages.MESSAGES;
 
 import java.io.File;
 import java.io.OutputStream;
@@ -30,6 +31,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 
+import org.jboss.as.controller.extension.ExtensionRegistry;
 import org.jboss.as.controller.PathAddress;
 import org.jboss.as.controller.persistence.ConfigurationFile;
 import org.jboss.as.controller.persistence.ConfigurationPersistenceException;
@@ -51,47 +53,53 @@ public class HostControllerConfigurationPersister implements ExtensibleConfigura
     private final ExtensibleConfigurationPersister hostPersister;
     private final LocalHostControllerInfo hostControllerInfo;
     private final ExecutorService executorService;
+    private final ExtensionRegistry extensionRegistry;
     private Boolean slave;
 
-    public HostControllerConfigurationPersister(final HostControllerEnvironment environment, LocalHostControllerInfo localHostControllerInfo, ExecutorService executorService) {
+    public HostControllerConfigurationPersister(final HostControllerEnvironment environment, final LocalHostControllerInfo localHostControllerInfo,
+                                                final ExecutorService executorService, final ExtensionRegistry extensionRegistry) {
         this.environment = environment;
         this.hostControllerInfo = localHostControllerInfo;
         this.executorService = executorService;
+        this.extensionRegistry = extensionRegistry;
         final File configDir = environment.getDomainConfigurationDir();
         final ConfigurationFile configurationFile = environment.getHostConfigurationFile();
-        this.hostPersister = ConfigurationPersisterFactory.createHostXmlConfigurationPersister(configDir, configurationFile, executorService);
+        this.hostPersister = ConfigurationPersisterFactory.createHostXmlConfigurationPersister(configurationFile, environment.getHostControllerName());
     }
 
     public void initializeDomainConfigurationPersister(boolean slave) {
         if (domainPersister != null) {
-            throw new IllegalStateException("Configuration persister for domain model is already initialized");
+            throw MESSAGES.configurationPersisterAlreadyInitialized();
         }
 
         final File configDir = environment.getDomainConfigurationDir();
         if (slave) {
-            if (environment.isBackupDomainFiles() || environment.isUseCachedDc()) {
-                domainPersister = ConfigurationPersisterFactory.createCachedRemoteDomainXmlConfigurationPersister(configDir, executorService);
+            if (environment.isBackupDomainFiles()) {
+                // --backup
+                domainPersister = ConfigurationPersisterFactory.createRemoteBackupDomainXmlConfigurationPersister(configDir, executorService, extensionRegistry);
+            } else if(environment.isUseCachedDc()) {
+                // --cached-dc
+                domainPersister = ConfigurationPersisterFactory.createCachedRemoteDomainXmlConfigurationPersister(configDir, executorService, extensionRegistry);
             } else {
-                domainPersister = ConfigurationPersisterFactory.createTransientDomainXmlConfigurationPersister(executorService);
+                domainPersister = ConfigurationPersisterFactory.createTransientDomainXmlConfigurationPersister(executorService, extensionRegistry);
             }
         } else {
             final ConfigurationFile configurationFile = environment.getDomainConfigurationFile();
-            domainPersister = ConfigurationPersisterFactory.createDomainXmlConfigurationPersister(configDir, configurationFile, executorService);
+            domainPersister = ConfigurationPersisterFactory.createDomainXmlConfigurationPersister(configurationFile, executorService, extensionRegistry);
         }
-
         this.slave = Boolean.valueOf(slave);
     }
 
     public boolean isSlave() {
         if (slave == null) {
-            throw new IllegalStateException("Must call initializeDomainConfigurationPersister before checking for slave status");
+            throw MESSAGES.mustInvokeBeforeCheckingSlaveStatus("initializeDomainConfigurationPersister");
         }
         return slave;
     }
 
     public ExtensibleConfigurationPersister getDomainPersister() {
         if (domainPersister == null) {
-            throw new IllegalStateException("Must call initializeDomainConfigurationPersister before persisting the domain model");
+            throw MESSAGES.mustInvokeBeforePersisting("initializeDomainConfigurationPersister");
         }
         return domainPersister;
     }
@@ -179,7 +187,21 @@ public class HostControllerConfigurationPersister implements ExtensibleConfigura
     }
 
     @Override
+    public void unregisterSubsystemWriter(String name) {
+        domainPersister.unregisterSubsystemWriter(name);
+    }
+
+    @Override
+    @Deprecated
+    @SuppressWarnings("deprecation")
     public void registerSubsystemDeploymentWriter(String name, XMLElementWriter<SubsystemMarshallingContext> writer) {
         domainPersister.registerSubsystemDeploymentWriter(name, writer);
+    }
+
+    @Override
+    @Deprecated
+    @SuppressWarnings("deprecation")
+    public void unregisterSubsystemDeploymentWriter(String name) {
+        domainPersister.unregisterSubsystemDeploymentWriter(name);
     }
 }

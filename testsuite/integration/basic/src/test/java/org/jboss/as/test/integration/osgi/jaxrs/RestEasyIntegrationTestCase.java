@@ -22,17 +22,26 @@
 
 package org.jboss.as.test.integration.osgi.jaxrs;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.jar.JarFile;
+
+import javax.inject.Inject;
+
 import org.jboss.arquillian.container.test.api.Deployer;
 import org.jboss.arquillian.container.test.api.Deployment;
 import org.jboss.arquillian.junit.Arquillian;
 import org.jboss.arquillian.test.api.ArquillianResource;
-import org.jboss.as.test.integration.osgi.OSGiTestSupport;
+import org.jboss.as.test.integration.common.HttpRequest;
 import org.jboss.as.test.integration.osgi.xservice.api.Echo;
 import org.jboss.as.test.integration.osgi.xservice.bundle.TargetBundleActivator;
 import org.jboss.logging.Logger;
 import org.jboss.modules.ModuleIdentifier;
-import org.jboss.osgi.testing.ManifestBuilder;
-import org.jboss.osgi.testing.OSGiManifestBuilder;
+import org.jboss.osgi.spi.ManifestBuilder;
+import org.jboss.osgi.spi.OSGiManifestBuilder;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
 import org.jboss.shrinkwrap.api.asset.Asset;
 import org.jboss.shrinkwrap.api.spec.JavaArchive;
@@ -41,11 +50,6 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleActivator;
-
-import javax.inject.Inject;
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.jar.JarFile;
 
 import static org.junit.Assert.assertEquals;
 
@@ -69,7 +73,7 @@ public class RestEasyIntegrationTestCase {
     @Deployment
     public static JavaArchive createDeployment() {
         final JavaArchive archive = ShrinkWrap.create(JavaArchive.class, "jaxrs-osgi-target");
-        archive.addClasses(OSGiTestSupport.class, Echo.class, TargetBundleActivator.class);
+        archive.addClasses(HttpRequest.class, Echo.class, TargetBundleActivator.class);
         archive.setManifest(new Asset() {
             public InputStream openStream() {
                 OSGiManifestBuilder builder = OSGiManifestBuilder.newInstance();
@@ -87,7 +91,7 @@ public class RestEasyIntegrationTestCase {
     public static WebArchive endpointWar() {
         final WebArchive archive = ShrinkWrap.create(WebArchive.class, DEPLOYMENT_NAME);
         archive.addClass(SimpleRestEndpoint.class);
-        archive.setWebXML("osgi/jaxrs/web.xml");
+        archive.setWebXML(RestEasyIntegrationTestCase.class.getPackage(), "web.xml");
         // [SHRINKWRAP-278] WebArchive.setManifest() results in WEB-INF/classes/META-INF/MANIFEST.MF
         archive.add(new Asset() {
             public InputStream openStream() {
@@ -113,9 +117,21 @@ public class RestEasyIntegrationTestCase {
         }
     }
 
-    private String getHttpResponse(String message) throws IOException {
-        String reqPath = "/resteasy-osgi-client/rest/echo/" + message;
-        return OSGiTestSupport.getHttpResponse("localhost", 8080, reqPath, 2000);
+    private String getHttpResponse(String message) throws IOException, ExecutionException, TimeoutException {
+        String reqPath = "http://" + formatPossibleIpv6Address(System.getProperty("test.bind.address", "localhost")) + ":8080/resteasy-osgi-client/rest/echo/" + message;
+        return HttpRequest.get(reqPath, 10, TimeUnit.SECONDS);
     }
 
+    public static String formatPossibleIpv6Address(String address) {
+        if (address == null) {
+            return address;
+        }
+        if (!address.contains(":")) {
+            return address;
+        }
+        if (address.startsWith("[") && address.endsWith("]")) {
+            return address;
+        }
+        return "[" + address + "]";
+    }
 }

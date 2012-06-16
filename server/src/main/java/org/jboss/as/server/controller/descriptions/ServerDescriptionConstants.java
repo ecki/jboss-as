@@ -32,9 +32,11 @@ public final class ServerDescriptionConstants {
 
     public static final String SERVER_ENVIRONMENT = "server-environment";
 
-    public static final String SERVER_STATE = "server-state";
+    public static final String PROCESS_STATE = "server-state";
 
     public static final String PROCESS_TYPE = "process-type";
 
     public static final String LAUNCH_TYPE = "launch-type";
+
+    public static final String RUNNING_MODE = "running-mode";
 }

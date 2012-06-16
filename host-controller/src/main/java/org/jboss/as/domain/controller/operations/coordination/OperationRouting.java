@@ -28,6 +28,7 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SERVER;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.STEPS;
+import static org.jboss.as.domain.controller.DomainControllerMessages.MESSAGES;
 
 import java.util.Collection;
 import java.util.HashSet;
@@ -59,15 +60,18 @@ public class OperationRouting {
         String targetHost = null;
         final PathAddress address = PathAddress.pathAddress(operation.get(OP_ADDR));
         final String operationName = operation.get(OP).asString();
+        boolean compositeOp = false;
         if (address.size() > 0) {
             PathElement first = address.getElement(0);
             if (HOST.equals(first.getKey())) {
                 targetHost = first.getValue();
             }
+        } else {
+            compositeOp = COMPOSITE.equals(operationName);
         }
 
         if (targetHost != null) {
-            Set<OperationEntry.Flag> flags = registry.getOperationFlags(PathAddress.EMPTY_ADDRESS, operation.require(OP).asString());
+            Set<OperationEntry.Flag> flags = registry.getOperationFlags(PathAddress.EMPTY_ADDRESS, operationName);
             checkNull(operation, flags);
             if(flags.contains(OperationEntry.Flag.READ_ONLY) && !flags.contains(OperationEntry.Flag.DOMAIN_PUSH_TO_SERVERS)) {
                 routing =  new OperationRouting(targetHost, false);
@@ -86,9 +90,38 @@ public class OperationRouting {
                     routing = new OperationRouting(targetHost, true);
                 }
             }
+        } else if (compositeOp) {
+            // Recurse into the steps to see what's required
+            if (operation.hasDefined(STEPS)) {
+                Set<String> allHosts = new HashSet<String>();
+                boolean twoStep = false;
+                for (ModelNode step : operation.get(STEPS).asList()) {
+                    ImmutableManagementResourceRegistration stepRegistry = registry.getSubModel(PathAddress.pathAddress(step.get(OP_ADDR)));
+                    OperationRouting stepRouting = determineRouting(step, localHostControllerInfo, stepRegistry);
+                    if (stepRouting.isTwoStep()) {
+                        twoStep = true;
+                    }
+                    allHosts.addAll(stepRouting.getHosts());
+                }
+
+                // AS7-2907 Always process as a two-step so the results for a composite op are consistent in all cases
+                // routing = new OperationRouting(allHosts.iterator().next(), twoStep);
+//                if (allHosts.size() == 1) {
+//                    routing = new OperationRouting(allHosts.iterator().next(), true);
+//                }
+//                else {
+//                    routing = new OperationRouting(allHosts);
+//                }
+                routing = new OperationRouting(allHosts);
+            }
+            else {
+                // empty; this will be an error but don't deal with it here
+                // Let our DomainModel deal with it
+                routing = new OperationRouting(localHostControllerInfo.getLocalHostName(), false);
+            }
         } else {
             // Domain level operation
-            Set<OperationEntry.Flag> flags = registry.getOperationFlags(PathAddress.EMPTY_ADDRESS, operation.require(OP).asString());
+            Set<OperationEntry.Flag> flags = registry.getOperationFlags(PathAddress.EMPTY_ADDRESS, operationName);
             checkNull(operation, flags);
             if (flags.contains(OperationEntry.Flag.READ_ONLY) && !flags.contains(OperationEntry.Flag.DOMAIN_PUSH_TO_SERVERS)) {
                 // Direct read of domain model
@@ -103,37 +136,8 @@ public class OperationRouting {
         }
 
         if (routing == null) {
-            if (COMPOSITE.equals(operationName)){
-                // Recurse into the steps to see what's required
-                if (operation.hasDefined(STEPS)) {
-                    Set<String> allHosts = new HashSet<String>();
-                    boolean twoStep = false;
-                    for (ModelNode step : operation.get(STEPS).asList()) {
-                        ImmutableManagementResourceRegistration stepRegistry = registry.getSubModel(PathAddress.pathAddress(step.get(OP_ADDR)));
-                        OperationRouting stepRouting = determineRouting(step, localHostControllerInfo, stepRegistry);
-                        if (stepRouting.isTwoStep()) {
-                            twoStep = true;
-                        }
-                        allHosts.addAll(stepRouting.getHosts());
-                    }
-
-                    if (allHosts.size() == 1) {
-                        routing = new OperationRouting(allHosts.iterator().next(), twoStep);
-                    }
-                    else {
-                        routing = new OperationRouting(allHosts);
-                    }
-                }
-                else {
-                    // empty; this will be an error but don't deal with it here
-                    // Let our DomainModel deal with it
-                    routing = new OperationRouting(localHostControllerInfo.getLocalHostName(), false);
-                }
-            }
-            else {
-                // Write operation to the model or a read that needs to be pushed to servers; everyone gets it
-                routing = new OperationRouting(true);
-            }
+            // Write operation to the model or a read that needs to be pushed to servers; everyone gets it
+            routing = new OperationRouting(true);
         }
         return routing;
 
@@ -141,27 +145,26 @@ public class OperationRouting {
 
     private static void checkNull(final ModelNode operation, final Object toCheck) throws OperationFailedException {
         if (toCheck == null) {
-            String msg = String.format("No handler for %s at address %s", operation.require(OP).asString(),
-                                        PathAddress.pathAddress(operation.get(OP_ADDR)));
-            throw new OperationFailedException(new ModelNode().set(msg));
+            throw new OperationFailedException(new ModelNode().set(MESSAGES.noHandlerForOperation( operation.require(OP).asString(),
+                    PathAddress.pathAddress(operation.get(OP_ADDR)))));
         }
 
     }
 
+    private final String singleHost;
     private final Set<String> hosts = new HashSet<String>();
     private final boolean twoStep;
-    private final boolean routeToMaster;
 
     /** Constructor for domain-level requests where we are not master */
     private OperationRouting() {
         twoStep = false;
-        routeToMaster = true;
+        singleHost = null;
     }
 
     /** Constructor for multi-host ops */
     private OperationRouting(final boolean twoStep) {
         this.twoStep = twoStep;
-        routeToMaster = !twoStep;
+        singleHost = null;
     }
 
     /**
@@ -173,7 +176,7 @@ public class OperationRouting {
     public OperationRouting(String host, boolean twoStep) {
         this.hosts.add(host);
         this.twoStep = twoStep;
-        routeToMaster = false;
+        singleHost = host;
     }
 
     /**
@@ -184,7 +187,7 @@ public class OperationRouting {
     public OperationRouting(final Collection<String> hosts) {
         this.hosts.addAll(hosts);
         this.twoStep = true;
-        routeToMaster = false;
+        singleHost = null;
     }
 
     public Set<String> getHosts() {
@@ -192,22 +195,22 @@ public class OperationRouting {
     }
 
     public String getSingleHost() {
-        return hosts.size() == 1 ? hosts.iterator().next() : null;
+        return singleHost;
     }
 
     public boolean isTwoStep() {
         return twoStep;
     }
 
-    public boolean isRouteToMaster() {
-        return routeToMaster;
-    }
-
     public boolean isLocalOnly(final String localHostName) {
-        return localHostName.equals(getSingleHost());
+        if (singleHost != null) {
+            return localHostName.equals(singleHost);
+        } else {
+            return hosts.size() == 1 && hosts.contains(localHostName);
+        }
     }
 
     public boolean isLocalCallNeeded(final String localHostName) {
-        return isLocalOnly(localHostName) || hosts.size() == 0 || hosts.contains(localHostName);
+        return localHostName.equals(singleHost) || hosts.size() == 0 || hosts.contains(localHostName);
     }
 }

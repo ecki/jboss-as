@@ -22,26 +22,24 @@
 
 package org.jboss.as.server;
 
-import static org.jboss.as.server.ServerLogger.AS_ROOT_LOGGER;
-import static org.jboss.as.server.ServerLogger.CONFIG_LOGGER;
-
 import java.lang.management.ManagementFactory;
 import java.lang.management.RuntimeMXBean;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.ServiceLoader;
 import java.util.TreeSet;
 
 import org.jboss.as.controller.ControlledProcessState;
-import org.jboss.as.server.deployment.repository.impl.ContentRepositoryImpl;
-import org.jboss.as.server.deployment.repository.impl.ServerDeploymentRepositoryImpl;
-import org.jboss.as.server.mgmt.ShutdownHandler;
-import org.jboss.as.server.mgmt.ShutdownHandlerImpl;
+import org.jboss.as.controller.RunningModeControl;
+import org.jboss.as.repository.ContentRepository;
+import org.jboss.as.server.deployment.DeploymentMountProvider;
+import org.jboss.as.server.mgmt.domain.RemoteFileRepository;
 import org.jboss.as.server.moduleservice.ExternalModuleService;
 import org.jboss.as.server.moduleservice.ModuleIndexService;
 import org.jboss.as.server.moduleservice.ServiceModuleLoader;
-import org.jboss.as.server.services.path.AbsolutePathService;
-import org.jboss.as.version.Version;
+import org.jboss.as.server.services.security.AbstractVaultReader;
 import org.jboss.msc.service.Service;
 import org.jboss.msc.service.ServiceActivator;
 import org.jboss.msc.service.ServiceActivatorContext;
@@ -55,22 +53,32 @@ import org.jboss.msc.service.StartException;
 import org.jboss.msc.service.StopContext;
 import org.jboss.threads.AsyncFuture;
 
+import static org.jboss.as.server.ServerLogger.AS_ROOT_LOGGER;
+import static org.jboss.as.server.ServerLogger.CONFIG_LOGGER;
+
 /**
+ * The root service for an Application Server process.
+ *
  * @author <a href="mailto:david.lloyd@redhat.com">David M. Lloyd</a>
  */
 final class ApplicationServerService implements Service<AsyncFuture<ServiceContainer>> {
 
     private final List<ServiceActivator> extraServices;
     private final Bootstrap.Configuration configuration;
+    private final RunningModeControl runningModeControl;
     private final ControlledProcessState processState;
+    private final boolean standalone;
     private volatile FutureServiceContainer futureContainer;
     private volatile long startTime;
 
-    ApplicationServerService(final List<ServiceActivator> extraServices, final Bootstrap.Configuration configuration) {
+    ApplicationServerService(final List<ServiceActivator> extraServices, final Bootstrap.Configuration configuration,
+                             final ControlledProcessState processState) {
         this.extraServices = extraServices;
         this.configuration = configuration;
+        runningModeControl = configuration.getRunningModeControl();
         startTime = configuration.getStartTime();
-        processState = new ControlledProcessState(configuration.getServerEnvironment().isStandalone());
+        standalone = configuration.getServerEnvironment().isStandalone();
+        this.processState = processState;
     }
 
     @Override
@@ -84,20 +92,21 @@ final class ApplicationServerService implements Service<AsyncFuture<ServiceConta
         // Install the environment before doing anything
         serverEnvironment.install();
 
-        AS_ROOT_LOGGER.serverStarting(Version.AS_VERSION, Version.AS_RELEASE_CODENAME);
+        String prettyVersion = serverEnvironment.getProductConfig().getPrettyVersionString();
+        AS_ROOT_LOGGER.serverStarting(prettyVersion);
         if (CONFIG_LOGGER.isDebugEnabled()) {
             final Properties properties = System.getProperties();
             final StringBuilder b = new StringBuilder(8192);
-            b.append("Configured system properties:");
+            b.append(ServerMessages.MESSAGES.configuredSystemPropertiesLabel());
             for (String property : new TreeSet<String>(properties.stringPropertyNames())) {
                 b.append("\n\t").append(property).append(" = ").append(properties.getProperty(property, "<undefined>"));
             }
             CONFIG_LOGGER.debug(b);
-            CONFIG_LOGGER.debugf("VM Arguments: %s", getVMArguments());
+            CONFIG_LOGGER.debugf(ServerMessages.MESSAGES.vmArgumentsLabel(getVMArguments()));
             if (CONFIG_LOGGER.isTraceEnabled()) {
                 b.setLength(0);
                 final Map<String,String> env = System.getenv();
-                b.append("Configured system environment:");
+                b.append(ServerMessages.MESSAGES.configuredSystemEnvironmentLabel());
                 for (String key : new TreeSet<String>(env.keySet())) {
                     b.append("\n\t").append(key).append(" = ").append(env.get(key));
                 }
@@ -118,15 +127,18 @@ final class ApplicationServerService implements Service<AsyncFuture<ServiceConta
 
         CurrentServiceContainer.setServiceContainer(context.getController().getServiceContainer());
 
-        final BootstrapListener bootstrapListener = new BootstrapListener(container, startTime, serviceTarget, futureContainer, configuration);
+        final BootstrapListener bootstrapListener = new BootstrapListener(container, startTime, serviceTarget, futureContainer, prettyVersion);
         serviceTarget.addListener(ServiceListener.Inheritance.ALL, bootstrapListener);
         myController.addListener(bootstrapListener);
-        ContentRepositoryImpl contentRepository = ContentRepositoryImpl.addService(serviceTarget, serverEnvironment.getServerDeployDir());
-        ServerDeploymentRepositoryImpl.addService(serviceTarget, contentRepository);
+        RemoteFileRepository remoteFileRepository = standalone ? null : RemoteFileRepository.addService(serviceTarget, serverEnvironment.getServerContentDir());
+        ContentRepository.Factory.addService(serviceTarget, serverEnvironment.getServerContentDir());
+        DeploymentMountProvider.Factory.addService(serviceTarget);
         ServiceModuleLoader.addService(serviceTarget, configuration);
         ExternalModuleService.addService(serviceTarget);
         ModuleIndexService.addService(serviceTarget);
-        ServerService.addService(serviceTarget, configuration, processState, bootstrapListener, new ServerRuntimeVaultReader());
+        final AbstractVaultReader vaultReader = service(AbstractVaultReader.class);
+        AS_ROOT_LOGGER.debugf("Using VaultReader %s", vaultReader);
+        ServerService.addService(serviceTarget, configuration, processState, bootstrapListener, runningModeControl, vaultReader, remoteFileRepository);
         final ServiceActivatorContext serviceActivatorContext = new ServiceActivatorContext() {
             @Override
             public ServiceTarget getServiceTarget() {
@@ -145,31 +157,20 @@ final class ApplicationServerService implements Service<AsyncFuture<ServiceConta
 
         // TODO: decide the fate of these
 
-        // Graceful shutdown
-        serviceTarget.addService(ShutdownHandler.SERVICE_NAME, new ShutdownHandlerImpl()).install();
-
         // Add server environment
         ServerEnvironmentService.addService(serverEnvironment, serviceTarget);
 
-        // Add environment paths
-        AbsolutePathService.addService(ServerEnvironment.HOME_DIR, serverEnvironment.getHomeDir().getAbsolutePath(), serviceTarget);
-        AbsolutePathService.addService(ServerEnvironment.SERVER_BASE_DIR, serverEnvironment.getServerBaseDir().getAbsolutePath(), serviceTarget);
-        AbsolutePathService.addService(ServerEnvironment.SERVER_CONFIG_DIR, serverEnvironment.getServerConfigurationDir().getAbsolutePath(), serviceTarget);
-        AbsolutePathService.addService(ServerEnvironment.SERVER_DATA_DIR, serverEnvironment.getServerDataDir().getAbsolutePath(), serviceTarget);
-        AbsolutePathService.addService(ServerEnvironment.SERVER_LOG_DIR, serverEnvironment.getServerLogDir().getAbsolutePath(), serviceTarget);
-        AbsolutePathService.addService(ServerEnvironment.SERVER_TEMP_DIR, serverEnvironment.getServerTempDir().getAbsolutePath(), serviceTarget);
-
-        // Add system paths
-        AbsolutePathService.addService("user.dir", System.getProperty("user.dir"), serviceTarget);
-        AbsolutePathService.addService("user.home", System.getProperty("user.home"), serviceTarget);
-        AbsolutePathService.addService("java.home", System.getProperty("java.home"), serviceTarget);
+        //Add server path manager service
+        ServerPathManagerService serverPathManagerService = new ServerPathManagerService();
+        ServerPathManagerService.addService(serviceTarget, serverPathManagerService, serverEnvironment);
 
         // BES 2011/06/11 -- moved this to AbstractControllerService.start()
 //        processState.setRunning();
 
         if (AS_ROOT_LOGGER.isDebugEnabled()) {
             final long nanos = context.getElapsedTime();
-            AS_ROOT_LOGGER.debugf("JBoss AS root service started in %d.%06d ms", Long.valueOf(nanos / 1000000L), Long.valueOf(nanos % 1000000L));
+            AS_ROOT_LOGGER.debugf(prettyVersion + " root service started in %d.%06d ms",
+                    Long.valueOf(nanos / 1000000L), Long.valueOf(nanos % 1000000L));
         }
     }
 
@@ -177,7 +178,8 @@ final class ApplicationServerService implements Service<AsyncFuture<ServiceConta
     public synchronized void stop(final StopContext context) {
         processState.setStopping();
         CurrentServiceContainer.setServiceContainer(null);
-        AS_ROOT_LOGGER.serverStopped(Version.AS_VERSION, Version.AS_RELEASE_CODENAME, Integer.valueOf((int) (context.getElapsedTime() / 1000000L)));
+        String prettyVersion = configuration.getServerEnvironment().getProductConfig().getPrettyVersionString();
+        AS_ROOT_LOGGER.serverStopped(prettyVersion, Integer.valueOf((int) (context.getElapsedTime() / 1000000L)));
     }
 
     @Override
@@ -194,4 +196,12 @@ final class ApplicationServerService implements Service<AsyncFuture<ServiceConta
       }
       return result.toString();
    }
+
+    private static <S> S service(final Class<S> service) {
+        final ServiceLoader<S> serviceLoader = ServiceLoader.load(service);
+        final Iterator<S> it = serviceLoader.iterator();
+        if (it.hasNext())
+            return it.next();
+        return null;
+    }
 }

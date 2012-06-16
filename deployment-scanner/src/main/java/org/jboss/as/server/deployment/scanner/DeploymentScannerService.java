@@ -23,20 +23,15 @@
 package org.jboss.as.server.deployment.scanner;
 
 import java.io.File;
-import java.security.AccessController;
 import java.util.List;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 
 import org.jboss.as.controller.ModelController;
+import org.jboss.as.controller.services.path.PathManager;
+import org.jboss.as.controller.services.path.PathManagerService;
 import org.jboss.as.server.Services;
-import org.jboss.as.server.deployment.repository.api.ContentRepository;
-import org.jboss.as.server.deployment.repository.api.ServerDeploymentRepository;
 import org.jboss.as.server.deployment.scanner.api.DeploymentScanner;
-import org.jboss.as.server.services.path.AbsolutePathService;
-import org.jboss.as.server.services.path.RelativePathService;
 import org.jboss.msc.service.Service;
 import org.jboss.msc.service.ServiceBuilder;
 import org.jboss.msc.service.ServiceController;
@@ -48,7 +43,6 @@ import org.jboss.msc.service.StartContext;
 import org.jboss.msc.service.StartException;
 import org.jboss.msc.service.StopContext;
 import org.jboss.msc.value.InjectedValue;
-import org.jboss.threads.JBossThreadFactory;
 
 /**
  * Service responsible creating a {@code DeploymentScanner}
@@ -63,21 +57,20 @@ public class DeploymentScannerService implements Service<DeploymentScanner> {
     private boolean enabled;
     private boolean autoDeployZipped;
     private boolean autoDeployExploded;
+    private boolean autoDeployXml;
     private Long deploymentTimeout;
     private final String relativeTo;
+    private final String path;
 
     /**
      * The created scanner.
      */
-    private DeploymentScanner scanner;
+    private FileSystemDeploymentService scanner;
 
-
-    private final InjectedValue<String> relativePathValue = new InjectedValue<String>();
-    private final InjectedValue<String> pathValue = new InjectedValue<String>();
+    private final InjectedValue<PathManager> pathManagerValue = new InjectedValue<PathManager>();
     private final InjectedValue<ModelController> controllerValue = new InjectedValue<ModelController>();
-    private final InjectedValue<ServerDeploymentRepository> deploymentRepositoryValue = new InjectedValue<ServerDeploymentRepository>();
-    private final InjectedValue<ContentRepository> contentRepositoryValue = new InjectedValue<ContentRepository>();
     private final InjectedValue<ScheduledExecutorService> scheduledExecutorValue = new InjectedValue<ScheduledExecutorService>();
+    private volatile PathManager.Callback.Handle callbackHandle;
 
     public static ServiceName getServiceName(String repositoryName) {
         return DeploymentScanner.BASE_SERVICE_NAME.append(repositoryName);
@@ -93,53 +86,44 @@ public class DeploymentScannerService implements Service<DeploymentScanner> {
      * @param scanInterval      the scan interval
      * @param scanEnabled       scan enabled
      * @param deploymentTimeout the deployment timeout
+     * @param bootTimeService   the deployment scanner used in the boot time scan
      * @return
      */
-    public static ServiceController<?> addService(final ServiceTarget serviceTarget, final String name, final String relativeTo, final String path,
-                                  final Integer scanInterval, TimeUnit unit, final Boolean autoDeployZip,
-                                  final Boolean autoDeployExploded, final Boolean scanEnabled, final Long deploymentTimeout,
-                                  final List<ServiceController<?>> newControllers,
-                                  final ServiceListener<Object>... listeners) {
-        final DeploymentScannerService service = new DeploymentScannerService(relativeTo, scanInterval, unit, autoDeployZip, autoDeployExploded, scanEnabled, deploymentTimeout);
+    public static ServiceController<DeploymentScanner> addService(final ServiceTarget serviceTarget, final String name, final String relativeTo, final String path,
+                                                                  final Integer scanInterval, TimeUnit unit, final Boolean autoDeployZip,
+                                                                  final Boolean autoDeployExploded, final Boolean autoDeployXml, final Boolean scanEnabled, final Long deploymentTimeout,
+                                                                  final List<ServiceController<?>> newControllers, final FileSystemDeploymentService bootTimeService, final ScheduledExecutorService scheduledExecutorService,
+                                                                  final ServiceListener<Object>... listeners) {
+        final DeploymentScannerService service = new DeploymentScannerService(relativeTo, path, scanInterval, unit, autoDeployZip,
+                autoDeployExploded, autoDeployXml, scanEnabled, deploymentTimeout, bootTimeService);
         final ServiceName serviceName = getServiceName(name);
-        final ServiceName pathService = serviceName.append("path");
-        final ServiceName relativePathService = relativeTo != null ? RelativePathService.pathNameOf(relativeTo) : null;
 
-        if (relativeTo != null) {
-            RelativePathService.addService(pathService, path, false, relativeTo, serviceTarget, newControllers, listeners);
-        } else {
-            AbsolutePathService.addService(pathService, path, serviceTarget, newControllers, listeners);
-        }
-        final ThreadFactory threadFactory = new JBossThreadFactory(new ThreadGroup("DeploymentScanner-threads"), Boolean.FALSE, null, "%G - %t", null, null, AccessController.getContext());
-        final ScheduledExecutorService scheduledExecutorService = Executors.newScheduledThreadPool(2, threadFactory);
-
-        ServiceBuilder builder = serviceTarget.addService(serviceName, service)
-                .addDependency(pathService, String.class, service.pathValue)
+        ServiceBuilder<DeploymentScanner> builder = serviceTarget.addService(serviceName, service)
+                .addDependency(PathManagerService.SERVICE_NAME, PathManager.class, service.pathManagerValue)
                 .addDependency(Services.JBOSS_SERVER_CONTROLLER, ModelController.class, service.controllerValue)
-                .addDependency(ServerDeploymentRepository.SERVICE_NAME, ServerDeploymentRepository.class, service.deploymentRepositoryValue)
-                .addDependency(ContentRepository.SERVICE_NAME, ContentRepository.class, service.contentRepositoryValue)
                 .addDependency(org.jboss.as.server.deployment.Services.JBOSS_DEPLOYMENT_CHAINS)
                 .addInjection(service.scheduledExecutorValue, scheduledExecutorService);
-        if (relativePathService != null) {
-            builder.addDependency(relativePathService, String.class, service.relativePathValue);
-        }
         builder.addListener(listeners);
-        ServiceController<?> svc = builder.setInitialMode(Mode.ACTIVE).install();
+        ServiceController<DeploymentScanner> svc = builder.setInitialMode(Mode.ACTIVE).install();
         if (newControllers != null) {
             newControllers.add(svc);
         }
         return svc;
     }
 
-    DeploymentScannerService(final String relativeTo, final Integer interval, final TimeUnit unit, final Boolean autoDeployZipped,
-                             final Boolean autoDeployExploded, final Boolean enabled, final Long deploymentTimeout) {
+    DeploymentScannerService(final String relativeTo, final String path, final Integer interval, final TimeUnit unit, final Boolean autoDeployZipped,
+                             final Boolean autoDeployExploded, final Boolean autoDeployXml, final Boolean enabled, final Long deploymentTimeout,
+                             final FileSystemDeploymentService bootTimeService) {
         this.relativeTo = relativeTo;
+        this.path = path;
         this.interval = interval == null ? DEFAULT_INTERVAL : interval.longValue();
         this.unit = unit;
         this.autoDeployZipped = autoDeployZipped == null ? true : autoDeployZipped.booleanValue();
         this.autoDeployExploded = autoDeployExploded == null ? false : autoDeployExploded.booleanValue();
+        this.autoDeployXml = autoDeployXml == null ? true : autoDeployXml.booleanValue();
         this.enabled = enabled == null ? true : enabled.booleanValue();
         this.deploymentTimeout = deploymentTimeout;
+        this.scanner = bootTimeService;
     }
 
 
@@ -149,21 +133,43 @@ public class DeploymentScannerService implements Service<DeploymentScanner> {
     @Override
     public synchronized void start(StartContext context) throws StartException {
         try {
-            final String pathName = pathValue.getValue();
-            final String relativePathName = relativePathValue.getOptionalValue();
-            final File relativePath = relativePathName != null ? new File(relativePathName) : null;
-            final FileSystemDeploymentService scanner = new FileSystemDeploymentService(relativeTo, new File(pathName), relativePath, controllerValue.getValue().createClient(scheduledExecutorValue.getValue()), scheduledExecutorValue.getValue(), deploymentRepositoryValue.getValue(), contentRepositoryValue.getValue());
-            scanner.setScanInterval(unit.toMillis(interval));
-            scanner.setAutoDeployExplodedContent(autoDeployExploded);
-            scanner.setAutoDeployZippedContent(autoDeployZipped);
-            if (deploymentTimeout != null) {
-                scanner.setDeploymentTimeout(deploymentTimeout);
+
+            final DeploymentOperations.Factory factory = new DeploymentOperations.Factory() {
+                @Override
+                public DeploymentOperations create() {
+                    return new DefaultDeploymentOperations(controllerValue.getValue().createClient(scheduledExecutorValue.getValue()));
+                }
+            };
+
+            //if this is the first start we want to use the same scanner that was used at boot time
+            if (scanner == null) {
+                final PathManager pathManager = pathManagerValue.getValue();
+                final String pathName = pathManager.resolveRelativePathEntry(path, relativeTo);
+                File relativePath = null;
+                if (relativeTo != null) {
+                    relativePath = new File(pathManager.getPathEntry(relativeTo).resolvePath());
+                    callbackHandle = pathManager.registerCallback(pathName, PathManager.ReloadServerCallback.create(), PathManager.Event.UPDATED, PathManager.Event.REMOVED);
+                }
+
+                final FileSystemDeploymentService scanner = new FileSystemDeploymentService(relativeTo, new File(pathName),
+                        relativePath, factory, scheduledExecutorValue.getValue());
+
+                scanner.setScanInterval(unit.toMillis(interval));
+                scanner.setAutoDeployExplodedContent(autoDeployExploded);
+                scanner.setAutoDeployZippedContent(autoDeployZipped);
+                scanner.setAutoDeployXMLContent(autoDeployXml);
+                if (deploymentTimeout != null) {
+                    scanner.setDeploymentTimeout(deploymentTimeout);
+                }
+                this.scanner = scanner;
+            } else {
+                // The boot-time scanner should use our DeploymentOperations.Factory
+                this.scanner.setDeploymentOperationsFactory(factory);
             }
 
             if (enabled) {
                 scanner.startScanner();
             }
-            this.scanner = scanner;
         } catch (Exception e) {
             throw new StartException(e);
         }
@@ -178,6 +184,9 @@ public class DeploymentScannerService implements Service<DeploymentScanner> {
         this.scanner = null;
         scanner.stopScanner();
         scheduledExecutorValue.getValue().shutdown();
+        if (callbackHandle != null) {
+            callbackHandle.remove();
+        }
     }
 
     /**

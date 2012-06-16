@@ -21,6 +21,8 @@
  */
 package org.jboss.as.test.integration.jpa.epcpropagation;
 
+import java.util.Locale;
+
 import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
 import javax.ejb.EJB;
@@ -40,7 +42,7 @@ import javax.transaction.UserTransaction;
 @Stateful
 @TransactionManagement(TransactionManagementType.BEAN)
 @Local
-public class EPCStatefulBean implements StatefulInterface {
+public class EPCStatefulBean extends AbstractStatefulInterface  implements StatefulInterface {
 
     @PersistenceContext(type = PersistenceContextType.EXTENDED, unitName = "mypc")
     EntityManager em;
@@ -69,12 +71,12 @@ public class EPCStatefulBean implements StatefulInterface {
             tx1.begin();
             em.joinTransaction();
             MyEntity entity = em.find(MyEntity.class, id);
-            entity.setName(name.toUpperCase());
+            entity.setName(name.toUpperCase(Locale.ENGLISH));
 
-            String propagatedName = cmtBean.updateEntity(id, name.toLowerCase());
+            String propagatedName = cmtBean.updateEntity(id, name.toLowerCase(Locale.ENGLISH));
             tx1.commit();
 
-            return propagatedName.equals(name.toUpperCase());
+            return propagatedName.equals(name.toUpperCase(Locale.ENGLISH));
         } catch (Exception e) {
             try {
                 sessionContext.getUserTransaction().rollback();
@@ -99,9 +101,5 @@ public class EPCStatefulBean implements StatefulInterface {
         return null;
     }
 
-    @Override
-    public void finishUp() throws Exception {
-
-    }
 
 }

@@ -22,53 +22,72 @@
 
 package org.jboss.as.host.controller;
 
-import static org.jboss.as.process.protocol.ProtocolUtils.expectHeader;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.DOMAIN_MODEL;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.EXTENSION;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.FAILURE_DESCRIPTION;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.MANAGEMENT_MAJOR_VERSION;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.MANAGEMENT_MINOR_VERSION;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.NAME;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OPERATION_HEADERS;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OUTCOME;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PRODUCT_NAME;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PRODUCT_VERSION;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RELEASE_CODENAME;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RELEASE_VERSION;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SUCCESS;
+import org.jboss.as.controller.extension.ExtensionRegistry;
+import org.jboss.as.domain.controller.operations.ApplyExtensionsHandler;
+import static org.jboss.as.host.controller.HostControllerLogger.ROOT_LOGGER;
+import static org.jboss.as.host.controller.HostControllerMessages.MESSAGES;
 
-import java.io.BufferedOutputStream;
 import java.io.DataInput;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
-import java.net.InetAddress;
 import java.net.URI;
-import java.net.UnknownHostException;
 import java.security.AccessController;
-import java.security.PrivilegedAction;
-import java.security.Security;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
 
-import javax.security.auth.callback.CallbackHandler;
+import javax.net.ssl.SSLHandshakeException;
 import javax.security.sasl.SaslException;
 
 import org.jboss.as.controller.HashUtil;
 import org.jboss.as.controller.ModelController;
 import org.jboss.as.controller.client.ModelControllerClient;
 import org.jboss.as.controller.client.Operation;
+import org.jboss.as.controller.client.OperationAttachments;
 import org.jboss.as.controller.client.OperationMessageHandler;
 import org.jboss.as.controller.remote.ExistingChannelModelControllerClient;
-import org.jboss.as.controller.remote.TransactionalModelControllerOperationHandler;
-import org.jboss.as.domain.controller.FileRepository;
-import org.jboss.as.domain.controller.operations.SlaveRegistrationError;
-import org.jboss.as.domain.controller.operations.SlaveRegistrationError.ErrorCode;
-import org.jboss.as.domain.management.CallbackHandlerFactory;
-import org.jboss.as.domain.management.security.SecretIdentityService;
+import org.jboss.as.controller.remote.TransactionalProtocolOperationHandler;
+import org.jboss.as.domain.controller.LocalHostControllerInfo;
+import org.jboss.as.domain.controller.SlaveRegistrationException;
+import org.jboss.as.domain.controller.operations.ApplyRemoteMasterDomainModelHandler;
+import org.jboss.as.domain.management.SecurityRealm;
 import org.jboss.as.domain.management.security.SecurityRealmService;
 import org.jboss.as.host.controller.mgmt.DomainControllerProtocol;
-import org.jboss.as.process.protocol.Connection.ClosedCallback;
+import org.jboss.as.host.controller.mgmt.DomainRemoteFileRequestAndHandler;
+import org.jboss.as.network.NetworkUtils;
 import org.jboss.as.protocol.ProtocolChannelClient;
+import org.jboss.as.protocol.StreamUtils;
+import org.jboss.as.protocol.mgmt.AbstractManagementRequest;
+import org.jboss.as.protocol.mgmt.ActiveOperation;
 import org.jboss.as.protocol.mgmt.FlushableDataOutput;
-import org.jboss.as.protocol.mgmt.ManagementChannel;
-import org.jboss.as.protocol.mgmt.ManagementChannelFactory;
-import org.jboss.as.protocol.mgmt.ManagementClientChannelStrategy;
-import org.jboss.as.protocol.mgmt.ManagementRequest;
-import org.jboss.as.protocol.mgmt.ManagementResponseHandler;
+import org.jboss.as.protocol.mgmt.ManagementChannelHandler;
+import org.jboss.as.protocol.mgmt.ManagementRequestContext;
 import org.jboss.as.remoting.management.ManagementRemotingServices;
+import org.jboss.as.repository.HostFileRepository;
+import org.jboss.as.repository.RemoteFileRequestAndHandler.CannotCreateLocalDirectoryException;
+import org.jboss.as.repository.RemoteFileRequestAndHandler.DidNotReadEntireFileException;
+import org.jboss.as.version.ProductConfig;
+import org.jboss.as.version.Version;
 import org.jboss.dmr.ModelNode;
-import org.jboss.logging.Logger;
 import org.jboss.msc.service.Service;
 import org.jboss.msc.service.ServiceBuilder;
 import org.jboss.msc.service.ServiceController;
@@ -78,13 +97,13 @@ import org.jboss.msc.service.StartContext;
 import org.jboss.msc.service.StartException;
 import org.jboss.msc.service.StopContext;
 import org.jboss.msc.value.InjectedValue;
-import org.jboss.remoting3.Channel;
-import org.jboss.remoting3.CloseHandler;
 import org.jboss.remoting3.Endpoint;
-import org.jboss.sasl.JBossSaslProvider;
+import org.jboss.remoting3.RemotingOptions;
 import org.jboss.threads.AsyncFuture;
 import org.jboss.threads.AsyncFutureTask;
-
+import org.jboss.threads.JBossThreadFactory;
+import org.xnio.OptionMap;
+import org.xnio.Options;
 
 /**
  * Establishes the connection from a slave {@link org.jboss.as.domain.controller.DomainController} to the master
@@ -92,59 +111,64 @@ import org.jboss.threads.AsyncFutureTask;
  *
  * @author Kabir Khan
  */
-public class RemoteDomainConnectionService implements MasterDomainControllerClient, Service<MasterDomainControllerClient>, ClosedCallback {
+public class RemoteDomainConnectionService implements MasterDomainControllerClient, Service<MasterDomainControllerClient> {
 
-    private static final Logger log = Logger.getLogger("org.jboss.as.domain.controller");
+    public static final String DOMAIN_CONNECTION_ID = "domain-connection-id";
+
+    private static final ModelNode APPLY_EXTENSIONS = new ModelNode();
+    private static final ModelNode APPLY_DOMAIN_MODEL = new ModelNode();
+    static {
+        APPLY_EXTENSIONS.get(OP).set(ApplyExtensionsHandler.OPERATION_NAME);
+        APPLY_EXTENSIONS.get(OPERATION_HEADERS, "execute-for-coordinator").set(true);
+        APPLY_EXTENSIONS.get(OP_ADDR).setEmptyList();
+        APPLY_EXTENSIONS.protect();
+
+        APPLY_DOMAIN_MODEL.get(OP).set(ApplyRemoteMasterDomainModelHandler.OPERATION_NAME);
+        //FIXME this makes the op work after boot (i.e. slave connects to restarted master), but does not make the slave resync the servers
+        APPLY_DOMAIN_MODEL.get(OPERATION_HEADERS, "execute-for-coordinator").set(true);
+        APPLY_DOMAIN_MODEL.get(OP_ADDR).setEmptyList();
+        APPLY_DOMAIN_MODEL.protect();
+    }
+
+    private final ExtensionRegistry extensionRegistry;
     private final ModelController controller;
-    private final InetAddress host;
-    private final int port;
-    private final String name;
+    private final ProductConfig productConfig;
+    private final LocalHostControllerInfo localHostInfo;
     private final RemoteFileRepository remoteFileRepository;
 
-    private volatile ProtocolChannelClient<ManagementChannel> channelClient;
     /** Used to invoke ModelController ops on the master */
     private volatile ModelControllerClient masterProxy;
-    /** Handler for transactional operations */
-    private volatile TransactionalModelControllerOperationHandler txOperationHandler;
-    private final AtomicBoolean shutdown = new AtomicBoolean();
-    private volatile ManagementChannel channel;
-    private final ExecutorService executor = Executors.newCachedThreadPool();
-    private final AtomicBoolean connected = new AtomicBoolean(false);
-    private final AtomicBoolean registered = new AtomicBoolean(false);
+
     private final FutureClient futureClient = new FutureClient();
     private final InjectedValue<Endpoint> endpointInjector = new InjectedValue<Endpoint>();
-    private final InjectedValue<CallbackHandlerFactory> callbackFactoryInjector = new InjectedValue<CallbackHandlerFactory>();
+    private final InjectedValue<SecurityRealm> securityRealmInjector = new InjectedValue<SecurityRealm>();
 
-    private RemoteDomainConnectionService(final ModelController controller, final String name, final InetAddress host, final int port, final RemoteFileRepository remoteFileRepository){
+    private ExecutorService executor;
+    private ScheduledExecutorService scheduledExecutorService;
+
+    private RemoteDomainConnection connection;
+    private ManagementChannelHandler handler;
+
+    private RemoteDomainConnectionService(final ModelController controller, final ExtensionRegistry extensionRegistry, final LocalHostControllerInfo localHostControllerInfo, final ProductConfig productConfig, final RemoteFileRepository remoteFileRepository){
         this.controller = controller;
-        this.name = name;
-        this.host = host;
-        this.port = port;
+        this.extensionRegistry = extensionRegistry;
+        this.productConfig = productConfig;
+        this.localHostInfo = localHostControllerInfo;
         this.remoteFileRepository = remoteFileRepository;
         remoteFileRepository.setRemoteFileRepositoryExecutor(remoteFileRepositoryExecutor);
     }
 
-    public static Future<MasterDomainControllerClient> install(final ServiceTarget serviceTarget, final ModelController controller,
-                                                                  final String localHostName, final String remoteDcHost, final int remoteDcPort,
-                                                                  final String securityRealm, final RemoteFileRepository remoteFileRepository) {
-        RemoteDomainConnectionService service;
-        try {
-            service = new RemoteDomainConnectionService(
-                    controller,
-                    localHostName,
-                    InetAddress.getByName(remoteDcHost),
-                    remoteDcPort,
-                    remoteFileRepository);
-        } catch (UnknownHostException e) {
-            throw new RuntimeException(e);
-        }
-        ServiceBuilder builder = serviceTarget.addService(MasterDomainControllerClient.SERVICE_NAME, service)
+    public static Future<MasterDomainControllerClient> install(final ServiceTarget serviceTarget, final ModelController controller, final ExtensionRegistry extensionRegistry,
+                                                               final LocalHostControllerInfo localHostControllerInfo, final ProductConfig productConfig,
+                                                               final String securityRealm, final RemoteFileRepository remoteFileRepository) {
+        RemoteDomainConnectionService service = new RemoteDomainConnectionService(controller, extensionRegistry, localHostControllerInfo, productConfig, remoteFileRepository);
+        ServiceBuilder<MasterDomainControllerClient> builder = serviceTarget.addService(MasterDomainControllerClient.SERVICE_NAME, service)
                 .addDependency(ManagementRemotingServices.MANAGEMENT_ENDPOINT, Endpoint.class, service.endpointInjector)
                 .setInitialMode(ServiceController.Mode.ACTIVE);
 
         if (securityRealm != null) {
-            ServiceName callbackHandlerService = SecurityRealmService.BASE_SERVICE_NAME.append(securityRealm).append(SecretIdentityService.SERVICE_SUFFIX);
-            builder.addDependency(callbackHandlerService, CallbackHandlerFactory.class, service.callbackFactoryInjector);
+            ServiceName realmName = SecurityRealmService.BASE_SERVICE_NAME.append(securityRealm);
+            builder.addDependency(realmName, SecurityRealm.class, service.securityRealmInjector);
         }
 
         builder.install();
@@ -152,8 +176,7 @@ public class RemoteDomainConnectionService implements MasterDomainControllerClie
     }
 
     /** {@inheritDoc} */
-    public void register() {
-        IllegalStateException ise = null;
+    public synchronized void register() throws IOException {
         boolean connected = false;
         //This takes about 30 seconds should be enough to start up master if booted at the same time
         final long timeout = 30000;
@@ -161,131 +184,48 @@ public class RemoteDomainConnectionService implements MasterDomainControllerClie
         int retries = 0;
         while (!connected) {
             try {
-               connect();
-               connected = true;
-               break;
-            }
-            catch (IllegalStateException e) {
+                // Try to connect to the domain controller
+                connection.connect();
+                connected = true;
+            } catch (IOException e) {
                 Throwable cause = e;
+                HostControllerLogger.ROOT_LOGGER.debugf(e, "failed to connect to %s:%d", localHostInfo.getRemoteDomainControllerHost(), localHostInfo.getRemoteDomainControllerPort());
                 while ((cause = cause.getCause()) != null) {
                     if (cause instanceof SaslException) {
-                        throw new IllegalStateException("Unable to connect due to authentication failure.", cause);
+                        throw MESSAGES.authenticationFailureUnableToConnect(cause);
+                    } else if (cause instanceof SSLHandshakeException) {
+                        throw MESSAGES.sslFailureUnableToConnect(cause);
+                    } else if (cause instanceof SlaveRegistrationException) {
+                        throw new IOException(cause);
                     }
                 }
-
                 if (System.currentTimeMillis() > endTime) {
-                    throw new IllegalStateException("Could not connect to master in " + retries + "attempts within  " + timeout + " ms", e);
+                    throw MESSAGES.connectionToMasterTimeout(e, retries, timeout);
                 }
-                ise = e;
                 try {
+                    HostControllerLogger.ROOT_LOGGER.cannotConnect(localHostInfo.getRemoteDomainControllerHost(), localHostInfo.getRemoteDomainControllerPort(), e);
                     ReconnectPolicy.CONNECT.wait(retries);
+                    retries++;
                 } catch (InterruptedException ie) {
-                    throw new IllegalStateException("Interrupted while trying to connect to master");
+                    throw MESSAGES.connectionToMasterInterrupted();
                 }
-            } catch (HostAlreadyExistsException e) {
-                throw new IllegalStateException(e.getMessage());
             }
         }
-
-        this.connected.set(true);
-        registered.set(true);
-    }
-
-    private synchronized void connect() {
-        AccessController.doPrivileged(new PrivilegedAction<Object>() {
-            public Object run() {
-                return Security.insertProviderAt(new JBossSaslProvider(), 1);
-            }
-        });
-
-//        if (this.channelClient != null) {
-//            try {
-//                new UnregisterModelControllerRequest().executeForResult(executor, ManagementClientChannelStrategy.create(channel));
-//            } catch (Exception e) {
-//            }
-//
-//            this.channelClient.close();
-//            this.channelClient = null;
-//        }
-
-        txOperationHandler = new TransactionalModelControllerOperationHandler(executor, controller);
-        ProtocolChannelClient<ManagementChannel> client;
-        ProtocolChannelClient.Configuration<ManagementChannel> configuration = new ProtocolChannelClient.Configuration<ManagementChannel>();
-        //Reusing the endpoint here after a disconnect does not seem to work once something has gone down, so try our own
-        //configuration.setEndpoint(endpointInjector.getValue());
-        configuration.setEndpointName("endpoint");
-        configuration.setUriScheme("remote");
-
-        try {
-            configuration.setUri(new URI("remote://" + host.getHostAddress() + ":" + port));
-            configuration.setChannelFactory(new ManagementChannelFactory(txOperationHandler));
-            client = ProtocolChannelClient.create(configuration);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+        if(connected) {
+            // Setup the transaction protocol handler
+            handler.addHandlerFactory(new TransactionalProtocolOperationHandler(controller, handler));
+            // Use the existing channel strategy
+            masterProxy = ExistingChannelModelControllerClient.createAndAdd(handler);
         }
-
-        try {
-            CallbackHandler handler = null;
-            CallbackHandlerFactory handlerFactory = callbackFactoryInjector.getOptionalValue();
-            if (handlerFactory != null) {
-                handler = handlerFactory.getCallbackHandler(name);
-            }
-
-            client.connect(handler);
-            this.channelClient = client;
-
-            ManagementChannel channel = client.openChannel(ManagementRemotingServices.DOMAIN_CHANNEL);
-            this.channel = channel;
-
-            channel.addCloseHandler(new CloseHandler<Channel>() {
-                public void handleClose(final Channel closed, final IOException exception) {
-                    connectionClosed();
-                }
-            });
-
-            channel.startReceiving();
-
-            masterProxy = new ExistingChannelModelControllerClient(channel);
-        } catch (IOException e) {
-            log.warnf("Could not connect to remote domain controller %s:%d", host.getHostAddress(), port);
-            throw new IllegalStateException(e);
-        }
-
-        SlaveRegistrationError error = null;
-        try {
-            error = new RegisterModelControllerRequest().executeForResult(executor, ManagementClientChannelStrategy.create(channel));
-        } catch (Exception e) {
-            log.warnf("Error retrieving domain model from remote domain controller %s:%d: %s", host.getHostAddress(), port, e.getMessage());
-            throw new IllegalStateException(e);
-        }
-
-        if (error != null) {
-            if (error.getErrorCode() == ErrorCode.HOST_ALREADY_EXISTS) {
-                throw new HostAlreadyExistsException(error.getErrorMessage());
-            }
-            throw new IllegalStateException(error.getErrorMessage());
-        }
-
     }
 
     /** {@inheritDoc} */
     public synchronized void unregister() {
-        if (!registered.get()) {
-            return;
-        }
-        try {
-            new UnregisterModelControllerRequest().executeForResult(executor, ManagementClientChannelStrategy.create(channel));
-            registered.set(false);
-        } catch (Exception e) {
-            log.debugf(e, "Error unregistering from master");
-        }
-        finally {
-            channelClient.close();
-        }
+        StreamUtils.safeClose(connection);
     }
 
     /** {@inheritDoc} */
-    public synchronized FileRepository getRemoteFileRepository() {
+    public synchronized HostFileRepository getRemoteFileRepository() {
         return remoteFileRepository;
     }
 
@@ -321,62 +261,136 @@ public class RemoteDomainConnectionService implements MasterDomainControllerClie
 
     @Override
     public void close() throws IOException {
-        throw new UnsupportedOperationException("Close should be managed by the service");
+        throw MESSAGES.closeShouldBeManagedByService();
     }
-
 
     /** {@inheritDoc} */
     @Override
     public synchronized void start(StartContext context) throws StartException {
-        futureClient.setClient(this);
+        final RemoteDomainConnection connection;
+        final ManagementChannelHandler handler;
+        try {
+
+            ThreadFactory threadFactory = new JBossThreadFactory(new ThreadGroup("domain-connection-threads"), Boolean.FALSE, null, "%G - %t", null, null, AccessController.getContext());
+            this.executor = Executors.newCachedThreadPool(threadFactory);
+            ThreadFactory scheduledThreadFactory = new JBossThreadFactory(new ThreadGroup("domain-connection-pinger-threads"), Boolean.TRUE, null, "%G - %t", null, null, AccessController.getContext());
+            this.scheduledExecutorService = Executors.newSingleThreadScheduledExecutor(scheduledThreadFactory);
+
+            // Include additional local host information when registering at the DC
+            final ModelNode hostInfo = createLocalHostHostInfo(localHostInfo, productConfig);
+            final OptionMap options = OptionMap.builder().set(RemotingOptions.HEARTBEAT_INTERVAL, 15000)
+                    .set(Options.READ_TIMEOUT, 45000)
+                    .set(RemotingOptions.RECEIVE_WINDOW_SIZE, ProtocolChannelClient.Configuration.WINDOW_SIZE).getMap();
+
+            // Gather the required information to connect to the remote DC
+            final ProtocolChannelClient.Configuration configuration = new ProtocolChannelClient.Configuration();
+            configuration.setUri(new URI("remote://" + NetworkUtils.formatPossibleIpv6Address(localHostInfo.getRemoteDomainControllerHost()) + ":" + localHostInfo.getRemoteDomainControllerPort()));
+            configuration.setEndpoint(endpointInjector.getValue());
+            configuration.setOptionMap(options);
+
+            final SecurityRealm realm = securityRealmInjector.getOptionalValue();
+            // Create the remote domain channel strategy
+            connection = new RemoteDomainConnection(localHostInfo.getLocalHostName(), hostInfo, configuration, realm,
+                    localHostInfo.getRemoteDomainControllerUsername(), executor, scheduledExecutorService,
+                    new RemoteDomainConnection.HostRegistrationCallback() {
+
+                @Override
+                public ModelNode resolveSubsystemVersions(ModelNode extensions) {
+                    return resolveSubsystems(extensions.asList());
+                }
+
+                        @Override
+                public boolean applyDomainModel(final List<ModelNode> bootOperations) {
+                    // Apply the model..
+                    return applyRemoteDomainModel(bootOperations);
+                }
+
+                @Override
+                public void registrationComplete(ManagementChannelHandler handler) {
+                    //
+                }
+            });
+            // Setup the management channel handler
+            handler = connection.getChannelHandler();
+        } catch (Exception e) {
+            throw new StartException(e);
+        } finally {
+            futureClient.setClient(this);
+        }
+        this.connection = connection;
+        this.handler = handler;
+    }
+
+    /**
+     * Resolve the subsystem versions.
+     *
+     * @param extensions the extensions to install
+     * @return the subsystem versions
+     */
+    private ModelNode resolveSubsystems(final List<ModelNode> extensions) {
+
+        final List<ModelNode> bootOperations = new ArrayList<ModelNode>();
+        for (final ModelNode extension : extensions) {
+            final ModelNode e = new ModelNode();
+            e.get("domain-resource-address").add(EXTENSION, extension.asString());
+            bootOperations.add(e);
+        }
+        final ModelNode operation = APPLY_EXTENSIONS.clone();
+        operation.get(DOMAIN_MODEL).set(bootOperations);
+        final ModelNode result = controller.execute(operation, OperationMessageHandler.logging, ModelController.OperationTransactionControl.COMMIT, OperationAttachments.EMPTY);
+        if (!SUCCESS.equals(result.get(OUTCOME).asString())) {
+            throw HostControllerMessages.MESSAGES.failedToAddExtensions(result.get(FAILURE_DESCRIPTION));
+        }
+        final ModelNode subsystems = new ModelNode();
+        for (final ModelNode extension : extensions) {
+            extensionRegistry.recordSubsystemVersions(extension.asString(), subsystems);
+        }
+        return subsystems;
+    }
+
+    /**
+     * Apply the remote domain model to the local host controller.
+     *
+     * @param bootOperations the result of the remote read-domain-model op
+     * @return {@code true} if the model was applied successfully, {@code false} otherwise
+     */
+    private boolean applyRemoteDomainModel(final List<ModelNode> bootOperations) {
+        final ModelNode result;
+        try {
+            // Create the apply-domain-model operation
+            final ModelNode operation = APPLY_DOMAIN_MODEL.clone();
+            operation.get(DOMAIN_MODEL).set(bootOperations);
+            // Execute the operation
+            result = controller.execute(operation, OperationMessageHandler.logging, ModelController.OperationTransactionControl.COMMIT, OperationAttachments.EMPTY);
+        } catch (Exception e) {
+            return false;
+        }
+        // If it did not success, don't register it at the DC
+        return SUCCESS.equals(result.get(OUTCOME).asString());
     }
 
     /** {@inheritDoc} */
     @Override
-    public synchronized void stop(StopContext context) {
-        shutdown.set(true);
-        if (channelClient != null) {
-            unregister();
-        }
-    }
+    public synchronized void stop(final StopContext context) {
 
-    @Override
-    public void connectionClosed() {
-
-        if (!connected.get()) {
-            log.error("Null reconnect info, cannot try to reconnect");
-            return;
-        }
-
-        if (!shutdown.get()) {
-            //The remote host went down, try reconnecting
-            new Thread(new Runnable() {
-                @Override
-                public void run() {
+        context.asynchronous();
+        Thread executorShutdown = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    StreamUtils.safeClose(connection);
+                    scheduledExecutorService.shutdownNow();
+                } finally {
                     try {
-                        Thread.sleep(3000);
-                    } catch (InterruptedException e) {
-                    }
-
-                    int count = 0;
-                    while (!shutdown.get()) {
-                        log.debug("Attempting reconnection to master...");
-                        try {
-                            connect();
-                            log.info("Reconnected to master");
-                            break;
-                        } catch (Exception e) {
-                        }
-                        try {
-                            ReconnectPolicy.RECONNECT.wait(++count);
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                            return;
-                        }
+                        executor.shutdown();
+                    } finally {
+                        context.complete();
                     }
                 }
-            }).start();
-        }
+            }
+        }, RemoteDomainConnectionService.class.getSimpleName() + " ExecutorService Shutdown Thread");
+
+        executorShutdown.start();
     }
 
     /** {@inheritDoc} */
@@ -385,170 +399,65 @@ public class RemoteDomainConnectionService implements MasterDomainControllerClie
         return this;
     }
 
-    private abstract class RegistryRequest<T> extends ManagementRequest<T>{
-
-    }
-
-    private class RegisterModelControllerRequest extends RegistryRequest<SlaveRegistrationError> {
-
-        RegisterModelControllerRequest() {
-        }
-
-        @Override
-        protected byte getRequestCode() {
-            return DomainControllerProtocol.REGISTER_HOST_CONTROLLER_REQUEST;
-        }
-
-        /** {@inheritDoc} */
-        @Override
-        protected void writeRequest(final int protocolVersion, final FlushableDataOutput output) throws IOException {
-            output.write(DomainControllerProtocol.PARAM_HOST_ID);
-            output.writeUTF(name);
-        }
-
-        protected ManagementResponseHandler<SlaveRegistrationError> getResponseHandler() {
-            return new ManagementResponseHandler<SlaveRegistrationError>() {
-                @Override
-                protected SlaveRegistrationError readResponse(DataInput input) throws IOException {
-                    byte status = input.readByte();
-                    if (status == DomainControllerProtocol.PARAM_OK) {
-                        return null;
-                    } else {
-                        //return input.readUTF();
-                        return SlaveRegistrationError.parse(input.readUTF());
-                    }
-                }
-            };
-        }
-    }
-
-    private class UnregisterModelControllerRequest extends RegistryRequest<Void> {
-        @Override
-        protected byte getRequestCode() {
-            return DomainControllerProtocol.UNREGISTER_HOST_CONTROLLER_REQUEST;
-        }
-
-        /** {@inheritDoc} */
-        @Override
-        protected void writeRequest(final int protocolVersion, final FlushableDataOutput output) throws IOException {
-            output.write(DomainControllerProtocol.PARAM_HOST_ID);
-            output.writeUTF(name);
-        }
-
-        protected ManagementResponseHandler<Void> getResponseHandler() {
-            return ManagementResponseHandler.EMPTY_RESPONSE;
-        }
-    }
-
-    private class GetFileRequest extends RegistryRequest<File> {
+    private class GetFileRequest extends AbstractManagementRequest<File, Void> {
         private final byte rootId;
         private final String filePath;
-        private final FileRepository localFileRepository;
+        private final HostFileRepository localFileRepository;
 
-        private GetFileRequest(final byte rootId, final String filePath, final FileRepository localFileRepository) {
+        private GetFileRequest(final byte rootId, final String filePath, final HostFileRepository localFileRepository) {
             this.rootId = rootId;
             this.filePath = filePath;
             this.localFileRepository = localFileRepository;
         }
 
         @Override
-        public final byte getRequestCode() {
+        public byte getOperationType() {
             return DomainControllerProtocol.GET_FILE_REQUEST;
         }
 
         @Override
-        protected final void writeRequest(final int protocolVersion, final FlushableDataOutput output) throws IOException {
-            super.writeRequest(protocolVersion, output);
-            log.debugf("Requesting files for path %s", filePath);
-            output.writeByte(DomainControllerProtocol.PARAM_ROOT_ID);
-            output.writeByte(rootId);
-            output.writeByte(DomainControllerProtocol.PARAM_FILE_PATH);
-            output.writeUTF(filePath);
+        protected void sendRequest(ActiveOperation.ResultHandler<File> resultHandler, ManagementRequestContext<Void> context, FlushableDataOutput output) throws IOException {
+            output.write(DomainControllerProtocol.PARAM_HOST_ID);
+            output.writeUTF(localHostInfo.getLocalHostName());
+            DomainRemoteFileRequestAndHandler.INSTANCE.sendRequest(output, rootId, filePath);
         }
 
-        protected ManagementResponseHandler<File> getResponseHandler() {
-            return new ManagementResponseHandler<File>() {
-                @Override
-                protected final File readResponse(final DataInput input) throws IOException {
-                    final File localPath;
-                    switch (rootId) {
-                        case DomainControllerProtocol.PARAM_ROOT_ID_FILE: {
-                            localPath = localFileRepository.getFile(filePath);
-                            break;
-                        }
-                        case DomainControllerProtocol.PARAM_ROOT_ID_CONFIGURATION: {
-                            localPath = localFileRepository.getConfigurationFile(filePath);
-                            break;
-                        }
-                        case DomainControllerProtocol.PARAM_ROOT_ID_DEPLOYMENT: {
-                            byte[] hash = HashUtil.hexStringToByteArray(filePath);
-                            localPath = localFileRepository.getDeploymentRoot(hash);
-                            break;
-                        }
-                        default: {
-                            localPath = null;
-                        }
-                    }
-                    expectHeader(input, DomainControllerProtocol.PARAM_NUM_FILES);
-                    int numFiles = input.readInt();
-                    log.debugf("Received %d files for %s", numFiles, localPath);
-                    switch (numFiles) {
-                        case -1: { // Not found on DC
-                            break;
-                        }
-                        case 0: { // Found on DC, but was an empty dir
-                            if (!localPath.mkdirs()) {
-                                throw new IOException("Unable to create local directory: " + localPath);
-                            }
-                            break;
-                        }
-                        default: { // Found on DC
-                            for (int i = 0; i < numFiles; i++) {
-                                expectHeader(input, DomainControllerProtocol.FILE_START);
-                                expectHeader(input, DomainControllerProtocol.PARAM_FILE_PATH);
-                                final String path = input.readUTF();
-                                expectHeader(input, DomainControllerProtocol.PARAM_FILE_SIZE);
-                                final long length = input.readLong();
-                                log.debugf("Received file [%s] of length %d", path, length);
-                                final File file = new File(localPath, path);
-                                if (!file.getParentFile().exists() && !file.getParentFile().mkdirs()) {
-                                    throw new IOException("Unable to create local directory " + localPath.getParent());
-                                }
-                                long totalRead = 0;
-                                OutputStream fileOut = null;
-                                try {
-                                    fileOut = new BufferedOutputStream(new FileOutputStream(file));
-                                    final byte[] buffer = new byte[8192];
-                                    while (totalRead < length) {
-                                        int len = Math.min((int) (length - totalRead), buffer.length);
-                                        input.readFully(buffer, 0, len);
-                                        fileOut.write(buffer, 0, len);
-                                        totalRead += len;
-                                    }
-                                } finally {
-                                    if (fileOut != null) {
-                                        fileOut.close();
-                                    }
-                                }
-                                if (totalRead != length) {
-                                    throw new IOException("Did not read the entire file. Missing: " + (length - totalRead));
-                                }
-
-                                expectHeader(input, DomainControllerProtocol.FILE_END);
-                            }
-                        }
-                    }
-                    return localPath;
+        @Override
+        public void handleRequest(DataInput input, ActiveOperation.ResultHandler<File> resultHandler, ManagementRequestContext<Void> context) throws IOException {
+            final File localPath;
+            switch (rootId) {
+                case DomainControllerProtocol.PARAM_ROOT_ID_FILE: {
+                    localPath = localFileRepository.getFile(filePath);
+                    break;
                 }
-            };
+                case DomainControllerProtocol.PARAM_ROOT_ID_CONFIGURATION: {
+                    localPath = localFileRepository.getConfigurationFile(filePath);
+                    break;
+                }
+                case DomainControllerProtocol.PARAM_ROOT_ID_DEPLOYMENT: {
+                    byte[] hash = HashUtil.hexStringToByteArray(filePath);
+                    localPath = localFileRepository.getDeploymentRoot(hash);
+                    break;
+                }
+                default: {
+                    localPath = null;
+                }
+            }
+            try {
+                DomainRemoteFileRequestAndHandler.INSTANCE.handleResponse(input, localPath, ROOT_LOGGER, resultHandler, context);
+            } catch (CannotCreateLocalDirectoryException e) {
+                throw MESSAGES.cannotCreateLocalDirectory(e.getDir());
+            } catch (DidNotReadEntireFileException e) {
+                throw MESSAGES.didNotReadEntireFile(e.getMissing());
+            }
         }
     }
 
-    static class RemoteFileRepository implements FileRepository {
-        private final FileRepository localFileRepository;
+    static class RemoteFileRepository implements HostFileRepository {
+        private final HostFileRepository localFileRepository;
         private volatile RemoteFileRepositoryExecutor remoteFileRepositoryExecutor;
 
-        RemoteFileRepository(final FileRepository localFileRepository) {
+        RemoteFileRepository(final HostFileRepository localFileRepository) {
             this.localFileRepository = localFileRepository;
         }
 
@@ -564,35 +473,48 @@ public class RemoteDomainConnectionService implements MasterDomainControllerClie
 
         @Override
         public final File[] getDeploymentFiles(byte[] deploymentHash) {
-            String hex = deploymentHash == null ? "" : HashUtil.bytesToHexString(deploymentHash);
-            return getFile(hex, DomainControllerProtocol.PARAM_ROOT_ID_DEPLOYMENT).listFiles();
+            final File root = getDeploymentRoot(deploymentHash);
+            return root.listFiles();
         }
 
         @Override
         public File getDeploymentRoot(byte[] deploymentHash) {
             String hex = deploymentHash == null ? "" : HashUtil.bytesToHexString(deploymentHash);
-            return getFile(hex, DomainControllerProtocol.PARAM_ROOT_ID_DEPLOYMENT);
+            final File file = localFileRepository.getDeploymentRoot(deploymentHash);
+            if(! file.exists()) {
+                return getFile(hex, DomainControllerProtocol.PARAM_ROOT_ID_DEPLOYMENT);
+            }
+            return file;
         }
 
         private File getFile(final String relativePath, final byte repoId) {
             return remoteFileRepositoryExecutor.getFile(relativePath, repoId, localFileRepository);
         }
 
-        private void setRemoteFileRepositoryExecutor(RemoteFileRepositoryExecutor remoteFileRepositoryExecutor) {
+        void setRemoteFileRepositoryExecutor(RemoteFileRepositoryExecutor remoteFileRepositoryExecutor) {
             this.remoteFileRepositoryExecutor = remoteFileRepositoryExecutor;
+        }
+
+        @Override
+        public void deleteDeployment(byte[] deploymentHash) {
+            localFileRepository.deleteDeployment(deploymentHash);
         }
     }
 
-    private static interface RemoteFileRepositoryExecutor {
-        File getFile(final String relativePath, final byte repoId, FileRepository localFileRepository);
+    static interface RemoteFileRepositoryExecutor {
+        File getFile(final String relativePath, final byte repoId, HostFileRepository localFileRepository);
     }
 
-    private RemoteFileRepositoryExecutor remoteFileRepositoryExecutor = new RemoteFileRepositoryExecutor() {
-        public File getFile(final String relativePath, final byte repoId, FileRepository localFileRepository) {
-            try {
-                return new GetFileRequest(repoId, relativePath, localFileRepository).executeForResult(executor, ManagementClientChannelStrategy.create(channel));
-            } catch (Exception e) {
-                throw new RuntimeException("Failed to get file from remote repository", e);
+    private final RemoteFileRepositoryExecutor remoteFileRepositoryExecutor = new RemoteFileRepositoryExecutor() {
+        public File getFile(final String relativePath, final byte repoId, HostFileRepository localFileRepository) {
+            if(connection.isConnected()) {
+                try {
+                    return handler.executeRequest(new GetFileRequest(repoId, relativePath, localFileRepository), null).getResult().get();
+                } catch (Exception e) {
+                    throw MESSAGES.failedToGetFileFromRemoteRepository(e);
+                }
+            } else {
+                return localFileRepository.getFile(relativePath);
             }
         }
     };
@@ -608,11 +530,39 @@ public class RemoteDomainConnectionService implements MasterDomainControllerClie
         }
     }
 
-    private static class HostAlreadyExistsException extends RuntimeException {
+    private static class HostAlreadyExistsException extends IOException {
+
+        private static final long serialVersionUID = 1L;
 
         public HostAlreadyExistsException(String msg) {
             super(msg);
         }
 
     }
+
+    /**
+     * Create the metadata which gets send to the DC when registering.
+     *
+     * @param hostInfo the local host info
+     * @param productConfig the product config
+     * @return the host info
+     */
+    static ModelNode createLocalHostHostInfo(final LocalHostControllerInfo hostInfo, final ProductConfig productConfig) {
+        final ModelNode info = new ModelNode();
+        info.get(NAME).set(hostInfo.getLocalHostName());
+        info.get(RELEASE_VERSION).set(Version.AS_VERSION);
+        info.get(RELEASE_CODENAME).set(Version.AS_RELEASE_CODENAME);
+        info.get(MANAGEMENT_MAJOR_VERSION).set(Version.MANAGEMENT_MAJOR_VERSION);
+        info.get(MANAGEMENT_MINOR_VERSION).set(Version.MANAGEMENT_MINOR_VERSION);
+        final String productName = productConfig.getProductName();
+        final String productVersion = productConfig.getProductVersion();
+        if(productName != null) {
+            info.get(PRODUCT_NAME).set(productName);
+        }
+        if(productVersion != null) {
+            info.get(PRODUCT_VERSION).set(productVersion);
+        }
+        return info;
+    }
+
 }

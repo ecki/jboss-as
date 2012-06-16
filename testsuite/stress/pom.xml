@@ -29,7 +29,7 @@
     <parent>
         <groupId>org.jboss.as</groupId>
         <artifactId>jboss-as-testsuite</artifactId>
-        <version>7.1.0.CR1-SNAPSHOT</version>
+        <version>7.2.0.Alpha1-SNAPSHOT</version>
     </parent>
 
     <groupId>org.jboss.as</groupId>
@@ -39,6 +39,16 @@
 
     <properties>
         <skip.stress.tests>false</skip.stress.tests>
+        
+        <!-- Current module's directory. Will automatically pick up sub-module's basedir. -->
+        <jbossas.ts.submodule.dir>${basedir}</jbossas.ts.submodule.dir>
+        <!-- Integration module's directory. To be overriden in sub-modules. -->
+        <jbossas.ts.integ.dir>${basedir}/../integration</jbossas.ts.integ.dir>
+        <!-- This project's testsuite dir. To be changed for every submodule (until we figure out how to do it automatically). -->
+        <jbossas.ts.dir>${basedir}/..</jbossas.ts.dir>
+        <!-- This project's root dir. -->
+        <jbossas.project.dir>${jbossas.ts.dir}/..</jbossas.project.dir>
+                
     </properties>
 
 
@@ -48,7 +58,7 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <redirectTestOutputToFile>true</redirectTestOutputToFile>
+                    <redirectTestOutputToFile>${testLogToFile}</redirectTestOutputToFile>
                     <skipTests>${skip.stress.tests}</skipTests>
                 </configuration>
             </plugin>

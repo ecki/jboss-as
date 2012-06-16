@@ -23,6 +23,7 @@ package org.jboss.as.cli.parsing;
 
 
 import org.jboss.as.cli.CommandFormatException;
+import org.jboss.as.cli.CommandLineFormat;
 import org.jboss.as.cli.operation.CommandLineParser;
 import org.jboss.as.cli.parsing.command.ArgumentListState;
 import org.jboss.as.cli.parsing.command.ArgumentState;
@@ -61,12 +62,28 @@ public class ParserUtil {
         StateParser.parse(commandLine, callbackHandler, OperationRequestState.INSTANCE);
     }
 
+    public static void parseHeaders(String commandLine, final CommandLineParser.CallbackHandler handler) throws CommandFormatException {
+        if(commandLine == null) {
+            return;
+        }
+        final ParsingStateCallbackHandler callbackHandler = getCallbackHandler(handler);
+        StateParser.parse(commandLine, callbackHandler, HeaderListState.INSTANCE);
+    }
+
     public static void parseCommandArgs(String commandLine, final CommandLineParser.CallbackHandler handler) throws CommandFormatException {
         if(commandLine == null) {
             return;
         }
         final ParsingStateCallbackHandler callbackHandler = getCallbackHandler(handler);
         StateParser.parse(commandLine, callbackHandler, ArgumentListState.INSTANCE);
+    }
+
+    public static void parse(String str, final CommandLineParser.CallbackHandler handler, ParsingState initialState) throws CommandFormatException {
+        if(str == null) {
+            return;
+        }
+        final ParsingStateCallbackHandler callbackHandler = getCallbackHandler(handler);
+        StateParser.parse(str, callbackHandler, initialState);
     }
 
     protected static ParsingStateCallbackHandler getCallbackHandler(final CommandLineParser.CallbackHandler handler) {
@@ -81,30 +98,28 @@ public class ParserUtil {
 
             String delegateStateId;
             ParsingStateCallbackHandler delegate;
+            CommandLineFormat format;
 
             @Override
             public void enteredState(ParsingContext ctx) throws CommandFormatException {
 
                 final String id = ctx.getState().getId();
-                //System.out.println("entered " + id + " " + ctx.getCharacter());
+//                System.out.println("entered " + id + " " + ctx.getCharacter());
 
                 if(delegate != null) {
                     delegate.enteredState(ctx);
                     return;
                 }
 
-                if(!inValue) {
+                if(!inValue && ctx.getState().updateValueIndex()) {
                     bufferStartIndex = ctx.getLocation();
+                    inValue = ctx.getState().lockValueIndex();
                 }
 
                 if (id.equals(PropertyListState.ID)) {
                     handler.propertyListStart(ctx.getLocation());
-                } else if (ArgumentValueState.ID.equals(id)) {
-                    inValue = true;
                 } else if ("ADDR_OP_SEP".equals(id)) {
                     handler.addressOperationSeparator(ctx.getLocation());
-                } else if (NodeState.ID.equals(id)) {
-                    inValue = true;
                 } else if ("NAME_VALUE_SEPARATOR".equals(id)) {
                     nameValueSeparator = ctx.getLocation();
                     if (buffer.length() > 0) {
@@ -112,13 +127,13 @@ public class ParserUtil {
                         buffer.setLength(0);
                     }
                 } else if(id.equals(CommandState.ID)) {
+                    format = CommandFormat.INSTANCE;
                     handler.setFormat(CommandFormat.INSTANCE);
                 } else if(id.equals(OperationRequestState.ID)) {
+                    format = OperationFormat.INSTANCE;
                     handler.setFormat(OperationFormat.INSTANCE);
                 } else if (HeaderListState.ID.equals(id)) {
                     handler.headerListStart(ctx.getLocation());
-                } else if (HeaderValueState.ID.equals(id)) {
-                    inValue = true;
                 }
             }
 
@@ -126,7 +141,7 @@ public class ParserUtil {
             public void leavingState(ParsingContext ctx) throws CommandFormatException {
 
                 final String id = ctx.getState().getId();
-                //System.out.println("leaving " + id + " " + ctx.getCharacter());
+//                System.out.println("leaving " + id + " " + ctx.getCharacter());
 
                 if(delegateStateId != null && !id.equals(delegateStateId)) {
                     delegate.leavingState(ctx);
@@ -157,7 +172,7 @@ public class ParserUtil {
 //                    if (ctx.getCharacter() == ',') {
 //                        handler.propertySeparator(ctx.getLocation());
 //                    } TODO this is not really an equivalent
-                    if(!ctx.isEndOfContent()) {
+                    if(!ctx.isEndOfContent() || format != null && format.isPropertySeparator(ctx.getCharacter())) {
                         handler.propertySeparator(ctx.getLocation());
                     }
 
@@ -172,7 +187,6 @@ public class ParserUtil {
                             handler.propertySeparator(ctx.getLocation());
                         }
                     }
-                    inValue = false;
                 } else if (CommandNameState.ID.equals(id)) {
                     final String opName = buffer.toString().trim();
                     if(!opName.isEmpty()) {
@@ -212,15 +226,14 @@ public class ParserUtil {
                                 }
                             }
 
-                            if (ch == '/') {
+                            if (ch == '/' && value.charAt(value.length() - 1) != '/') {
                                 handler.nodeSeparator(ctx.getLocation());
                             }
                         }
                     }
                     buffer.setLength(0);
-                    inValue = false;
                 } else if (HeaderListState.ID.equals(id)) {
-                    if (ctx.getCharacter() == '}') {
+                    if (!ctx.isEndOfContent()) {
                         handler.headerListEnd(ctx.getLocation());
                     }
                 } else if (HeaderNameState.ID.equals(id)) {
@@ -234,19 +247,27 @@ public class ParserUtil {
                     }
                     buffer.setLength(0);
                 } else if (HeaderValueState.ID.equals(id)) {
-                    handler.header(name, buffer.toString().trim(), bufferStartIndex);
+                    handler.header(name, buffer.toString(), bufferStartIndex);
                     buffer.setLength(0);
-//                    if(!ctx.isEndOfContent()) {
-//                        handler.propertySeparator(ctx.getLocation());
-//                    }
-                    inValue = false;
+                    nameValueSeparator = -1;
                 } else if (HeaderState.ID.equals(id)) {
+                    if(nameValueSeparator > 0) {
+                        handler.headerNameValueSeparator(nameValueSeparator);
+                        nameValueSeparator = -1;
+                    }
                     this.name = null;
                     delegate = null;
                     delegateStateId = null;
+                    if(!ctx.isEndOfContent() && ctx.getCharacter() == ';') {
+                        handler.headerSeparator(ctx.getLocation());
+                    }
                 } else if (OutputTargetState.ID.equals(id)) {
                     handler.outputTarget(bufferStartIndex, buffer.toString().trim());
                     buffer.setLength(0);
+                }
+
+                if(inValue && ctx.getState().lockValueIndex()) {
+                    inValue = false;
                 }
             }
 
@@ -256,7 +277,7 @@ public class ParserUtil {
                     delegate.character(ctx);
                     return;
                 }
-                //System.out.println(ctx.getState().getId() + " '" + ctx.getCharacter() + "'");
+//                System.out.println(ctx.getState().getId() + " '" + ctx.getCharacter() + "'");
                 buffer.append(ctx.getCharacter());
             }
         };

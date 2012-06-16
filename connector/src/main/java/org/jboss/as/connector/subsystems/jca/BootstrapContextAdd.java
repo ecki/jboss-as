@@ -25,10 +25,10 @@ import static org.jboss.as.connector.subsystems.jca.Constants.DEFAULT_NAME;
 
 import java.util.List;
 
-import org.jboss.as.connector.ConnectorServices;
-import org.jboss.as.connector.bootstrap.BootStrapContextService;
-import org.jboss.as.connector.bootstrap.NamedBootstrapContext;
-import org.jboss.as.controller.AbstractBoottimeAddStepHandler;
+import org.jboss.as.connector.util.ConnectorServices;
+import org.jboss.as.connector.services.bootstrap.BootStrapContextService;
+import org.jboss.as.connector.services.bootstrap.NamedBootstrapContext;
+import org.jboss.as.controller.AbstractAddStepHandler;
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.ServiceVerificationHandler;
@@ -48,7 +48,7 @@ import org.jboss.tm.JBossXATerminator;
  * @author <a href="jesper.pedersen@jboss.org">Jesper Pedersen</a>
  * @author <a href="stefano.maestri@redhat.com">Stefano Maestri</a>
  */
-public class BootstrapContextAdd extends AbstractBoottimeAddStepHandler {
+public class BootstrapContextAdd extends AbstractAddStepHandler {
 
     public static final BootstrapContextAdd INSTANCE = new BootstrapContextAdd();
 
@@ -88,11 +88,11 @@ public class BootstrapContextAdd extends AbstractBoottimeAddStepHandler {
     }
 
     @Override
-    protected void performBoottime(final OperationContext context, final ModelNode operation, final ModelNode model,
+    protected void performRuntime(final OperationContext context, final ModelNode operation, final ModelNode model,
                                    final ServiceVerificationHandler verificationHandler, final List<ServiceController<?>> newControllers) throws OperationFailedException {
 
-        String name = BootstrapCtxParameters.NAME.getAttribute().validateResolvedOperation(model).asString();
-        String workmanager = BootstrapCtxParameters.WORKMANAGER.getAttribute().validateResolvedOperation(model).asString();
+        String name = BootstrapCtxParameters.NAME.getAttribute().resolveModelAttribute(context, model).asString();
+        String workmanager = BootstrapCtxParameters.WORKMANAGER.getAttribute().resolveModelAttribute(context, model).asString();
         boolean usingDefaultWm = false;
         if (DEFAULT_NAME.equals( workmanager)) {
             usingDefaultWm = true;

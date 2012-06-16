@@ -22,6 +22,20 @@
 
 package org.jboss.as.naming.subsystem;
 
+import java.util.EnumSet;
+import java.util.List;
+
+import javax.xml.stream.XMLStreamConstants;
+import javax.xml.stream.XMLStreamException;
+
+import org.jboss.as.controller.persistence.SubsystemMarshallingContext;
+import org.jboss.dmr.ModelNode;
+import org.jboss.dmr.Property;
+import org.jboss.staxmapper.XMLElementReader;
+import org.jboss.staxmapper.XMLElementWriter;
+import org.jboss.staxmapper.XMLExtendedStreamReader;
+import org.jboss.staxmapper.XMLExtendedStreamWriter;
+
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADD;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
@@ -41,20 +55,6 @@ import static org.jboss.as.naming.subsystem.NamingSubsystemModel.OBJECT_FACTORY;
 import static org.jboss.as.naming.subsystem.NamingSubsystemModel.SIMPLE;
 import static org.jboss.as.naming.subsystem.NamingSubsystemModel.TYPE;
 import static org.jboss.as.naming.subsystem.NamingSubsystemModel.VALUE;
-
-import java.util.EnumSet;
-import java.util.List;
-
-import javax.xml.stream.XMLStreamConstants;
-import javax.xml.stream.XMLStreamException;
-
-import org.jboss.as.controller.persistence.SubsystemMarshallingContext;
-import org.jboss.dmr.ModelNode;
-import org.jboss.dmr.Property;
-import org.jboss.staxmapper.XMLElementReader;
-import org.jboss.staxmapper.XMLElementWriter;
-import org.jboss.staxmapper.XMLExtendedStreamReader;
-import org.jboss.staxmapper.XMLExtendedStreamWriter;
 
 /**
  * @author Stuart Douglas
@@ -140,11 +140,18 @@ public class NamingSubsystem11Parser implements XMLElementReader<List<ModelNode>
     public void readElement(final XMLExtendedStreamReader reader, final List<ModelNode> operations) throws XMLStreamException {
 
 
-        final ModelNode ejb3SubsystemAddOperation = new ModelNode();
-        ejb3SubsystemAddOperation.get(OP).set(ADD);
-        ejb3SubsystemAddOperation.get(OP_ADDR).add(SUBSYSTEM, NamingExtension.SUBSYSTEM_NAME);
+        final ModelNode namingSubsystemAdd = new ModelNode();
+        namingSubsystemAdd.get(OP).set(ADD);
+        namingSubsystemAdd.get(OP_ADDR).add(SUBSYSTEM, NamingExtension.SUBSYSTEM_NAME);
 
-        operations.add(ejb3SubsystemAddOperation);
+        operations.add(namingSubsystemAdd);
+
+        final ModelNode remoteNamingAdd = new ModelNode();
+        remoteNamingAdd.get(OP).set(ADD);
+        remoteNamingAdd.get(OP_ADDR).add(SUBSYSTEM, NamingExtension.SUBSYSTEM_NAME);
+        remoteNamingAdd.get(OP_ADDR).add(NamingSubsystemModel.SERVICE, NamingSubsystemModel.REMOTE_NAMING);
+
+        operations.add(remoteNamingAdd);
 
         // elements
         final EnumSet<NamingSubsystemXMLElement> encountered = EnumSet.noneOf(NamingSubsystemXMLElement.class);
@@ -216,10 +223,10 @@ public class NamingSubsystem11Parser implements XMLElementReader<List<ModelNode>
                     name = value.trim();
                     break;
                 case VALUE:
-                    bindingValue = NamingBindingResourceDefinition.VALUE.parse(value, reader.getLocation()).asString();
+                    bindingValue = NamingBindingResourceDefinition.VALUE.parse(value, reader).asString();
                     break;
                 case TYPE:
-                    type = NamingBindingResourceDefinition.TYPE.parse(value, reader.getLocation()).asString();
+                    type = NamingBindingResourceDefinition.TYPE.parse(value, reader).asString();
                     break;
                 default:
                     throw unexpectedAttribute(reader, i);
@@ -262,10 +269,10 @@ public class NamingSubsystem11Parser implements XMLElementReader<List<ModelNode>
                     name = value.trim();
                     break;
                 case MODULE:
-                    module = NamingBindingResourceDefinition.MODULE.parse(value, reader.getLocation()).asString();
+                    module = NamingBindingResourceDefinition.MODULE.parse(value, reader).asString();
                     break;
                 case CLASS:
-                    factory = NamingBindingResourceDefinition.CLASS.parse(value, reader.getLocation()).asString();
+                    factory = NamingBindingResourceDefinition.CLASS.parse(value, reader).asString();
                     break;
                 default:
                     throw unexpectedAttribute(reader, i);
@@ -305,7 +312,7 @@ public class NamingSubsystem11Parser implements XMLElementReader<List<ModelNode>
                     name = value.trim();
                     break;
                 case LOOKUP:
-                    lookup = NamingBindingResourceDefinition.LOOKUP.parse(value, reader.getLocation()).asString();
+                    lookup = NamingBindingResourceDefinition.LOOKUP.parse(value, reader).asString();
                     break;
                 default:
                     throw unexpectedAttribute(reader, i);

@@ -28,11 +28,11 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OUTCOME;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.READ_CHILDREN_NAMES_OPERATION;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RESULT;
+import static org.jboss.as.ee.deployment.spi.DeploymentLogger.ROOT_LOGGER;
+import static org.jboss.as.ee.deployment.spi.DeploymentMessages.MESSAGES;
 
-import java.io.IOException;
 import java.net.URI;
 import java.net.URL;
-import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -42,13 +42,6 @@ import java.util.concurrent.Future;
 import javax.enterprise.deploy.shared.ModuleType;
 import javax.enterprise.deploy.spi.TargetModuleID;
 import javax.enterprise.deploy.spi.exceptions.TargetException;
-import javax.security.auth.callback.Callback;
-import javax.security.auth.callback.CallbackHandler;
-import javax.security.auth.callback.NameCallback;
-import javax.security.auth.callback.PasswordCallback;
-import javax.security.auth.callback.UnsupportedCallbackException;
-import javax.security.sasl.RealmCallback;
-import javax.security.sasl.RealmChoiceCallback;
 
 import org.jboss.as.controller.client.ModelControllerClient;
 import org.jboss.as.controller.client.helpers.standalone.DeploymentAction;
@@ -58,11 +51,10 @@ import org.jboss.as.controller.client.helpers.standalone.ServerDeploymentActionR
 import org.jboss.as.controller.client.helpers.standalone.ServerDeploymentManager;
 import org.jboss.as.controller.client.helpers.standalone.ServerDeploymentPlanResult;
 import org.jboss.dmr.ModelNode;
-import org.jboss.logging.Logger;
 
 /**
  * A Target that deploys using the {@link ServerDeploymentManager}.
- *
+ * <p/>
  * This target is selected by including a targetType=as7 param in the DeploymentManager deployURI.
  *
  * @author Thomas.Diesler@jboss.com
@@ -70,35 +62,18 @@ import org.jboss.logging.Logger;
  */
 final class DeploymentManagerTarget extends JBossTarget {
 
-    // provide logging
-    static final Logger log = Logger.getLogger(DeploymentManagerTarget.class);
-
     static final String DESCRIPTION = "ServerDeploymentManager target";
 
-    private final Map<TargetModuleID, String> runtimeNames = new HashMap<TargetModuleID, String>();
     private final Map<TargetModuleID, Boolean> runtimeState = new HashMap<TargetModuleID, Boolean>();
     private final ModelControllerClient modelControllerClient;
     private final ServerDeploymentManager deploymentManager;
     private final URI deployURI;
 
-    public DeploymentManagerTarget(URI deployURI, String username, String password) {
-        log.debug("new DeploymentManagerTarget: " + deployURI);
-        try {
-            URIParser parser = new URIParser(deployURI);
-            String serverHost = parser.getParameter("serverHost");
-            String serverPort = parser.getParameter("serverPort");
-            String host = serverHost != null ? serverHost : "127.0.0.1";
-            Integer port = serverPort != null ? Integer.parseInt(serverPort) : 9999;
-            if (username != null && password != null) {
-                this.modelControllerClient = ModelControllerClient.Factory.create(host, port, getCallbackHandler(username, password));
-            } else {
-                this.modelControllerClient = ModelControllerClient.Factory.create(host, port);
-            }
-            this.deploymentManager = ServerDeploymentManager.Factory.create(modelControllerClient);
-            this.deployURI = deployURI;
-        } catch (UnknownHostException ex) {
-            throw new IllegalArgumentException("Cannot connect to management target: " + deployURI, ex);
-        }
+    public DeploymentManagerTarget(URI deployURI, final ModelControllerClient modelControllerClient) {
+        ROOT_LOGGER.debugf("new DeploymentManagerTarget: %s", deployURI);
+        this.modelControllerClient = modelControllerClient;
+        this.deploymentManager = ServerDeploymentManager.Factory.create(modelControllerClient);
+        this.deployURI = deployURI;
     }
 
     @Override
@@ -113,21 +88,22 @@ final class DeploymentManagerTarget extends JBossTarget {
 
     @Override
     public void deploy(TargetModuleID targetModuleID) throws Exception {
-        log.infof("Begin deploy: %s", targetModuleID);
+        ROOT_LOGGER.beginDeploy(targetModuleID);
         DeploymentPlanBuilder builder = deploymentManager.newDeploymentPlan();
-        builder = builder.add(targetModuleID.getModuleID(), new URL(targetModuleID.getModuleID())).andDeploy();
+        TargetModuleExt targetModule = (TargetModuleExt) targetModuleID;
+        URL contentURL = targetModule.getContentFile().toURI().toURL();
+        builder = builder.add(targetModule.getModuleID(), contentURL).andDeploy();
         DeploymentPlan plan = builder.build();
         DeploymentAction deployAction = builder.getLastAction();
-        String runtimeName = executeDeploymentPlan(plan, deployAction);
-        runtimeNames.put(targetModuleID, runtimeName);
-        log.infof("End deploy: %s", targetModuleID);
+        executeDeploymentPlan(plan, deployAction);
+        ROOT_LOGGER.endDeploy(targetModuleID);
     }
 
     @Override
     public void start(TargetModuleID targetModuleID) throws Exception {
         // [TODO] A hack that fakes module start/stop behaviour
         // [AS7-2777] Add notion of start/stop for deployments
-        ((TargetModuleIDImpl)targetModuleID).setRunning(Boolean.TRUE);
+        ((TargetModuleIDImpl) targetModuleID).setRunning(Boolean.TRUE);
         runtimeState.put(targetModuleID, Boolean.TRUE);
     }
 
@@ -135,32 +111,29 @@ final class DeploymentManagerTarget extends JBossTarget {
     public void stop(TargetModuleID targetModuleID) throws Exception {
         // [TODO] A hack that fakes module start/stop behaviour
         // [AS7-2777] Add notion of start/stop for deployments
-        ((TargetModuleIDImpl)targetModuleID).setRunning(Boolean.FALSE);
+        ((TargetModuleIDImpl) targetModuleID).setRunning(Boolean.FALSE);
         runtimeState.put(targetModuleID, Boolean.FALSE);
     }
 
     @Override
     public void undeploy(TargetModuleID targetModuleID) throws Exception {
-        String runtimeName = runtimeNames.remove(targetModuleID);
-        if (runtimeName != null) {
-            DeploymentPlanBuilder builder = deploymentManager.newDeploymentPlan();
-            DeploymentPlan plan = builder.undeploy(runtimeName).remove(runtimeName).build();
-            Future<ServerDeploymentPlanResult> future = deploymentManager.execute(plan);
-            future.get();
-        }
+        String deploymentName = targetModuleID.getModuleID();
+        DeploymentPlanBuilder builder = deploymentManager.newDeploymentPlan();
+        DeploymentPlan plan = builder.undeploy(deploymentName).remove(deploymentName).build();
+        Future<ServerDeploymentPlanResult> future = deploymentManager.execute(plan);
+        future.get();
     }
 
     @Override
     public TargetModuleID[] getAvailableModules(ModuleType filterType) throws TargetException {
         try {
             List<TargetModuleID> list = new ArrayList<TargetModuleID>();
-
             final ModelNode operation = new ModelNode();
             operation.get(OP).set(READ_CHILDREN_NAMES_OPERATION);
             operation.get(CHILD_TYPE).set(DEPLOYMENT);
             ModelNode result = modelControllerClient.execute(operation);
             if (FAILED.equals(result.get(OUTCOME).asString()))
-                throw new IllegalStateException("Management request failed: " + result);
+                throw new IllegalStateException(MESSAGES.managementRequestFailed(result));
 
             List<ModelNode> nodeList = result.get(RESULT).asList();
             for (ModelNode node : nodeList) {
@@ -177,11 +150,11 @@ final class DeploymentManagerTarget extends JBossTarget {
                     moduleType = ModuleType.EJB;
                 }
                 if (moduleType == null) {
-                    log.warnf("Cannot determine module type of: %s", node);
+                    ROOT_LOGGER.cannotDetermineModuleType(node);
                     continue;
                 }
                 if (filterType == null || filterType.equals(moduleType)) {
-                    TargetModuleIDImpl targetModuleID = new TargetModuleIDImpl(this, moduleID, null, moduleType);
+                    TargetModuleIDImpl targetModuleID = new TargetModuleIDImpl(this, moduleID, null, moduleType, null);
                     Boolean state = runtimeState.get(targetModuleID);
                     targetModuleID.setRunning(state != null ? state : Boolean.TRUE);
                     list.add(targetModuleID);
@@ -197,7 +170,7 @@ final class DeploymentManagerTarget extends JBossTarget {
         }
     }
 
-    private String executeDeploymentPlan(DeploymentPlan plan, DeploymentAction deployAction) throws Exception {
+    private void executeDeploymentPlan(DeploymentPlan plan, DeploymentAction deployAction) throws Exception {
         Future<ServerDeploymentPlanResult> future = deploymentManager.execute(plan);
         ServerDeploymentPlanResult planResult = future.get();
 
@@ -207,31 +180,6 @@ final class DeploymentManagerTarget extends JBossTarget {
             if (deploymentException != null)
                 throw deploymentException;
         }
-
-        return deployAction.getDeploymentUnitUniqueName();
     }
 
-    private CallbackHandler getCallbackHandler(final String username, final String password) {
-        return new CallbackHandler() {
-            public void handle(Callback[] callbacks) throws IOException, UnsupportedCallbackException {
-                for (Callback current : callbacks) {
-                    if (current instanceof NameCallback) {
-                        NameCallback ncb = (NameCallback) current;
-                        ncb.setName(username);
-                    } else if (current instanceof PasswordCallback) {
-                        PasswordCallback pcb = (PasswordCallback) current;
-                        pcb.setPassword(password.toCharArray());
-                    } else if (current instanceof RealmCallback) {
-                        RealmCallback rcb = (RealmCallback) current;
-                        rcb.setText(rcb.getDefaultText());
-                    } else if (current instanceof RealmChoiceCallback) {
-                        // Ignored but not rejected.
-                    } else {
-                        throw new UnsupportedCallbackException(current);
-                    }
-
-                }
-            }
-        };
-    }
 }

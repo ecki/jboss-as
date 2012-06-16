@@ -23,6 +23,8 @@
 package org.jboss.as.ejb3.subsystem;
 
 import org.jboss.as.controller.PathElement;
+import org.jboss.as.threads.ThreadsServices;
+import org.jboss.msc.service.ServiceName;
 
 /**
  * User: jpai
@@ -30,20 +32,26 @@ import org.jboss.as.controller.PathElement;
 public interface EJB3SubsystemModel {
     String LITE = "lite";
     String NAME = "name";
-
-    //only set if this is a cut-down app client boot
-    String APPCLIENT = "appclient";
+    String ALIASES = "aliases";
 
     String ASYNC = "async";
     String IIOP = "iiop";
 
     String CONNECTOR_REF = "connector-ref";
+    String IN_VM_REMOTE_INTERFACE_INVOCATION_PASS_BY_VALUE = "in-vm-remote-interface-invocation-pass-by-value";
 
+    String DEFAULT_DISTINCT_NAME = "default-distinct-name";
     String DEFAULT_MDB_INSTANCE_POOL = "default-mdb-instance-pool";
     String DEFAULT_RESOURCE_ADAPTER_NAME = "default-resource-adapter-name";
+    String DEFAULT_SFSB_CACHE = "default-sfsb-cache";
+    String DEFAULT_CLUSTERED_SFSB_CACHE = "default-clustered-sfsb-cache";
     String DEFAULT_SLSB_INSTANCE_POOL = "default-slsb-instance-pool";
     String INSTANCE_ACQUISITION_TIMEOUT = "timeout";
     String INSTANCE_ACQUISITION_TIMEOUT_UNIT = "timeout-unit";
+    String DEFAULT_ENTITY_BEAN_INSTANCE_POOL = "default-entity-bean-instance-pool";
+    String DEFAULT_ENTITY_BEAN_OPTIMISTIC_LOCKING = "default-entity-bean-optimistic-locking";
+
+    String ENABLE_STATISTICS = "enable-statistics";
 
     String MAX_POOL_SIZE = "max-pool-size";
     String STRICT_MAX_BEAN_INSTANCE_POOL = "strict-max-bean-instance-pool";
@@ -67,11 +75,32 @@ public interface EJB3SubsystemModel {
     String USE_QUALIFIED_NAME = "use-qualified-name";
     String ENABLE_BY_DEFAULT = "enable-by-default";
 
+    String CACHE = "cache";
+    String PASSIVATION_STORE = "passivation-store";
+
+    String FILE_PASSIVATION_STORE = "file-passivation-store";
+    String IDLE_TIMEOUT = "idle-timeout";
+    String IDLE_TIMEOUT_UNIT = "idle-timeout-unit";
+    String MAX_SIZE = "max-size";
+    String GROUPS_PATH = "groups-path";
+    String SESSIONS_PATH = "sessions-path";
+    String SUBDIRECTORY_COUNT = "subdirectory-count";
+
+    String CLUSTER_PASSIVATION_STORE = "cluster-passivation-store";
+    String BEAN_CACHE = "bean-cache";
+    String CACHE_CONTAINER = "cache-container";
+    String CLIENT_MAPPINGS_CACHE = "client-mappings-cache";
+    String PASSIVATE_EVENTS_ON_REPLICATE = "passivate-events-on-replicate";
+
+    String CHANNEL_CREATION_OPTIONS = "channel-creation-options";
+    String VALUE = "value";
+    String TYPE = "type";
+
     PathElement REMOTE_SERVICE_PATH = PathElement.pathElement(SERVICE, REMOTE);
     PathElement ASYNC_SERVICE_PATH = PathElement.pathElement(SERVICE, ASYNC);
     PathElement TIMER_SERVICE_PATH = PathElement.pathElement(SERVICE, TIMER_SERVICE);
     PathElement THREAD_POOL_PATH = PathElement.pathElement(THREAD_POOL);
     PathElement IIOP_PATH = PathElement.pathElement(SERVICE, IIOP);
 
-
+    ServiceName BASE_THREAD_POOL_SERVICE_NAME = ThreadsServices.EXECUTOR.append("ejb3");
 }

@@ -33,7 +33,6 @@ import javax.xml.stream.XMLStreamWriter;
 import org.jboss.as.controller.ListAttributeDefinition;
 import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.descriptions.ResourceDescriptionResolver;
-import org.jboss.as.controller.operations.validation.EnumValidator;
 import org.jboss.as.controller.operations.validation.ModelTypeValidator;
 import org.jboss.as.controller.operations.validation.ParameterValidator;
 import org.jboss.as.controller.operations.validation.ParametersOfValidator;
@@ -69,7 +68,7 @@ public class ProviderModulesAttributeDefinition extends ListAttributeDefinition 
     @Override
     protected void addValueTypeDescription(ModelNode node, ResourceBundle bundle) {
         // This method being used indicates a misuse of this class
-        throw new UnsupportedOperationException("Use the ResourceDescriptionResolver variant");
+        throw SecurityMessages.MESSAGES.unsupportedOperationExceptionUseResourceDesc();
     }
 
     @Override
@@ -98,7 +97,7 @@ public class ProviderModulesAttributeDefinition extends ListAttributeDefinition 
         try {
             fieldValidator.validateParameter(name, node);
         } catch (OperationFailedException e) {
-            throw new XMLStreamException(e.getFailureDescription().toString(), location);
+            throw SecurityMessages.MESSAGES.xmlStreamException(e.getFailureDescription().toString(), location);
         }
         return node;
     }

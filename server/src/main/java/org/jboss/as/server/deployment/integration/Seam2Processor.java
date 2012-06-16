@@ -22,6 +22,7 @@
 
 package org.jboss.as.server.deployment.integration;
 
+import org.jboss.as.server.ServerMessages;
 import org.jboss.as.server.deployment.Attachments;
 import org.jboss.as.server.deployment.DeploymentPhaseContext;
 import org.jboss.as.server.deployment.DeploymentUnit;
@@ -102,7 +103,7 @@ public class Seam2Processor implements DeploymentUnitProcessor {
                 Module extModule = moduleLoader.loadModule(EXT_CONTENT_MODULE);
                 URL url = extModule.getExportedResource(SEAM_INT_JAR);
                 if (url == null)
-                    throw new DeploymentUnitProcessingException("No Seam Integration jar present: " + extModule);
+                    throw ServerMessages.MESSAGES.noSeamIntegrationJarPresent(extModule);
 
                 File file = new File(url.toURI());
                 VirtualFile vf = VFS.getChild(file.toURI());
@@ -153,7 +154,7 @@ public class Seam2Processor implements DeploymentUnitProcessor {
                 if (root.getChild(path).exists()) {
                     final ModuleSpecification moduleSpecification = deploymentUnit.getAttachment(Attachments.MODULE_SPECIFICATION);
                     final ModuleLoader moduleLoader = Module.getBootModuleLoader();
-                    moduleSpecification.addSystemDependency(new ModuleDependency(moduleLoader, VFS_MODULE, false, false, false));
+                    moduleSpecification.addSystemDependency(new ModuleDependency(moduleLoader, VFS_MODULE, false, false, false, false));
                     moduleSpecification.addResourceLoader(getSeamIntResourceLoader());
                     return;
                 }

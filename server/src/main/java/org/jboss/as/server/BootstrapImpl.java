@@ -25,7 +25,8 @@ package org.jboss.as.server;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-import org.jboss.as.controller.persistence.ConfigurationPersister;
+import org.jboss.as.controller.ControlledProcessState;
+import org.jboss.as.controller.ControlledProcessStateService;
 import org.jboss.modules.Module;
 import org.jboss.modules.ModuleIdentifier;
 import org.jboss.modules.ModuleLoadException;
@@ -52,45 +53,34 @@ final class BootstrapImpl implements Bootstrap {
 
     @Override
     public AsyncFuture<ServiceContainer> bootstrap(final Configuration configuration, final List<ServiceActivator> extraServices) {
-        if (configuration == null) {
-            throw new IllegalArgumentException("configuration is null");
-        }
+
+        assert configuration != null : "configuration is null";
         final ModuleLoader moduleLoader = configuration.getModuleLoader();
-        final ServerEnvironment serverEnvironment = configuration.getServerEnvironment();
-        if (serverEnvironment == null) {
-            throw new IllegalArgumentException("serverEnvironment is null");
-        }
-        final String name = serverEnvironment.getServerName();
         final Bootstrap.ConfigurationPersisterFactory configurationPersisterFactory = configuration.getConfigurationPersisterFactory();
-        if (moduleLoader == null) {
-            throw new IllegalArgumentException("moduleLoader is null");
-        }
-        if (name == null) {
-            throw new IllegalArgumentException("name is null");
-        }
-        if (configurationPersisterFactory == null) {
-            throw new IllegalArgumentException("configurationPersisterFactory is null");
-        }
+        assert configurationPersisterFactory != null : "configurationPersisterFactory is null";
+
         try {
             Module.registerURLStreamHandlerFactoryModule(moduleLoader.loadModule(ModuleIdentifier.create("org.jboss.vfs")));
         } catch (ModuleLoadException e) {
-            throw new IllegalArgumentException("VFS is not available from the configured module loader");
+            throw ServerMessages.MESSAGES.vfsNotAvailable();
         }
         final FutureServiceContainer future = new FutureServiceContainer(container);
         final ServiceTarget tracker = container.subTarget();
-        final Service<?> applicationServerService = new ApplicationServerService(extraServices, configuration);
+        final ControlledProcessState processState = new ControlledProcessState(configuration.getServerEnvironment().isStandalone());
+        ControlledProcessStateService.addService(tracker, processState);
+        final Service<?> applicationServerService = new ApplicationServerService(extraServices, configuration, processState);
         tracker.addService(Services.JBOSS_AS, applicationServerService)
             .install();
         final ServiceController<?> rootService = container.getRequiredService(Services.JBOSS_AS);
         rootService.addListener(new AbstractServiceListener<Object>() {
             @Override
-            public void transition(final ServiceController<? extends Object> controller, final ServiceController.Transition transition) {
+            public void transition(final ServiceController<?> controller, final ServiceController.Transition transition) {
                 switch (transition) {
                     case STARTING_to_UP: {
                         controller.removeListener(this);
                         final ServiceController<?> controllerServiceController = controller.getServiceContainer().getRequiredService(Services.JBOSS_SERVER_CONTROLLER);
                         controllerServiceController.addListener(new AbstractServiceListener<Object>() {
-                            public void transition(final ServiceController<? extends Object> controller, final ServiceController.Transition transition) {
+                            public void transition(final ServiceController<?> controller, final ServiceController.Transition transition) {
                                 switch (transition) {
                                     case STARTING_to_UP: {
                                         future.done();
@@ -103,7 +93,7 @@ final class BootstrapImpl implements Bootstrap {
                                         break;
                                     }
                                     case REMOVING_to_REMOVED: {
-                                        future.failed(new ServiceNotFoundException("Server controller service was removed"));
+                                        future.failed(ServerMessages.MESSAGES.serverControllerServiceRemoved());
                                         controller.removeListener(this);
                                         break;
                                     }
@@ -119,7 +109,7 @@ final class BootstrapImpl implements Bootstrap {
                     }
                     case REMOVING_to_REMOVED: {
                         controller.removeListener(this);
-                        future.failed(new ServiceNotFoundException("Root service was removed"));
+                        future.failed(ServerMessages.MESSAGES.rootServiceRemoved());
                         break;
                     }
                 }
@@ -134,10 +124,9 @@ final class BootstrapImpl implements Bootstrap {
         try {
             ServiceContainer container = bootstrap(configuration, extraServices).get();
             ServiceController<?> controller = container.getRequiredService(Services.JBOSS_AS);
-            AsyncFuture<ServiceContainer> startupFuture = (AsyncFuture<ServiceContainer>) controller.getValue();
-            return startupFuture;
+            return (AsyncFuture<ServiceContainer>) controller.getValue();
         } catch (Exception ex) {
-            throw new IllegalStateException("Cannot start server", ex);
+            throw ServerMessages.MESSAGES.cannotStartServer(ex);
         }
     }
 

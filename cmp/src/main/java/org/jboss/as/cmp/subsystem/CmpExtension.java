@@ -25,32 +25,42 @@ package org.jboss.as.cmp.subsystem;
 import org.jboss.as.controller.Extension;
 import org.jboss.as.controller.ExtensionContext;
 import org.jboss.as.controller.SubsystemRegistration;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADD;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.DESCRIBE;
+import org.jboss.as.controller.descriptions.ResourceDescriptionResolver;
+import org.jboss.as.controller.descriptions.StandardResourceDescriptionResolver;
 import org.jboss.as.controller.operations.common.GenericSubsystemDescribeHandler;
 import org.jboss.as.controller.parsing.ExtensionParsingContext;
 import org.jboss.as.controller.registry.ManagementResourceRegistration;
 import org.jboss.as.controller.registry.OperationEntry;
+
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.DESCRIBE;
 
 /**
  * @author John Bailey
  */
 public class CmpExtension implements Extension {
     public static final String SUBSYSTEM_NAME = "cmp";
-    public static final String NAMESPACE_1_0 = "urn:jboss:domain:cmp:1.0";
 
-    private static CmpSubsystemParser PARSER = new CmpSubsystemParser();
+    private static final String RESOURCE_NAME = CmpExtension.class.getPackage().getName() + ".LocalDescriptions";
 
     public void initialize(final ExtensionContext context) {
-        final SubsystemRegistration subsystem = context.registerSubsystem(SUBSYSTEM_NAME);
-        final ManagementResourceRegistration subsystemRegistration = subsystem.registerSubsystemModel(CmpSubsystemProviders.SUBSYSTEM);
-        subsystem.registerXMLElementWriter(PARSER);
+        final SubsystemRegistration subsystem = context.registerSubsystem(SUBSYSTEM_NAME, 1, 0);
 
-        subsystemRegistration.registerOperationHandler(ADD, CmpSubsystemAdd.INSTANCE, CmpSubsystemAdd.INSTANCE, false);
+        final ManagementResourceRegistration subsystemRegistration = subsystem.registerSubsystemModel(CMPSubsystemRootResourceDescription.INSTANCE);
         subsystemRegistration.registerOperationHandler(DESCRIBE, GenericSubsystemDescribeHandler.INSTANCE, GenericSubsystemDescribeHandler.INSTANCE, false, OperationEntry.EntryType.PRIVATE);
+
+        subsystem.registerXMLElementWriter(CmpSubsystem10Parser.INSTANCE);
+
+        subsystemRegistration.registerSubModel(UUIDKeyGeneratorResourceDescription.INSTANCE);
+
+        subsystemRegistration.registerSubModel(HiLoKeyGeneratorResourceDescription.INSTANCE);
     }
 
     public void initializeParsers(final ExtensionParsingContext context) {
-        context.setSubsystemXmlMapping(NAMESPACE_1_0, PARSER);
+        context.setSubsystemXmlMapping(SUBSYSTEM_NAME, Namespace.CMP_1_0.getUriString(), CmpSubsystem10Parser.INSTANCE);
+    }
+
+
+    public static ResourceDescriptionResolver getResourceDescriptionResolver(final String keyPrefix) {
+        return new StandardResourceDescriptionResolver(keyPrefix, RESOURCE_NAME, CmpExtension.class.getClassLoader(), true, true);
     }
 }

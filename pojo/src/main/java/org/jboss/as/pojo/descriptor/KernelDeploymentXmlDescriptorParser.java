@@ -22,24 +22,27 @@
 
 package org.jboss.as.pojo.descriptor;
 
-import org.jboss.as.pojo.BeanState;
-import org.jboss.as.pojo.ParseResult;
-import org.jboss.staxmapper.XMLElementReader;
-import org.jboss.staxmapper.XMLExtendedStreamReader;
+import static org.jboss.as.controller.parsing.ParseUtils.missingRequired;
+import static org.jboss.as.controller.parsing.ParseUtils.unexpectedAttribute;
+import static org.jboss.as.controller.parsing.ParseUtils.unexpectedElement;
 
-import javax.xml.stream.XMLStreamConstants;
-import javax.xml.stream.XMLStreamException;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-import static org.jboss.as.controller.parsing.ParseUtils.missingRequired;
-import static org.jboss.as.controller.parsing.ParseUtils.unexpectedAttribute;
-import static org.jboss.as.controller.parsing.ParseUtils.unexpectedElement;
+import javax.xml.stream.XMLStreamConstants;
+import javax.xml.stream.XMLStreamException;
+
+import org.jboss.as.pojo.BeanState;
+import org.jboss.as.pojo.ParseResult;
+import org.jboss.as.pojo.PojoMessages;
+import org.jboss.staxmapper.XMLElementReader;
+import org.jboss.staxmapper.XMLExtendedStreamReader;
 
 /**
  * Parse Microcontainer jboss-beans.xml.
@@ -310,7 +313,7 @@ public class KernelDeploymentXmlDescriptorParser implements XMLElementReader<Par
     private String parseAlias(final XMLExtendedStreamReader reader) throws XMLStreamException {
         final String alias = parseTextElement(reader);
         if (alias == null || alias.trim().length() == 0)
-            throw new IllegalArgumentException("Null or empty alias");
+            throw PojoMessages.MESSAGES.nullOrEmptyAlias();
         return alias;
     }
 
@@ -446,10 +449,10 @@ public class KernelDeploymentXmlDescriptorParser implements XMLElementReader<Par
 
             switch (attribute) {
                 case STATE:
-                    installConfig.setWhenRequired(BeanState.valueOf(attributeValue.toUpperCase()));
+                    installConfig.setWhenRequired(BeanState.valueOf(attributeValue.toUpperCase(Locale.ENGLISH)));
                     break;
                 case TARGET_STATE:
-                    installConfig.setDependencyState(BeanState.valueOf(attributeValue.toUpperCase()));
+                    installConfig.setDependencyState(BeanState.valueOf(attributeValue.toUpperCase(Locale.ENGLISH)));
                     break;
                 case BEAN:
                     installConfig.setDependency(attributeValue);
@@ -497,10 +500,10 @@ public class KernelDeploymentXmlDescriptorParser implements XMLElementReader<Par
 
             switch (attribute) {
                 case STATE:
-                    callbackConfig.setWhenRequired(BeanState.valueOf(attributeValue.toUpperCase()));
+                    callbackConfig.setWhenRequired(BeanState.valueOf(attributeValue.toUpperCase(Locale.ENGLISH)));
                     break;
                 case TARGET_STATE:
-                    callbackConfig.setState(BeanState.valueOf(attributeValue.toUpperCase()));
+                    callbackConfig.setState(BeanState.valueOf(attributeValue.toUpperCase(Locale.ENGLISH)));
                     break;
                 case METHOD:
                     callbackConfig.setMethodName(attributeValue);
@@ -533,10 +536,10 @@ public class KernelDeploymentXmlDescriptorParser implements XMLElementReader<Par
 
             switch (attribute) {
                 case STATE:
-                    dependsConfig.setWhenRequired(BeanState.valueOf(attributeValue.toUpperCase()));
+                    dependsConfig.setWhenRequired(BeanState.valueOf(attributeValue.toUpperCase(Locale.ENGLISH)));
                     break;
                 case TARGET_STATE:
-                    dependsConfig.setDependencyState(BeanState.valueOf(attributeValue.toUpperCase()));
+                    dependsConfig.setDependencyState(BeanState.valueOf(attributeValue.toUpperCase(Locale.ENGLISH)));
                     break;
                 case SERVICE:
                     dependsConfig.setService(Boolean.parseBoolean(attributeValue));
@@ -548,7 +551,7 @@ public class KernelDeploymentXmlDescriptorParser implements XMLElementReader<Par
 
         String dependency = parseTextElement(reader);
         if (dependency == null || dependency.trim().length() == 0)
-            throw new IllegalArgumentException("Null or empty dependency");
+            throw PojoMessages.MESSAGES.nullOrEmptyDependency();
         dependsConfig.setDependency(dependency);
 
         return dependsConfig;
@@ -616,7 +619,7 @@ public class KernelDeploymentXmlDescriptorParser implements XMLElementReader<Par
             switch (reader.next()) {
                 case END_ELEMENT:
                     if (valueConfig == null)
-                        throw new XMLStreamException("Missing value", reader.getLocation());
+                        throw new XMLStreamException(PojoMessages.MESSAGES.missingValue(), reader.getLocation());
                     if (valueConfig.getType() == null)
                         valueConfig.setType(type);
                     return valueConfig;
@@ -660,7 +663,7 @@ public class KernelDeploymentXmlDescriptorParser implements XMLElementReader<Par
                     injectedValueConfig.setBean(attributeValue);
                     break;
                 case STATE:
-                    injectedValueConfig.setState(BeanState.valueOf(attributeValue.toUpperCase()));
+                    injectedValueConfig.setState(BeanState.valueOf(attributeValue.toUpperCase(Locale.ENGLISH)));
                     break;
                 case SERVICE:
                     injectedValueConfig.setService(attributeValue);
@@ -695,7 +698,7 @@ public class KernelDeploymentXmlDescriptorParser implements XMLElementReader<Par
                     factoryConfig.setBean(attributeValue);
                     break;
                 case STATE:
-                    factoryConfig.setState(BeanState.valueOf(attributeValue.toUpperCase()));
+                    factoryConfig.setState(BeanState.valueOf(attributeValue.toUpperCase(Locale.ENGLISH)));
                     break;
                 default:
                     throw unexpectedAttribute(reader, i);
@@ -837,7 +840,7 @@ public class KernelDeploymentXmlDescriptorParser implements XMLElementReader<Par
             switch (reader.next()) {
                 case END_ELEMENT:
                     if (value == null)
-                        throw new IllegalArgumentException("Null value: " + reader.getLocation());
+                        throw new XMLStreamException(PojoMessages.MESSAGES.missingValue(), reader.getLocation());
                     return value;
                 case START_ELEMENT:
                     switch (Element.of(reader.getLocalName())) {
@@ -890,7 +893,7 @@ public class KernelDeploymentXmlDescriptorParser implements XMLElementReader<Par
                     valueFactoryConfig.setMethod(attributeValue);
                     break;
                 case STATE:
-                    valueFactoryConfig.setState(BeanState.valueOf(attributeValue.toUpperCase()));
+                    valueFactoryConfig.setState(BeanState.valueOf(attributeValue.toUpperCase(Locale.ENGLISH)));
                     break;
                 default:
                     throw unexpectedAttribute(reader, i);

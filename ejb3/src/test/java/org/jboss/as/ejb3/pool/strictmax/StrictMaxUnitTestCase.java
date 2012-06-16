@@ -28,7 +28,9 @@ import org.jboss.as.ejb3.pool.StatelessObjectFactory;
 import org.jboss.as.ejb3.pool.common.MockBean;
 import org.jboss.as.ejb3.pool.common.MockFactory;
 
+import java.sql.Time;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -78,22 +80,24 @@ public class StrictMaxUnitTestCase extends TestCase {
      */
     public void testMultiThread() throws Exception {
         StatelessObjectFactory<MockBean> factory = new MockFactory();
-        final Pool<MockBean> pool = new StrictMaxPool<MockBean>(factory, 10, 1, TimeUnit.SECONDS);
+        final Pool<MockBean> pool = new StrictMaxPool<MockBean>(factory, 10, 60, TimeUnit.SECONDS);
         pool.start();
+
+        final CountDownLatch in = new CountDownLatch(1);
+        final CountDownLatch ready = new CountDownLatch(10);
+
+
 
         Callable<Void> task = new Callable<Void>() {
             public Void call() throws Exception {
-                for (int i = 0; i < 20; i++) {
-                    MockBean bean = pool.get();
+                MockBean bean = pool.get();
+                ready.countDown();
+                in.await();
+                pool.release(bean);
 
-                    Thread.sleep(50);
+                bean = null;
 
-                    pool.release(bean);
-
-                    bean = null;
-
-                    used.incrementAndGet();
-                }
+                used.incrementAndGet();
 
                 return null;
             }
@@ -105,6 +109,9 @@ public class StrictMaxUnitTestCase extends TestCase {
             results[i] = service.submit(task);
         }
 
+        ready.await(120, TimeUnit.SECONDS);
+        in.countDown();
+
         for (Future<?> result : results) {
             result.get(5, TimeUnit.SECONDS);
         }
@@ -113,7 +120,7 @@ public class StrictMaxUnitTestCase extends TestCase {
 
         pool.stop();
 
-        assertEquals(400, used.intValue());
+        assertEquals(20, used.intValue());
         assertEquals(10, MockBean.getPostConstructs());
         assertEquals(10, MockBean.getPreDestroys());
     }

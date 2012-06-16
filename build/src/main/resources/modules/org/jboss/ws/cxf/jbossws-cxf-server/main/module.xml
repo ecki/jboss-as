@@ -24,6 +24,10 @@
 
 <module xmlns="urn:jboss:module:1.1" name="org.jboss.ws.cxf.jbossws-cxf-server">
 
+    <properties>
+        <property name="jboss.api" value="private"/>
+    </properties>
+
     <resources>
         <!-- Insert resources here -->
     </resources>
@@ -36,13 +40,13 @@
         <module name="javax.xml.bind.api" />
         <module name="javax.xml.stream.api" />
         <module name="javax.xml.ws.api" />
-        <module name="org.picketbox" />
         <module name="org.jboss.ws.api" />
         <module name="org.jboss.ws.spi" />
         <module name="org.jboss.ws.common" />
         <module name="org.jboss.ws.jaxws-client" />
         <module name="org.jboss.ws.cxf.jbossws-cxf-factories" services="import"/>
-        <module name="org.apache.cxf" services="import">
+        <!-- do not import services from cxf, those need to come from jbossws -->
+        <module name="org.apache.cxf.impl">
           <imports>
             <include path="META-INF/cxf"/> <!-- required to also pull in the bus extensions from META-INF -->
             <include path="META-INF/"/>

@@ -23,6 +23,7 @@ package org.jboss.as.jacorb.rmi;
 
 import java.lang.reflect.Method;
 import java.rmi.Remote;
+import java.util.Locale;
 
 import org.omg.CORBA.AttributeMode;
 
@@ -88,7 +89,7 @@ public class AttributeAnalysis extends AbstractAnalysis {
                 mutatorAnalysis = new OperationAnalysis(mutator);
             }
 
-            setIDLName(getIDLName()); // Fixup operation names
+            setIDLName(getIDLName()); // Fix operation names
         }
     }
 
@@ -164,7 +165,7 @@ public class AttributeAnalysis extends AbstractAnalysis {
                 && (idlName.length() <= 1
                 || idlName.charAt(1) < 0x41 || idlName.charAt(1) > 0x5a)) {
             idlName =
-                    idlName.substring(0, 1).toLowerCase() + idlName.substring(1);
+                    idlName.substring(0, 1).toLowerCase(Locale.ENGLISH) + idlName.substring(1);
         }
 
         if (accessorAnalysis != null)

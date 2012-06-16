@@ -22,9 +22,14 @@
 package org.jboss.as.ejb3.component.stateful;
 
 import java.lang.reflect.Method;
+import java.nio.ByteBuffer;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 import javax.ejb.AccessTimeout;
@@ -36,11 +41,16 @@ import org.jboss.as.ee.component.BasicComponentInstance;
 import org.jboss.as.ee.component.Component;
 import org.jboss.as.ee.component.ComponentInstance;
 import org.jboss.as.ee.component.ComponentView;
+import org.jboss.as.ejb3.EjbLogger;
+import org.jboss.as.ejb3.EjbMessages;
 import org.jboss.as.ejb3.cache.Cache;
-import org.jboss.as.ejb3.cache.ExpiringCache;
+import org.jboss.as.ejb3.cache.IdentifierFactory;
+import org.jboss.as.ejb3.cache.PassivationManager;
 import org.jboss.as.ejb3.cache.StatefulObjectFactory;
+import org.jboss.as.ejb3.cache.TransactionAwareObjectFactory;
 import org.jboss.as.ejb3.component.DefaultAccessTimeoutService;
 import org.jboss.as.ejb3.component.EJBBusinessMethod;
+import org.jboss.as.ejb3.component.allowedmethods.AllowedMethodsInformation;
 import org.jboss.as.ejb3.component.session.SessionBeanComponent;
 import org.jboss.as.ejb3.concurrency.AccessTimeoutDetails;
 import org.jboss.as.naming.ManagedReference;
@@ -52,26 +62,23 @@ import org.jboss.invocation.Interceptor;
 import org.jboss.invocation.InterceptorContext;
 import org.jboss.invocation.InterceptorFactory;
 import org.jboss.invocation.InterceptorFactoryContext;
-import org.jboss.invocation.SimpleInterceptorFactoryContext;
-import org.jboss.logging.Logger;
+import org.jboss.marshalling.MarshallingConfiguration;
+import org.jboss.msc.service.ServiceContainer;
 import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.StopContext;
+
 import static org.jboss.as.ejb3.EjbMessages.MESSAGES;
-import static org.jboss.as.ejb3.EjbLogger.ROOT_LOGGER;
 
 /**
  * Stateful Session Bean
  *
  * @author <a href="mailto:cdewolf@redhat.com">Carlo de Wolf</a>
  */
-public class StatefulSessionComponent extends SessionBeanComponent {
+public class StatefulSessionComponent extends SessionBeanComponent implements StatefulObjectFactory<StatefulSessionComponentInstance>, PassivationManager<SessionID, StatefulSessionComponentInstance>, IdentifierFactory<SessionID> {
 
     public static final Object SESSION_ID_REFERENCE_KEY = new Object();
 
-
-    private static final Logger logger = Logger.getLogger(StatefulSessionComponent.class);
-
-    private final Cache<StatefulSessionComponentInstance> cache;
+    private final Cache<SessionID, StatefulSessionComponentInstance> cache;
 
     private final InterceptorFactory afterBegin;
     private final Method afterBeginMethod;
@@ -79,8 +86,21 @@ public class StatefulSessionComponent extends SessionBeanComponent {
     private final Method afterCompletionMethod;
     private final InterceptorFactory beforeCompletion;
     private final Method beforeCompletionMethod;
+    private final InterceptorFactory prePassivate;
+    private final InterceptorFactory postActivate;
     private final Map<EJBBusinessMethod, AccessTimeoutDetails> methodAccessTimeouts;
     private final DefaultAccessTimeoutService defaultAccessTimeoutProvider;
+    private final int currentMarshallingVersion;
+    private final Map<Integer, MarshallingConfiguration> marshallingConfigurations;
+
+    private final InterceptorFactory ejb2XRemoveMethod;
+
+    /**
+     * Set of context keys for serializable interceptors.
+     * <p/>
+     * These are used to serialize the user provided interceptors
+     */
+    private final Set<Object> serialiableInterceptorContextKeys;
 
     /**
      * Construct a new instance.
@@ -96,26 +116,63 @@ public class StatefulSessionComponent extends SessionBeanComponent {
         this.afterCompletionMethod = ejbComponentCreateService.getAfterCompletionMethod();
         this.beforeCompletion = ejbComponentCreateService.getBeforeCompletion();
         this.beforeCompletionMethod = ejbComponentCreateService.getBeforeCompletionMethod();
+        this.prePassivate = ejbComponentCreateService.getPrePassivate();
+        this.postActivate = ejbComponentCreateService.getPostActivate();
         this.methodAccessTimeouts = ejbComponentCreateService.getMethodApplicableAccessTimeouts();
         this.defaultAccessTimeoutProvider = ejbComponentCreateService.getDefaultAccessTimeoutService();
+        this.ejb2XRemoveMethod = ejbComponentCreateService.getEjb2XRemoveMethod();
+        this.currentMarshallingVersion = ejbComponentCreateService.getCurrentMarshallingVersion();
+        this.marshallingConfigurations = ejbComponentCreateService.getMarshallingConfigurations();
+        this.serialiableInterceptorContextKeys = ejbComponentCreateService.getSerializableInterceptorContextKeys();
 
-        final StatefulTimeoutInfo statefulTimeout = ejbComponentCreateService.getStatefulTimeout();
-        if (statefulTimeout != null) {
-            cache = new ExpiringCache<StatefulSessionComponentInstance>(statefulTimeout.getValue(), statefulTimeout.getTimeUnit(), ejbComponentCreateService.getComponentClass().getName());
-        } else {
-            cache = new ExpiringCache<StatefulSessionComponentInstance>(-1, TimeUnit.MILLISECONDS, ejbComponentCreateService.getComponentClass().getName());
+        String beanName = ejbComponentCreateService.getComponentClass().getName();
+        StatefulObjectFactory<StatefulSessionComponentInstance> factory = new TransactionAwareObjectFactory<StatefulSessionComponentInstance>(this, this.getTransactionManager());
+        StatefulTimeoutInfo timeout = ejbComponentCreateService.getStatefulTimeout();
+        this.cache = ejbComponentCreateService.getCacheFactory().createCache(beanName, this, factory, this, timeout);
+    }
+
+    @Override
+    public StatefulSessionComponentInstance createInstance() {
+        return (StatefulSessionComponentInstance) super.createInstance();
+    }
+
+    @Override
+    public StatefulSessionComponentInstance createInstance(final Object instance) {
+        return (StatefulSessionComponentInstance) super.createInstance();
+    }
+
+    @Override
+    protected StatefulSessionComponentInstance constructComponentInstance(ManagedReference instance, boolean invokePostConstruct, InterceptorFactoryContext context) {
+        return (StatefulSessionComponentInstance) super.constructComponentInstance(instance, invokePostConstruct, context);
+    }
+
+    @Override
+    public void destroyInstance(StatefulSessionComponentInstance instance) {
+        instance.destroy();
+    }
+
+    @Override
+    public void postActivate(StatefulSessionComponentInstance instance) {
+        instance.postActivate();
+    }
+
+    @Override
+    public void prePassivate(StatefulSessionComponentInstance instance) {
+        instance.prePassivate();
+    }
+
+    @Override
+    public int getCurrentMarshallingVersion() {
+        return this.currentMarshallingVersion;
+    }
+
+    @Override
+    public MarshallingConfiguration getMarshallingConfiguration(int version) {
+        MarshallingConfiguration config = this.marshallingConfigurations.get(version);
+        if (config == null) {
+            throw EjbMessages.MESSAGES.unsupportedMarshallingVersion(version);
         }
-        cache.setStatefulObjectFactory(new StatefulObjectFactory<StatefulSessionComponentInstance>() {
-            @Override
-            public StatefulSessionComponentInstance createInstance() {
-                return (StatefulSessionComponentInstance) StatefulSessionComponent.this.createInstance();
-            }
-
-            @Override
-            public void destroyInstance(StatefulSessionComponentInstance instance) {
-                instance.destroy();
-            }
-        });
+        return config;
     }
 
     protected SessionID getSessionIdOf(final InterceptorContext ctx) {
@@ -123,28 +180,32 @@ public class StatefulSessionComponent extends SessionBeanComponent {
         return instance.getId();
     }
 
+    @Override
     public <T> T getBusinessObject(Class<T> businessInterface, final InterceptorContext context) throws IllegalStateException {
         if (businessInterface == null) {
             throw MESSAGES.businessInterfaceIsNull();
         }
-        return createViewInstanceProxy(businessInterface, Collections.<Object, Object>singletonMap(SessionID.SESSION_ID_KEY, getSessionIdOf(context)));
+        return createViewInstanceProxy(businessInterface, Collections.<Object, Object>singletonMap(SessionID.class, getSessionIdOf(context)));
     }
 
+    @Override
     public EJBLocalObject getEJBLocalObject(final InterceptorContext ctx) throws IllegalStateException {
-        if (getEjbLocalObjectView() == null) {
-            throw new IllegalStateException("Bean " + getComponentName() + " does not have an EJBLocalObject");
+        if (getEjbLocalObjectViewServiceName() == null) {
+            throw EjbLogger.EJB3_LOGGER.ejbLocalObjectUnavailable(getComponentName());
         }
-        return createViewInstanceProxy(EJBLocalObject.class, Collections.<Object, Object>singletonMap(SessionID.SESSION_ID_KEY, getSessionIdOf(ctx)), getEjbLocalObjectView());
+        return createViewInstanceProxy(EJBLocalObject.class, Collections.<Object, Object>singletonMap(SessionID.class, getSessionIdOf(ctx)), getEjbLocalObjectViewServiceName());
     }
 
+    @SuppressWarnings("unchecked")
+    @Override
     public EJBObject getEJBObject(final InterceptorContext ctx) throws IllegalStateException {
-        if (getEjbObjectView() == null) {
-            throw MESSAGES.beanComponentMissingEjbObject(getComponentName(),"EJBObject");
+        if (getEjbObjectViewServiceName() == null) {
+            throw MESSAGES.beanComponentMissingEjbObject(getComponentName(), "EJBObject");
         }
-        final ServiceController<?> serviceController = CurrentServiceContainer.getServiceContainer().getRequiredService(getEjbObjectView());
+        final ServiceController<?> serviceController = currentServiceContainer().getRequiredService(getEjbObjectViewServiceName());
         final ComponentView view = (ComponentView) serviceController.getValue();
         final String locatorAppName = getEarApplicationName() == null ? "" : getEarApplicationName();
-        return EJBClient.createProxy(new StatefulEJBLocator<EJBObject>((Class<EJBObject>) view.getViewClass(), locatorAppName, getModuleName(), getComponentName(), getDistinctName(), getSessionIdOf(ctx)));
+        return EJBClient.createProxy(new StatefulEJBLocator<EJBObject>((Class<EJBObject>) view.getViewClass(), locatorAppName, getModuleName(), getComponentName(), getDistinctName(), getSessionIdOf(ctx), this.getCache().getStrictAffinity()));
     }
 
     @Override
@@ -170,25 +231,47 @@ public class StatefulSessionComponent extends SessionBeanComponent {
         return defaultAccessTimeoutProvider.getDefaultAccessTimeout();
     }
 
-    protected Interceptor createInterceptor(final InterceptorFactory factory) {
+    protected Interceptor createInterceptor(final InterceptorFactory factory, final InterceptorFactoryContext context) {
         if (factory == null)
             return null;
-        final SimpleInterceptorFactoryContext context = new SimpleInterceptorFactoryContext();
         context.getContextData().put(Component.class, this);
         return factory.create(context);
     }
 
     public SessionID createSession() {
-        return getCache().create().getId();
+        return this.cache.create().getId();
     }
 
-    public Cache<StatefulSessionComponentInstance> getCache() {
-        return cache;
+    public Cache<SessionID, StatefulSessionComponentInstance> getCache() {
+        return this.cache;
+    }
+
+    @Override
+    public SessionID createIdentifier() {
+        final UUID uuid = UUID.randomUUID();
+        ByteBuffer bb = ByteBuffer.wrap(new byte[16]);
+        bb.putLong(uuid.getMostSignificantBits());
+        bb.putLong(uuid.getLeastSignificantBits());
+        return SessionID.createSessionID(bb.array());
     }
 
     @Override
     protected BasicComponentInstance instantiateComponentInstance(final AtomicReference<ManagedReference> instanceReference, final Interceptor preDestroyInterceptor, final Map<Method, Interceptor> methodInterceptors, final InterceptorFactoryContext interceptorContext) {
-        return new StatefulSessionComponentInstance(this, instanceReference, preDestroyInterceptor, methodInterceptors);
+        return new StatefulSessionComponentInstance(this, instanceReference, preDestroyInterceptor, methodInterceptors, interceptorContext);
+    }
+
+    @Override
+    protected void componentInstanceCreated(final BasicComponentInstance basicComponentInstance, final InterceptorFactoryContext context) {
+        final StatefulSessionComponentInstance instance = (StatefulSessionComponentInstance) basicComponentInstance;
+        final Map<Object, Object> serializableInterceptors = new HashMap<Object, Object>();
+        for (final Object key : serialiableInterceptorContextKeys) {
+            @SuppressWarnings("unchecked")
+            final AtomicReference<ManagedReference> data = (AtomicReference<ManagedReference>) context.getContextData().get(key);
+            if (data != null) {
+                serializableInterceptors.put(key, data.get().getInstance());
+            }
+        }
+        instance.setSerializableInterceptors(serializableInterceptors);
     }
 
     /**
@@ -198,7 +281,7 @@ public class StatefulSessionComponent extends SessionBeanComponent {
      */
     public void removeSession(final SessionID sessionId) {
         //The cache takes care of the transactional behavoir
-        getCache().remove(getTransactionManager(), sessionId);
+        this.cache.remove(sessionId);
     }
 
     public InterceptorFactory getAfterBegin() {
@@ -225,15 +308,47 @@ public class StatefulSessionComponent extends SessionBeanComponent {
         return beforeCompletionMethod;
     }
 
+    public InterceptorFactory getPrePassivate() {
+        return this.prePassivate;
+    }
+
+    public InterceptorFactory getPostActivate() {
+        return this.postActivate;
+    }
+
+    public InterceptorFactory getEjb2XRemoveMethod() {
+        return this.ejb2XRemoveMethod;
+    }
+
     @Override
     public void start() {
+        getShutDownInterceptorFactory().start();
         super.start();
         cache.start();
     }
 
     @Override
     public void stop(final StopContext stopContext) {
+        getShutDownInterceptorFactory().shutdown();
         super.stop(stopContext);
         cache.stop();
+    }
+
+    @Override
+    public AllowedMethodsInformation getAllowedMethodsInformation() {
+        return StatefulAllowedMethodsInformation.INSTANCE;
+    }
+
+    public Set<Object> getSerialiableInterceptorContextKeys() {
+        return serialiableInterceptorContextKeys;
+    }
+
+    private static ServiceContainer currentServiceContainer() {
+        return AccessController.doPrivileged(new PrivilegedAction<ServiceContainer>() {
+            @Override
+            public ServiceContainer run() {
+                return CurrentServiceContainer.getServiceContainer();
+            }
+        });
     }
 }

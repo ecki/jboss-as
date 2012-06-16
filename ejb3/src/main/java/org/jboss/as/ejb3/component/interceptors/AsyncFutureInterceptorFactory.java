@@ -22,14 +22,19 @@
 
 package org.jboss.as.ejb3.component.interceptors;
 
+import java.security.AccessController;
+import java.security.PrivilegedAction;
+import java.util.concurrent.Future;
+
 import org.jboss.as.ee.component.Component;
+import org.jboss.as.ee.component.interceptors.InvocationType;
 import org.jboss.as.ejb3.component.session.SessionBeanComponent;
 import org.jboss.invocation.Interceptor;
 import org.jboss.invocation.InterceptorContext;
 import org.jboss.invocation.InterceptorFactory;
 import org.jboss.invocation.InterceptorFactoryContext;
-
-import java.util.concurrent.Future;
+import org.jboss.security.SecurityContext;
+import org.jboss.security.SecurityContextAssociation;
 
 /**
  * An asynchronous execution interceptor for methods returning {@link Future}.  Because asynchronous invocations
@@ -61,12 +66,18 @@ public final class AsyncFutureInterceptorFactory implements InterceptorFactory {
             @Override
             public Object processInvocation(final InterceptorContext context) throws Exception {
                 final InterceptorContext asyncInterceptorContext = context.clone();
+                asyncInterceptorContext.putPrivateData(InvocationType.class, InvocationType.ASYNC);
                 final CancellationFlag flag = new CancellationFlag();
+                final SecurityContext securityContext = SecurityContextAssociation.getSecurityContext();
                 final AsyncInvocationTask task = new AsyncInvocationTask( flag) {
-
                     @Override
                     protected Object runInvocation() throws Exception {
-                        return asyncInterceptorContext.proceed();
+                        setSecurityContextOnAssociation(securityContext);
+                        try {
+                            return asyncInterceptorContext.proceed();
+                        } finally {
+                            clearSecurityContextOnAssociation();
+                        }
                     }
                 };
                 asyncInterceptorContext.putPrivateData(CancellationFlag.class, flag);
@@ -76,4 +87,24 @@ public final class AsyncFutureInterceptorFactory implements InterceptorFactory {
         };
     }
 
+    private static void setSecurityContextOnAssociation(final SecurityContext sc) {
+        AccessController.doPrivileged(new PrivilegedAction<Void>() {
+
+            @Override
+            public Void run() {
+                SecurityContextAssociation.setSecurityContext(sc);
+                return null;
+            }
+        });
+    }
+    private static void clearSecurityContextOnAssociation() {
+        AccessController.doPrivileged(new PrivilegedAction<Void>() {
+
+            @Override
+            public Void run() {
+                SecurityContextAssociation.clearSecurityContext();
+                return null;
+            }
+        });
+    }
 }

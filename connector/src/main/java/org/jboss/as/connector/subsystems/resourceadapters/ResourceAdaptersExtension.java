@@ -21,17 +21,51 @@
  */
 package org.jboss.as.connector.subsystems.resourceadapters;
 
-import static org.jboss.as.connector.ConnectorLogger.SUBSYSTEM_RA_LOGGER;
-import static org.jboss.as.connector.pool.Constants.BACKGROUNDVALIDATION;
-import static org.jboss.as.connector.pool.Constants.BACKGROUNDVALIDATIONMILLIS;
-import static org.jboss.as.connector.pool.Constants.BLOCKING_TIMEOUT_WAIT_MILLIS;
-import static org.jboss.as.connector.pool.Constants.IDLETIMEOUTMINUTES;
-import static org.jboss.as.connector.pool.Constants.MAX_POOL_SIZE;
-import static org.jboss.as.connector.pool.Constants.MIN_POOL_SIZE;
-import static org.jboss.as.connector.pool.Constants.POOL_FLUSH_STRATEGY;
-import static org.jboss.as.connector.pool.Constants.POOL_PREFILL;
-import static org.jboss.as.connector.pool.Constants.POOL_USE_STRICT_MIN;
-import static org.jboss.as.connector.pool.Constants.USE_FAST_FAIL;
+import org.jboss.as.connector.util.ConnectorServices;
+import org.jboss.as.connector.subsystems.common.pool.PoolOperations;
+import org.jboss.as.controller.Extension;
+import org.jboss.as.controller.ExtensionContext;
+import org.jboss.as.controller.PathElement;
+import org.jboss.as.controller.ReloadRequiredWriteAttributeHandler;
+import org.jboss.as.controller.SimpleAttributeDefinition;
+import org.jboss.as.controller.SubsystemRegistration;
+import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
+import org.jboss.as.controller.operations.common.GenericSubsystemDescribeHandler;
+import org.jboss.as.controller.parsing.ExtensionParsingContext;
+import org.jboss.as.controller.parsing.ParseUtils;
+import org.jboss.as.controller.persistence.SubsystemMarshallingContext;
+import org.jboss.as.controller.registry.ManagementResourceRegistration;
+import org.jboss.as.controller.registry.OperationEntry;
+import org.jboss.as.controller.registry.OperationEntry.Flag;
+import org.jboss.dmr.ModelNode;
+import org.jboss.dmr.Property;
+import org.jboss.jca.common.api.metadata.common.Recovery;
+import org.jboss.jca.common.api.metadata.common.TransactionSupportEnum;
+import org.jboss.jca.common.api.metadata.common.v10.CommonConnDef;
+import org.jboss.jca.common.api.metadata.resourceadapter.ResourceAdapters;
+import org.jboss.jca.common.api.metadata.resourceadapter.v10.ResourceAdapter;
+import org.jboss.staxmapper.XMLElementReader;
+import org.jboss.staxmapper.XMLElementWriter;
+import org.jboss.staxmapper.XMLExtendedStreamReader;
+import org.jboss.staxmapper.XMLExtendedStreamWriter;
+
+import javax.xml.stream.XMLStreamConstants;
+import javax.xml.stream.XMLStreamException;
+import java.util.EnumSet;
+import java.util.List;
+import java.util.Map;
+
+import static org.jboss.as.connector.logging.ConnectorLogger.SUBSYSTEM_RA_LOGGER;
+import static org.jboss.as.connector.subsystems.common.pool.Constants.BACKGROUNDVALIDATION;
+import static org.jboss.as.connector.subsystems.common.pool.Constants.BACKGROUNDVALIDATIONMILLIS;
+import static org.jboss.as.connector.subsystems.common.pool.Constants.BLOCKING_TIMEOUT_WAIT_MILLIS;
+import static org.jboss.as.connector.subsystems.common.pool.Constants.IDLETIMEOUTMINUTES;
+import static org.jboss.as.connector.subsystems.common.pool.Constants.MAX_POOL_SIZE;
+import static org.jboss.as.connector.subsystems.common.pool.Constants.MIN_POOL_SIZE;
+import static org.jboss.as.connector.subsystems.common.pool.Constants.POOL_FLUSH_STRATEGY;
+import static org.jboss.as.connector.subsystems.common.pool.Constants.POOL_PREFILL;
+import static org.jboss.as.connector.subsystems.common.pool.Constants.POOL_USE_STRICT_MIN;
+import static org.jboss.as.connector.subsystems.common.pool.Constants.USE_FAST_FAIL;
 import static org.jboss.as.connector.subsystems.resourceadapters.Constants.ADMIN_OBJECTS_NAME;
 import static org.jboss.as.connector.subsystems.resourceadapters.Constants.ALLOCATION_RETRY;
 import static org.jboss.as.connector.subsystems.resourceadapters.Constants.ALLOCATION_RETRY_WAIT_MILLIS;
@@ -63,6 +97,7 @@ import static org.jboss.as.connector.subsystems.resourceadapters.Constants.USE_C
 import static org.jboss.as.connector.subsystems.resourceadapters.Constants.USE_JAVA_CONTEXT;
 import static org.jboss.as.connector.subsystems.resourceadapters.Constants.WRAP_XA_RESOURCE;
 import static org.jboss.as.connector.subsystems.resourceadapters.Constants.XA_RESOURCE_TIMEOUT;
+import static org.jboss.as.connector.subsystems.resourceadapters.ResourceAdaptersSubsystemProviders.ACTIVATE_RA_DESC;
 import static org.jboss.as.connector.subsystems.resourceadapters.ResourceAdaptersSubsystemProviders.ADD_ADMIN_OBJECT_DESC;
 import static org.jboss.as.connector.subsystems.resourceadapters.ResourceAdaptersSubsystemProviders.ADD_CONFIG_PROPERTIES_DESC;
 import static org.jboss.as.connector.subsystems.resourceadapters.ResourceAdaptersSubsystemProviders.ADD_CONNECTION_DEFINITION_DESC;
@@ -79,64 +114,33 @@ import static org.jboss.as.connector.subsystems.resourceadapters.ResourceAdapter
 import static org.jboss.as.connector.subsystems.resourceadapters.ResourceAdaptersSubsystemProviders.RESOURCEADAPTER_DESC;
 import static org.jboss.as.connector.subsystems.resourceadapters.ResourceAdaptersSubsystemProviders.SUBSYSTEM;
 import static org.jboss.as.connector.subsystems.resourceadapters.ResourceAdaptersSubsystemProviders.SUBSYSTEM_ADD_DESC;
+import static org.jboss.as.connector.subsystems.resourceadapters.ResourceAdaptersSubsystemProviders.SUBSYSTEM_REMOVE_DESC;
 import static org.jboss.as.connector.subsystems.resourceadapters.ResourceAdaptersSubsystemProviders.TEST_CONNECTION_DESC;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADD;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.DESCRIBE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.REMOVE;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.WRITE_ATTRIBUTE_OPERATION;
-
-import java.util.List;
-import java.util.Map;
-
-import javax.xml.stream.XMLStreamConstants;
-import javax.xml.stream.XMLStreamException;
-
-import org.jboss.as.connector.pool.PoolMetrics;
-import org.jboss.as.connector.pool.PoolOperations;
-import org.jboss.as.controller.Extension;
-import org.jboss.as.controller.ExtensionContext;
-import org.jboss.as.controller.PathElement;
-import org.jboss.as.controller.ReloadRequiredWriteAttributeHandler;
-import org.jboss.as.controller.SimpleAttributeDefinition;
-import org.jboss.as.controller.SubsystemRegistration;
-import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
-import org.jboss.as.controller.descriptions.common.CommonProviders;
-import org.jboss.as.controller.operations.common.GenericSubsystemDescribeHandler;
-import org.jboss.as.controller.operations.global.GlobalOperationHandlers;
-import org.jboss.as.controller.parsing.ExtensionParsingContext;
-import org.jboss.as.controller.parsing.ParseUtils;
-import org.jboss.as.controller.persistence.SubsystemMarshallingContext;
-import org.jboss.as.controller.registry.AttributeAccess.Storage;
-import org.jboss.as.controller.registry.ManagementResourceRegistration;
-import org.jboss.as.controller.registry.OperationEntry;
-import org.jboss.dmr.ModelNode;
-import org.jboss.dmr.Property;
-import org.jboss.jca.common.api.metadata.common.CommonConnDef;
-import org.jboss.jca.common.api.metadata.common.Recovery;
-import org.jboss.jca.common.api.metadata.resourceadapter.ResourceAdapter;
-import org.jboss.jca.common.api.metadata.resourceadapter.ResourceAdapters;
-import org.jboss.staxmapper.XMLElementReader;
-import org.jboss.staxmapper.XMLElementWriter;
-import org.jboss.staxmapper.XMLExtendedStreamReader;
-import org.jboss.staxmapper.XMLExtendedStreamWriter;
 
 /**
- * @author <a href="mailto:stefano.maestri@redhat.com">Stefano Maestri</a>
+more  * @author <a href="mailto:stefano.maestri@redhat.com">Stefano Maestri</a>
  * @author <a href="mailto:jeff.zhang@jboss.org">Jeff Zhang</a>
  */
 public class ResourceAdaptersExtension implements Extension {
 
     public static final String SUBSYSTEM_NAME = RESOURCEADAPTERS_NAME;
+    private static final EnumSet<Flag> RUNTIME_ONLY_FLAG = EnumSet.of(Flag.RUNTIME_ONLY);
+
+    private static final int MANAGEMENT_API_MAJOR_VERSION = 1;
+    private static final int MANAGEMENT_API_MINOR_VERSION = 1;
 
     @Override
     public void initialize(final ExtensionContext context) {
         SUBSYSTEM_RA_LOGGER.debugf("Initializing ResourceAdapters Extension");
         // Register the remoting subsystem
-        final SubsystemRegistration registration = context.registerSubsystem(SUBSYSTEM_NAME);
+        final SubsystemRegistration registration = context.registerSubsystem(SUBSYSTEM_NAME, MANAGEMENT_API_MAJOR_VERSION, MANAGEMENT_API_MINOR_VERSION);
 
-        ReloadRequiredWriteAttributeHandler reloadRequiredWriteAttributeHandler = new ReloadRequiredWriteAttributeHandler();
+        ReloadRequiredWriteAttributeHandler disabledRequiredWriteAttributeHandler = new  ReloadRequiredWriteAttributeHandler();
 
 
         registration.registerXMLElementWriter(ResourceAdapterSubsystemParser.INSTANCE);
@@ -144,66 +148,65 @@ public class ResourceAdaptersExtension implements Extension {
         // Remoting subsystem description and operation handlers
         final ManagementResourceRegistration subsystem = registration.registerSubsystemModel(SUBSYSTEM);
         subsystem.registerOperationHandler(ADD, ResourceAdaptersSubSystemAdd.INSTANCE, SUBSYSTEM_ADD_DESC, false);
+        subsystem.registerOperationHandler(REMOVE, ReloadRequiredRemoveStepHandler.INSTANCE, SUBSYSTEM_REMOVE_DESC, false);
         subsystem.registerOperationHandler(DESCRIBE, GenericSubsystemDescribeHandler.INSTANCE, GenericSubsystemDescribeHandler.INSTANCE, false, OperationEntry.EntryType.PRIVATE);
 
         final ManagementResourceRegistration resourceadapter = subsystem.registerSubModel(PathElement.pathElement(RESOURCEADAPTER_NAME),
                 RESOURCEADAPTER_DESC);
         resourceadapter.registerOperationHandler(ADD, RaAdd.INSTANCE, ADD_RESOURCEADAPTER_DESC, false);
         resourceadapter.registerOperationHandler(REMOVE, RaRemove.INSTANCE, REMOVE_RESOURCEADAPTER_DESC, false);
-        for (final String attribute : ResourceAdaptersSubsystemProviders.RESOURCEADAPTER_ATTRIBUTE) {
-            resourceadapter.registerReadWriteAttribute(attribute, null,
-                    reloadRequiredWriteAttributeHandler, Storage.CONFIGURATION);
+        resourceadapter.registerOperationHandler("activate", RaActivate.INSTANCE, ACTIVATE_RA_DESC, false);
+
+        for (final SimpleAttributeDefinition attribute : ResourceAdaptersSubsystemProviders.RESOURCEADAPTER_ATTRIBUTE) {
+            resourceadapter.registerReadWriteAttribute(attribute, null, disabledRequiredWriteAttributeHandler);
         }
 
         final ManagementResourceRegistration configAdapter = resourceadapter.registerSubModel(PathElement.pathElement(CONFIG_PROPERTIES.getName()), CONFIG_PROPERTIES_DESC);
         configAdapter.registerOperationHandler(ADD, ConfigPropertyAdd.INSTANCE, ADD_CONFIG_PROPERTIES_DESC, false);
         configAdapter.registerOperationHandler(REMOVE, ReloadRequiredRemoveStepHandler.INSTANCE, REMOVE_CONFIG_PROPERTIES_DESC, false);
+        configAdapter.registerReadOnlyAttribute(Constants.CONFIG_PROPERTY_VALUE, null);
 
         final ManagementResourceRegistration connectionDefinition = resourceadapter.registerSubModel(PathElement.pathElement(CONNECTIONDEFINITIONS_NAME), CONNECTION_DEFINITION_DESC);
         connectionDefinition.registerOperationHandler(ADD, ConnectionDefinitionAdd.INSTANCE, ADD_CONNECTION_DEFINITION_DESC, false);
         connectionDefinition.registerOperationHandler(REMOVE, ReloadRequiredRemoveStepHandler.INSTANCE, REMOVE_CONNECTION_DEFINITION_DESC, false);
-        connectionDefinition.registerOperationHandler(WRITE_ATTRIBUTE_OPERATION, GlobalOperationHandlers.WRITE_ATTRIBUTE, CommonProviders.WRITE_ATTRIBUTE_PROVIDER, true);
+        for (final SimpleAttributeDefinition attribute : ResourceAdaptersSubsystemProviders.CONNECTIONDEFINITIONS_NODEATTRIBUTE) {
+            connectionDefinition.registerReadWriteAttribute(attribute, null, disabledRequiredWriteAttributeHandler);
+        }
 
         final ManagementResourceRegistration configCF = connectionDefinition.registerSubModel(PathElement.pathElement(CONFIG_PROPERTIES.getName()), CONFIG_PROPERTIES_DESC);
         configCF.registerOperationHandler(ADD, CDConfigPropertyAdd.INSTANCE, ADD_CONFIG_PROPERTIES_DESC, false);
         configCF.registerOperationHandler(REMOVE, ReloadRequiredRemoveStepHandler.INSTANCE, REMOVE_CONFIG_PROPERTIES_DESC, false);
-        for (final SimpleAttributeDefinition attribute : ResourceAdaptersSubsystemProviders.CONNECTIONDEFINITIONS_NODEATTRIBUTE) {
-            connectionDefinition.registerReadWriteAttribute(attribute.getName(), null,
-                    reloadRequiredWriteAttributeHandler, Storage.CONFIGURATION);
-        }
+        configCF.registerReadOnlyAttribute(Constants.CONFIG_PROPERTY_VALUE, null);
 
         final ManagementResourceRegistration adminObject = resourceadapter.registerSubModel(PathElement.pathElement(ADMIN_OBJECTS_NAME), ADMIN_OBJECT_DESC);
         adminObject.registerOperationHandler(ADD, AdminObjectAdd.INSTANCE, ADD_ADMIN_OBJECT_DESC, false);
         adminObject.registerOperationHandler(REMOVE, ReloadRequiredRemoveStepHandler.INSTANCE, REMOVE_ADMIN_OBJECT_DESC, false);
+        for (final SimpleAttributeDefinition attribute : ResourceAdaptersSubsystemProviders.ADMIN_OBJECTS_NODEATTRIBUTE) {
+            adminObject.registerReadWriteAttribute(attribute, null, disabledRequiredWriteAttributeHandler);
+        }
 
         final ManagementResourceRegistration configAO = adminObject.registerSubModel(PathElement.pathElement(CONFIG_PROPERTIES.getName()), CONFIG_PROPERTIES_DESC);
         configAO.registerOperationHandler(ADD, AOConfigPropertyAdd.INSTANCE, ADD_CONFIG_PROPERTIES_DESC, false);
         configAO.registerOperationHandler(REMOVE, ReloadRequiredRemoveStepHandler.INSTANCE, REMOVE_CONFIG_PROPERTIES_DESC, false);
-        for (final SimpleAttributeDefinition attribute : ResourceAdaptersSubsystemProviders.ADMIN_OBJECTS_NODEATTRIBUTE) {
-            adminObject.registerReadWriteAttribute(attribute.getName(), null,
-                    reloadRequiredWriteAttributeHandler, Storage.CONFIGURATION);
-        }
+        configAO.registerReadOnlyAttribute(Constants.CONFIG_PROPERTY_VALUE, null);
 
-        resourceadapter.registerOperationHandler("flush-idle-connection-in-pool",
-                PoolOperations.FlushIdleConnectionInPool.RA_INSTANCE, FLUSH_IDLE_CONNECTION_DESC, false);
-        resourceadapter.registerOperationHandler("flush-all-connection-in-pool",
-                PoolOperations.FlushAllConnectionInPool.RA_INSTANCE, FLUSH_ALL_CONNECTION_DESC, false);
-        resourceadapter.registerOperationHandler("test-connection-in-pool", PoolOperations.TestConnectionInPool.RA_INSTANCE,
-                TEST_CONNECTION_DESC, false);
-
-        for (final String attributeName : PoolMetrics.ATTRIBUTES) {
-            resourceadapter.registerMetric(attributeName, PoolMetrics.RaPoolMetricsHandler.INSTANCE);
-
+        if (context.isRuntimeOnlyRegistrationValid()) {
+            connectionDefinition.registerOperationHandler("flush-idle-connection-in-pool",
+                    PoolOperations.FlushIdleConnectionInPool.RA_INSTANCE, FLUSH_IDLE_CONNECTION_DESC, false, RUNTIME_ONLY_FLAG);
+            connectionDefinition.registerOperationHandler("flush-all-connection-in-pool",
+                    PoolOperations.FlushAllConnectionInPool.RA_INSTANCE, FLUSH_ALL_CONNECTION_DESC, false, RUNTIME_ONLY_FLAG);
+            connectionDefinition.registerOperationHandler("test-connection-in-pool", PoolOperations.TestConnectionInPool.RA_INSTANCE,
+                    TEST_CONNECTION_DESC, false, RUNTIME_ONLY_FLAG);
         }
 
     }
 
     @Override
     public void initializeParsers(final ExtensionParsingContext context) {
-        context.setSubsystemXmlMapping(Namespace.CURRENT.getUriString(), ResourceAdapterSubsystemParser.INSTANCE);
+        context.setSubsystemXmlMapping(SUBSYSTEM_NAME, Namespace.CURRENT.getUriString(), ResourceAdapterSubsystemParser.INSTANCE);
     }
 
-    static final class ResourceAdapterSubsystemParser implements XMLStreamConstants, XMLElementReader<List<ModelNode>>,
+    public static final class ResourceAdapterSubsystemParser implements XMLStreamConstants, XMLElementReader<List<ModelNode>>,
             XMLElementWriter<SubsystemMarshallingContext> {
 
         static final ResourceAdapterSubsystemParser INSTANCE = new ResourceAdapterSubsystemParser();
@@ -231,23 +234,41 @@ public class ResourceAdaptersExtension implements Extension {
 
         private void writeRaElement(XMLExtendedStreamWriter streamWriter, ModelNode ra) throws XMLStreamException {
             streamWriter.writeStartElement(ResourceAdapters.Tag.RESOURCE_ADAPTER.getLocalName());
+            if (ra.hasDefined(ARCHIVE.getName())) {
+                streamWriter.writeStartElement(ARCHIVE.getXmlName());
+                String archive = ra.get(ARCHIVE.getName()).asString();
+                if (archive.contains(ConnectorServices.RA_SERVICE_NAME_SEPARATOR)) {
+                    streamWriter.writeCharacters(archive.substring(0, archive.indexOf(ConnectorServices.RA_SERVICE_NAME_SEPARATOR)));
+                } else {
+                    streamWriter.writeCharacters(archive);
+                }
 
-            ARCHIVE.marshallAsElement(ra, false, streamWriter);
+                streamWriter.writeEndElement();
+            }
+            BOOTSTRAPCONTEXT.marshallAsElement(ra, streamWriter);
 
             if (ra.hasDefined(BEANVALIDATIONGROUPS.getName())) {
+                streamWriter.writeStartElement(ResourceAdapter.Tag.BEAN_VALIDATION_GROUPS.getLocalName());
                 for (ModelNode bvg : ra.get(BEANVALIDATIONGROUPS.getName()).asList()) {
-                    BEANVALIDATIONGROUPS.marshallAsElement(bvg, false, streamWriter);
+                    streamWriter.writeStartElement(BEANVALIDATIONGROUPS.getXmlName());
+                    streamWriter.writeCharacters(bvg.asString());
+                    streamWriter.writeEndElement();
                 }
+                streamWriter.writeEndElement();
             }
 
-            BOOTSTRAPCONTEXT.marshallAsElement(ra, false, streamWriter);
-            TRANSACTIONSUPPORT.marshallAsElement(ra, false, streamWriter);
+            TRANSACTIONSUPPORT.marshallAsElement(ra, streamWriter);
             writeNewConfigProperties(streamWriter, ra);
-
+            TransactionSupportEnum transactionSupport = ra.hasDefined(TRANSACTIONSUPPORT.getName()) ? TransactionSupportEnum
+                .valueOf(ra.get(TRANSACTIONSUPPORT.getName()).asString()) : null;
+            boolean isXa = false;
+            if (transactionSupport == TransactionSupportEnum.XATransaction) {
+                isXa = true;
+            }
             if (ra.hasDefined(CONNECTIONDEFINITIONS_NAME)) {
                 streamWriter.writeStartElement(ResourceAdapter.Tag.CONNECTION_DEFINITIONS.getLocalName());
                 for (Property conDef : ra.get(CONNECTIONDEFINITIONS_NAME).asPropertyList()) {
-                    writeConDef(streamWriter, conDef.getValue(), conDef.getName());
+                    writeConDef(streamWriter, conDef.getValue(), conDef.getName(), isXa);
                 }
                 streamWriter.writeEndElement();
             }
@@ -297,10 +318,10 @@ public class ResourceAdaptersExtension implements Extension {
 
         private void writeAdminObject(XMLExtendedStreamWriter streamWriter, ModelNode adminObject, final String poolName) throws XMLStreamException {
             streamWriter.writeStartElement(ResourceAdapter.Tag.ADMIN_OBJECT.getLocalName());
-            CLASS_NAME.marshallAsAttribute(adminObject, false, streamWriter);
-            JNDINAME.marshallAsAttribute(adminObject, false, streamWriter);
-            ENABLED.marshallAsAttribute(adminObject, false, streamWriter);
-            USE_JAVA_CONTEXT.marshallAsAttribute(adminObject, false, streamWriter);
+            CLASS_NAME.marshallAsAttribute(adminObject, streamWriter);
+            JNDINAME.marshallAsAttribute(adminObject, streamWriter);
+            ENABLED.marshallAsAttribute(adminObject, streamWriter);
+            USE_JAVA_CONTEXT.marshallAsAttribute(adminObject, streamWriter);
             streamWriter.writeAttribute("pool-name", poolName);
 
             writeNewConfigProperties(streamWriter, adminObject);
@@ -308,14 +329,14 @@ public class ResourceAdaptersExtension implements Extension {
 
         }
 
-        private void writeConDef(XMLExtendedStreamWriter streamWriter, ModelNode conDef, final String poolName) throws XMLStreamException {
+        private void writeConDef(XMLExtendedStreamWriter streamWriter, ModelNode conDef, final String poolName, final boolean isXa) throws XMLStreamException {
             streamWriter.writeStartElement(ResourceAdapter.Tag.CONNECTION_DEFINITION.getLocalName());
-            CLASS_NAME.marshallAsAttribute(conDef, false, streamWriter);
-            JNDINAME.marshallAsAttribute(conDef, false, streamWriter);
-            ENABLED.marshallAsAttribute(conDef, false, streamWriter);
-            USE_JAVA_CONTEXT.marshallAsAttribute(conDef, false, streamWriter);
+            CLASS_NAME.marshallAsAttribute(conDef, streamWriter);
+            JNDINAME.marshallAsAttribute(conDef, streamWriter);
+            ENABLED.marshallAsAttribute(conDef, streamWriter);
+            USE_JAVA_CONTEXT.marshallAsAttribute(conDef, streamWriter);
             streamWriter.writeAttribute("pool-name", poolName);
-            USE_CCM.marshallAsAttribute(conDef, false, streamWriter);
+            USE_CCM.marshallAsAttribute(conDef, streamWriter);
 
 
             writeNewConfigProperties(streamWriter, conDef);
@@ -323,31 +344,37 @@ public class ResourceAdaptersExtension implements Extension {
             if (conDef.hasDefined(MAX_POOL_SIZE.getName()) || conDef.hasDefined(MIN_POOL_SIZE.getName()) ||
                 conDef.hasDefined(POOL_USE_STRICT_MIN.getName()) || conDef.hasDefined(POOL_PREFILL.getName()) ||
                 conDef.hasDefined(POOL_FLUSH_STRATEGY.getName())) {
-                if (conDef.hasDefined(INTERLEAVING.getName()) || conDef.hasDefined(WRAP_XA_RESOURCE.getName()) ||
-                    conDef.hasDefined(NOTXSEPARATEPOOL.getName()) || conDef.hasDefined(PAD_XID.getName()) ||
-                    conDef.hasDefined(SAME_RM_OVERRIDE.getName())) {
+                if (isXa) {
 
                     streamWriter.writeStartElement(CommonConnDef.Tag.XA_POOL.getLocalName());
-                    MIN_POOL_SIZE.marshallAsElement(conDef, false, streamWriter);
-                    MAX_POOL_SIZE.marshallAsElement(conDef, false, streamWriter);
-                    POOL_PREFILL.marshallAsElement(conDef, false, streamWriter);
-                    POOL_USE_STRICT_MIN.marshallAsElement(conDef, false, streamWriter);
-                    POOL_FLUSH_STRATEGY.marshallAsElement(conDef, false, streamWriter);
+                    MIN_POOL_SIZE.marshallAsElement(conDef, streamWriter);
+                    MAX_POOL_SIZE.marshallAsElement(conDef, streamWriter);
+                    POOL_PREFILL.marshallAsElement(conDef, streamWriter);
+                    POOL_USE_STRICT_MIN.marshallAsElement(conDef, streamWriter);
+                    POOL_FLUSH_STRATEGY.marshallAsElement(conDef, streamWriter);
 
-                    SAME_RM_OVERRIDE.marshallAsElement(conDef, false, streamWriter);
-                    INTERLEAVING.marshallAsElement(conDef, false, streamWriter);
-                    NOTXSEPARATEPOOL.marshallAsElement(conDef, false, streamWriter);
-                    PAD_XID.marshallAsElement(conDef, false, streamWriter);
-                    WRAP_XA_RESOURCE.marshallAsElement(conDef, false, streamWriter);
+                    SAME_RM_OVERRIDE.marshallAsElement(conDef, streamWriter);
+                    if (conDef.hasDefined(INTERLEAVING.getName()) && conDef.get(INTERLEAVING.getName()).asBoolean()) {
+                        streamWriter.writeEmptyElement(INTERLEAVING.getXmlName());
+                    } else {
+                        INTERLEAVING.marshallAsElement(conDef, streamWriter);
+                    }
+                    if (conDef.hasDefined(NOTXSEPARATEPOOL.getName()) && conDef.get(NOTXSEPARATEPOOL.getName()).asBoolean()) {
+                        streamWriter.writeEmptyElement(NOTXSEPARATEPOOL.getXmlName());
+                    } else {
+                        NOTXSEPARATEPOOL.marshallAsElement(conDef, streamWriter);
+                    }
+                    PAD_XID.marshallAsElement(conDef, streamWriter);
+                    WRAP_XA_RESOURCE.marshallAsElement(conDef, streamWriter);
 
                     streamWriter.writeEndElement();
                 } else {
                     streamWriter.writeStartElement(CommonConnDef.Tag.POOL.getLocalName());
-                    MIN_POOL_SIZE.marshallAsElement(conDef, false, streamWriter);
-                    MAX_POOL_SIZE.marshallAsElement(conDef, false, streamWriter);
-                    POOL_PREFILL.marshallAsElement(conDef, false, streamWriter);
-                    POOL_USE_STRICT_MIN.marshallAsElement(conDef, false, streamWriter);
-                    POOL_FLUSH_STRATEGY.marshallAsElement(conDef, false, streamWriter);
+                    MIN_POOL_SIZE.marshallAsElement(conDef, streamWriter);
+                    MAX_POOL_SIZE.marshallAsElement(conDef, streamWriter);
+                    POOL_PREFILL.marshallAsElement(conDef, streamWriter);
+                    POOL_USE_STRICT_MIN.marshallAsElement(conDef, streamWriter);
+                    POOL_FLUSH_STRATEGY.marshallAsElement(conDef, streamWriter);
                     streamWriter.writeEndElement();
                 }
             }
@@ -355,9 +382,13 @@ public class ResourceAdaptersExtension implements Extension {
             if (conDef.hasDefined(APPLICATION.getName()) || conDef.hasDefined(SECURITY_DOMAIN.getName())
                     || conDef.hasDefined(SECURITY_DOMAIN_AND_APPLICATION.getName())) {
                 streamWriter.writeStartElement(CommonConnDef.Tag.SECURITY.getLocalName());
-                APPLICATION.marshallAsElement(conDef, false, streamWriter);
-                SECURITY_DOMAIN.marshallAsElement(conDef, false, streamWriter);
-                SECURITY_DOMAIN_AND_APPLICATION.marshallAsElement(conDef, false, streamWriter);
+                if (conDef.hasDefined(APPLICATION.getName()) && conDef.get(APPLICATION.getName()).asBoolean()) {
+                    streamWriter.writeEmptyElement(APPLICATION.getXmlName());
+                } else {
+                    APPLICATION.marshallAsElement(conDef, streamWriter);
+                }
+                SECURITY_DOMAIN.marshallAsElement(conDef, streamWriter);
+                SECURITY_DOMAIN_AND_APPLICATION.marshallAsElement(conDef, streamWriter);
 
                 streamWriter.writeEndElement();
             }
@@ -365,19 +396,19 @@ public class ResourceAdaptersExtension implements Extension {
             if (conDef.hasDefined(BLOCKING_TIMEOUT_WAIT_MILLIS.getName()) || conDef.hasDefined(IDLETIMEOUTMINUTES.getName()) || conDef.hasDefined(ALLOCATION_RETRY.getName())
                     || conDef.hasDefined(ALLOCATION_RETRY_WAIT_MILLIS.getName()) || conDef.hasDefined(XA_RESOURCE_TIMEOUT.getName())) {
                 streamWriter.writeStartElement(CommonConnDef.Tag.TIMEOUT.getLocalName());
-                BLOCKING_TIMEOUT_WAIT_MILLIS.marshallAsElement(conDef, false, streamWriter);
-                IDLETIMEOUTMINUTES.marshallAsElement(conDef, false, streamWriter);
-                ALLOCATION_RETRY.marshallAsElement(conDef, false, streamWriter);
-                ALLOCATION_RETRY_WAIT_MILLIS.marshallAsElement(conDef, false, streamWriter);
-                XA_RESOURCE_TIMEOUT.marshallAsElement(conDef, false, streamWriter);
+                BLOCKING_TIMEOUT_WAIT_MILLIS.marshallAsElement(conDef, streamWriter);
+                IDLETIMEOUTMINUTES.marshallAsElement(conDef, streamWriter);
+                ALLOCATION_RETRY.marshallAsElement(conDef, streamWriter);
+                ALLOCATION_RETRY_WAIT_MILLIS.marshallAsElement(conDef, streamWriter);
+                XA_RESOURCE_TIMEOUT.marshallAsElement(conDef, streamWriter);
                 streamWriter.writeEndElement();
             }
 
             if (conDef.hasDefined(BACKGROUNDVALIDATION.getName()) || conDef.hasDefined(BACKGROUNDVALIDATIONMILLIS.getName()) || conDef.hasDefined(USE_FAST_FAIL.getName()) ) {
                 streamWriter.writeStartElement(CommonConnDef.Tag.VALIDATION.getLocalName());
-                BACKGROUNDVALIDATION.marshallAsElement(conDef, false, streamWriter);
-                BACKGROUNDVALIDATIONMILLIS.marshallAsElement(conDef, false, streamWriter);
-                USE_FAST_FAIL.marshallAsElement(conDef, false, streamWriter);
+                BACKGROUNDVALIDATION.marshallAsElement(conDef, streamWriter);
+                BACKGROUNDVALIDATIONMILLIS.marshallAsElement(conDef, streamWriter);
+                USE_FAST_FAIL.marshallAsElement(conDef, streamWriter);
                 streamWriter.writeEndElement();
             }
 
@@ -386,17 +417,19 @@ public class ResourceAdaptersExtension implements Extension {
                     || conDef.hasDefined(RECOVERLUGIN_PROPERTIES.getName()) || conDef.hasDefined(NO_RECOVERY.getName())) {
 
                 streamWriter.writeStartElement(CommonConnDef.Tag.RECOVERY.getLocalName());
+                NO_RECOVERY.marshallAsAttribute(conDef, streamWriter);
+
                 if (conDef.hasDefined(RECOVERY_USERNAME.getName()) || conDef.hasDefined(RECOVERY_PASSWORD.getName())
                         || conDef.hasDefined(RECOVERY_SECURITY_DOMAIN.getName())) {
                     streamWriter.writeStartElement(Recovery.Tag.RECOVER_CREDENTIAL.getLocalName());
-                    RECOVERY_USERNAME.marshallAsElement(conDef, false, streamWriter);
-                    RECOVERY_PASSWORD.marshallAsElement(conDef, false, streamWriter);
-                    RECOVERY_SECURITY_DOMAIN.marshallAsElement(conDef, false, streamWriter);
+                    RECOVERY_USERNAME.marshallAsElement(conDef, streamWriter);
+                    RECOVERY_PASSWORD.marshallAsElement(conDef, streamWriter);
+                    RECOVERY_SECURITY_DOMAIN.marshallAsElement(conDef, streamWriter);
                     streamWriter.writeEndElement();
                 }
                 if (conDef.hasDefined(RECOVERLUGIN_CLASSNAME.getName()) || conDef.hasDefined(RECOVERLUGIN_PROPERTIES.getName())) {
                     streamWriter.writeStartElement(Recovery.Tag.RECOVER_PLUGIN.getLocalName());
-                    RECOVERLUGIN_CLASSNAME.marshallAsAttribute(conDef, false, streamWriter);
+                    RECOVERLUGIN_CLASSNAME.marshallAsAttribute(conDef, streamWriter);
                     if (conDef.hasDefined(RECOVERLUGIN_PROPERTIES.getName())) {
                         for (Property property : conDef.get(RECOVERLUGIN_PROPERTIES.getName()).asPropertyList()) {
                             writeProperty(streamWriter, conDef, property.getName(), property
@@ -405,7 +438,7 @@ public class ResourceAdaptersExtension implements Extension {
                     }
                     streamWriter.writeEndElement();
                 }
-                NO_RECOVERY.marshallAsAttribute(conDef, false, streamWriter);
+                streamWriter.writeEndElement();
 
             }
 

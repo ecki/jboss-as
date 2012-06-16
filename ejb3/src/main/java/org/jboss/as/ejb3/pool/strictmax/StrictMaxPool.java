@@ -27,7 +27,6 @@ import static org.jboss.as.ejb3.EjbMessages.MESSAGES;
 import org.jboss.as.ejb3.pool.AbstractPool;
 import org.jboss.as.ejb3.pool.StatelessObjectFactory;
 
-import javax.ejb.EJBException;
 import java.util.LinkedList;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
@@ -61,8 +60,6 @@ public class StrictMaxPool<T> extends AbstractPool<T> {
      */
     private final LinkedList<T> pool = new LinkedList<T>();
 
-    private int inUse = 0;
-
     public StrictMaxPool(StatelessObjectFactory<T> factory, int maxSize, long timeout, TimeUnit timeUnit) {
         super(factory);
         this.maxSize = maxSize;
@@ -78,7 +75,6 @@ public class StrictMaxPool<T> extends AbstractPool<T> {
 
         // If we block when maxSize instances are in use, invoke release on strictMaxSize
         semaphore.release();
-        --inUse;
 
         // Let the super do any other remove stuff
         super.doRemove(ctx);
@@ -89,7 +85,7 @@ public class StrictMaxPool<T> extends AbstractPool<T> {
     }
 
     public int getAvailableCount() {
-        return maxSize - inUse;
+        return semaphore.availablePermits();
     }
 
     public int getMaxSize() {
@@ -124,11 +120,9 @@ public class StrictMaxPool<T> extends AbstractPool<T> {
         T bean = null;
         try {
             // Pool is empty, create an instance
-            ++inUse;
             bean = create();
         } finally {
             if (bean == null) {
-                --inUse;
                 semaphore.release();
             }
         }
@@ -161,17 +155,16 @@ public class StrictMaxPool<T> extends AbstractPool<T> {
             destroy(obj);
         // If we block when maxSize instances are in use, invoke release on strictMaxSize
         semaphore.release();
-        --inUse;
     }
 
     @Override
+    @Deprecated
     public void remove(T ctx) {
         if (ROOT_LOGGER.isTraceEnabled()) {
             ROOT_LOGGER.tracef("Removing instance: %s#%s", this, ctx);
         }
 
         semaphore.release();
-        --inUse;
         // let the super do the other remove stuff
         super.doRemove(ctx);
     }

@@ -39,23 +39,6 @@ public final class CommonProviders {
     private CommonProviders() {
     }
 
-    public static final DescriptionProvider EXTENSION_PROVIDER = new DescriptionProvider() {
-        @Override
-        public ModelNode getModelDescription(final Locale locale) {
-            return ExtensionDescription.getExtensionDescription(locale);
-        }
-    };
-
-    /**
-     * Provider for a sub-model that names a "path" but doesn't require the actual path to be specified.
-     */
-    public static final DescriptionProvider NAMED_PATH_PROVIDER = new DescriptionProvider() {
-        @Override
-        public ModelNode getModelDescription(final Locale locale) {
-            return PathDescription.getNamedPathDescription(locale);
-        }
-    };
-
     /**
      * Provider for a sub-model that defines the management configuration.
      */
@@ -66,45 +49,6 @@ public final class CommonProviders {
         }
     };
 
-    /**
-     * Provider for a sub-model that defines a management security-realm configuration.
-     */
-    public static final DescriptionProvider MANAGEMENT_SECURITY_REALM_PROVIDER = new DescriptionProvider() {
-        @Override
-        public ModelNode getModelDescription(final Locale locale) {
-            return ManagementDescription.getManagementSecurityRealmDescription(locale);
-        }
-    };
-
-    /**
-     * Provider for a sub-model that defines a management authentication/authorization connection factory configuration.
-     */
-    public static final DescriptionProvider MANAGEMENT_OUTBOUND_CONNECTION_PROVIDER = new DescriptionProvider() {
-        @Override
-        public ModelNode getModelDescription(final Locale locale) {
-            return ManagementDescription.getManagementOutboundConnectionDescription(locale);
-        }
-    };
-
-    /**
-     * Provider for a sub-model that defines the management configuration.
-     */
-    public static final DescriptionProvider NATIVE_REMOTING_MANAGEMENT_PROVIDER = new DescriptionProvider() {
-        @Override
-        public ModelNode getModelDescription(final Locale locale) {
-            return ManagementDescription.getNativeRemotingManagementDescription(locale);
-        }
-    };
-
-    /**
-     * Provider for a sub-model that names a "path" and specifies the actual path.
-     */
-    public static final DescriptionProvider SPECIFIED_PATH_PROVIDER = new DescriptionProvider() {
-        @Override
-        public ModelNode getModelDescription(final Locale locale) {
-            return PathDescription.getSpecifiedPathDescription(locale);
-        }
-    };
 
     /**
      * Provider for a sub-model that names an interface but doesn't require the address selection criteria.
@@ -126,16 +70,6 @@ public final class CommonProviders {
         }
     };
 
-    /**
-     * Provider for a sub-model that defines the JVM configuration.
-     */
-    public static final DescriptionProvider JVM_PROVIDER = new DescriptionProvider() {
-        @Override
-        public ModelNode getModelDescription(Locale locale) {
-            return JVMDescriptions.getJVMDescription(locale);
-        }
-    };
-
     public static final DescriptionProvider READ_RESOURCE_PROVIDER = new DescriptionProvider() {
         @Override
         public ModelNode getModelDescription(Locale locale) {
@@ -147,6 +81,13 @@ public final class CommonProviders {
         @Override
         public ModelNode getModelDescription(Locale locale) {
             return GlobalDescriptions.getReadAttributeOperationDescription(locale);
+        }
+    };
+
+    public static final DescriptionProvider UNDEFINE_ATTRIBUTE_PROVIDER = new DescriptionProvider() {
+        @Override
+        public ModelNode getModelDescription(final Locale locale) {
+            return GlobalDescriptions.getUndefineAttributeOperationDescription(locale);
         }
     };
 
@@ -207,13 +148,6 @@ public final class CommonProviders {
         }
     };
 
-    public static final DescriptionProvider VALIDATE_ADDRESS_PROVIDER = new DescriptionProvider() {
-        @Override
-        public ModelNode getModelDescription(Locale locale) {
-            return CommonDescriptions.getValidateAddressOperation(locale);
-        }
-    };
-
     /**
      * Provider for a sub-resource that exposes the MSC ServiceContainer.
      */
@@ -223,6 +157,7 @@ public final class CommonProviders {
             return CommonDescriptions.getServiceContainerDescription(locale);
         }
     };
+
     /**
      * Provider for a resource that defines the core security vault.
      */

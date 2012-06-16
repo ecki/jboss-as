@@ -26,19 +26,47 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
-import org.infinispan.AbstractDelegatingAdvancedCache;
 import org.infinispan.AdvancedCache;
 import org.infinispan.Cache;
-import org.infinispan.config.Configuration;
+import org.infinispan.configuration.cache.Configuration;
+import org.infinispan.configuration.cache.LegacyConfigurationAdaptor;
+import org.infinispan.configuration.global.GlobalConfiguration;
+import org.infinispan.configuration.global.GlobalConfigurationBuilder;
+import org.infinispan.configuration.global.LegacyGlobalConfigurationAdaptor;
 import org.infinispan.manager.AbstractDelegatingEmbeddedCacheManager;
 import org.infinispan.manager.CacheContainer;
+import org.infinispan.manager.DefaultCacheManager;
 import org.infinispan.manager.EmbeddedCacheManager;
 
 /**
  * @author Paul Ferraro
  */
 public class DefaultEmbeddedCacheManager extends AbstractDelegatingEmbeddedCacheManager {
+
+    @SuppressWarnings("deprecation")
+    private static org.infinispan.config.GlobalConfiguration adapt(GlobalConfiguration config) {
+        org.infinispan.config.GlobalConfiguration global = LegacyGlobalConfigurationAdaptor.adapt(config);
+        global.fluent().globalJmxStatistics().cacheManagerName(config.globalJmxStatistics().cacheManagerName());
+        return global;
+    }
+
+    @SuppressWarnings("deprecation")
+    private static GlobalConfiguration adapt(org.infinispan.config.GlobalConfiguration global) {
+        GlobalConfigurationBuilder builder = new GlobalConfigurationBuilder().read(LegacyGlobalConfigurationAdaptor.adapt(global));
+        return builder.globalJmxStatistics().cacheManagerName(global.getCacheManagerName()).build();
+    }
+
     private final String defaultCache;
+
+    @SuppressWarnings("deprecation")
+    public DefaultEmbeddedCacheManager(GlobalConfiguration global, String defaultCache) {
+        this(new DefaultCacheManager(adapt(global), false), defaultCache);
+    }
+
+    @SuppressWarnings("deprecation")
+    public DefaultEmbeddedCacheManager(GlobalConfiguration global, Configuration config, String defaultCache) {
+        this(new DefaultCacheManager(adapt(global), LegacyConfigurationAdaptor.adapt(config), false), defaultCache);
+    }
 
     public DefaultEmbeddedCacheManager(EmbeddedCacheManager container, String defaultCache) {
         super(container);
@@ -49,8 +77,9 @@ public class DefaultEmbeddedCacheManager extends AbstractDelegatingEmbeddedCache
      * {@inheritDoc}
      * @see org.infinispan.manager.EmbeddedCacheManager#defineConfiguration(java.lang.String, org.infinispan.config.Configuration)
      */
+    @Deprecated
     @Override
-    public Configuration defineConfiguration(String cacheName, Configuration configurationOverride) {
+    public org.infinispan.config.Configuration defineConfiguration(String cacheName, org.infinispan.config.Configuration configurationOverride) {
         return this.cm.defineConfiguration(this.getCacheName(cacheName), configurationOverride);
     }
 
@@ -58,18 +87,14 @@ public class DefaultEmbeddedCacheManager extends AbstractDelegatingEmbeddedCache
      * {@inheritDoc}
      * @see org.infinispan.manager.EmbeddedCacheManager#defineConfiguration(java.lang.String, java.lang.String, org.infinispan.config.Configuration)
      */
+    @Deprecated
     @Override
-    public Configuration defineConfiguration(String cacheName, String templateCacheName, Configuration configurationOverride) {
+    public org.infinispan.config.Configuration defineConfiguration(String cacheName, String templateCacheName, org.infinispan.config.Configuration configurationOverride) {
         return this.cm.defineConfiguration(this.getCacheName(cacheName), this.getCacheName(templateCacheName), configurationOverride);
     }
 
-    /**
-     * {@inheritDoc}
-     * @see org.infinispan.manager.EmbeddedCacheManager#defineConfiguration(String, org.infinispan.configuration.cache.Configuration)
-     */
     @Override
-    public org.infinispan.configuration.cache.Configuration defineConfiguration(String cacheName,
-            org.infinispan.configuration.cache.Configuration configuration) {
+    public Configuration defineConfiguration(String cacheName, Configuration configuration) {
         return this.cm.defineConfiguration(this.getCacheName(cacheName), configuration);
     }
 
@@ -162,6 +187,11 @@ public class DefaultEmbeddedCacheManager extends AbstractDelegatingEmbeddedCache
         return ((name == null) || name.equals(CacheContainer.DEFAULT_CACHE_NAME)) ? this.defaultCache : name;
     }
 
+    @Override
+    public GlobalConfiguration getCacheManagerConfiguration() {
+        return adapt(this.getGlobalConfiguration());
+    }
+
     /**
      * {@inheritDoc}
      * @see java.lang.Object#hashCode()
@@ -177,15 +207,12 @@ public class DefaultEmbeddedCacheManager extends AbstractDelegatingEmbeddedCache
      */
     @Override
     public String toString() {
-        return this.cm.getGlobalConfiguration().getCacheManagerName();
+        return this.cm.getCacheManagerConfiguration().globalJmxStatistics().cacheManagerName();
     }
 
-    class DelegatingCache<K, V> extends AbstractDelegatingAdvancedCache<K, V> {
-        private final AdvancedCache<K, V> cache;
-
+    class DelegatingCache<K, V> extends AbstractAdvancedCache<K, V> {
         DelegatingCache(AdvancedCache<K, V> cache) {
             super(cache);
-            this.cache = cache;
         }
 
         DelegatingCache(Cache<K, V> cache) {
@@ -193,18 +220,13 @@ public class DefaultEmbeddedCacheManager extends AbstractDelegatingEmbeddedCache
         }
 
         @Override
+        protected AdvancedCache<K, V> wrap(AdvancedCache<K, V> cache) {
+            return new DelegatingCache<K, V>(cache);
+        }
+
+        @Override
         public EmbeddedCacheManager getCacheManager() {
             return DefaultEmbeddedCacheManager.this;
-        }
-
-        @Override
-        public AdvancedCache<K, V> getAdvancedCache() {
-            return this;
-        }
-
-        @Override
-        public AdvancedCache<K, V> with(ClassLoader classLoader) {
-            return new ClassLoaderAwareCache<K, V>(this, classLoader);
         }
 
         @Override

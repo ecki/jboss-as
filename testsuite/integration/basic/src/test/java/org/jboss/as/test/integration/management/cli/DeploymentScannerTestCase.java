@@ -21,6 +21,7 @@
  */
 package org.jboss.as.test.integration.management.cli;
 
+import org.jboss.as.test.integration.management.base.AbstractCliTestBase;
 import static org.junit.Assert.assertTrue;
 
 import java.io.File;
@@ -75,13 +76,13 @@ public class DeploymentScannerTestCase extends AbstractCliTestBase {
             FileUtils.deleteDirectory(deployDir);
         }
         assertTrue("Unable to create deployment scanner directory.", deployDir.mkdir());
-        AbstractCliTestBase.before();
+        AbstractCliTestBase.initCLI();
     }
 
     @AfterClass
     public static void after() throws Exception {
         FileUtils.deleteDirectory(deployDir);
-        AbstractCliTestBase.after();
+        AbstractCliTestBase.closeCLI();
     }
 
     @Test
@@ -117,8 +118,8 @@ public class DeploymentScannerTestCase extends AbstractCliTestBase {
     private void removeDeploymentScanner() throws Exception {
 
         // remove deployment scanner
-        cli.sendLine("/subsystem=deployment-scanner/scanner=testScanner:remove()", false);
-        CLIOpResult result = cli.readAllAsOpResult(WAIT_TIMEOUT, WAIT_LINETIMEOUT);
+        cli.sendLine("/subsystem=deployment-scanner/scanner=testScanner:remove()");
+        CLIOpResult result = cli.readAllAsOpResult();
         assertTrue(result.isIsOutcomeSuccess());
 
         // delete deployment
@@ -132,7 +133,7 @@ public class DeploymentScannerTestCase extends AbstractCliTestBase {
         assertTrue("Invalid response: " + response, response.indexOf("SimpleServlet") >=0);
 
         // undeploy using CLI
-        cli.sendLine("undeploy SimpleServlet.war", true);
-        assertUndeployed(getBaseURL(url) + "SimpleServlet/SimpleServlet");
+        cli.sendLine("undeploy SimpleServlet.war");
+        assertTrue(checkUndeployed(getBaseURL(url) + "SimpleServlet/SimpleServlet"));
     }
 }

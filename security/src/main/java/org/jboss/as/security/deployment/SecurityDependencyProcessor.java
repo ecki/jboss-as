@@ -23,6 +23,7 @@
 package org.jboss.as.security.deployment;
 
 import org.jboss.as.security.ModuleName;
+import org.jboss.as.security.remoting.RemotingLoginModule;
 import org.jboss.as.server.deployment.Attachments;
 import org.jboss.as.server.deployment.DeploymentPhaseContext;
 import org.jboss.as.server.deployment.DeploymentUnit;
@@ -33,6 +34,7 @@ import org.jboss.as.server.deployment.module.ModuleSpecification;
 import org.jboss.modules.Module;
 import org.jboss.modules.ModuleIdentifier;
 import org.jboss.modules.ModuleLoader;
+import org.jboss.modules.filter.PathFilters;
 
 /**
  * Adds a security subsystem dependency to deployments
@@ -44,13 +46,19 @@ public class SecurityDependencyProcessor implements DeploymentUnitProcessor {
 
     public static final ModuleIdentifier PICKETBOX_ID = ModuleIdentifier.create(ModuleName.PICKETBOX.getName(),
             ModuleName.PICKETBOX.getSlot());
+    public static final ModuleIdentifier REMOTING_LOGIN_MODULE = ModuleIdentifier.create("org.jboss.as.security");
 
     /** {@inheritDoc} */
     public void deploy(DeploymentPhaseContext phaseContext) throws DeploymentUnitProcessingException {
         final DeploymentUnit deploymentUnit = phaseContext.getDeploymentUnit();
         final ModuleLoader moduleLoader = Module.getBootModuleLoader();
         final ModuleSpecification moduleSpecification = deploymentUnit.getAttachment(Attachments.MODULE_SPECIFICATION);
-        moduleSpecification.addSystemDependency(new ModuleDependency(moduleLoader, PICKETBOX_ID, false, false, false));
+        moduleSpecification.addSystemDependency(new ModuleDependency(moduleLoader, PICKETBOX_ID, false, false, false, false));
+
+        //add the remoting login module
+        final ModuleDependency remoting = new ModuleDependency(moduleLoader, REMOTING_LOGIN_MODULE, false, false, false, false);
+        remoting.addImportFilter(PathFilters.is(RemotingLoginModule.class.getName().replace(".","/")), true);
+        moduleSpecification.addSystemDependency(remoting);
     }
 
     /** {@inheritDoc} */

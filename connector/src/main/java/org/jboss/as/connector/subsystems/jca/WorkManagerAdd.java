@@ -27,10 +27,10 @@ import static org.jboss.as.connector.subsystems.jca.Constants.WORKMANAGER_SHORT_
 import java.util.List;
 import java.util.concurrent.Executor;
 
-import org.jboss.as.connector.ConnectorServices;
-import org.jboss.as.connector.workmanager.NamedWorkManager;
-import org.jboss.as.connector.workmanager.WorkManagerService;
-import org.jboss.as.controller.AbstractBoottimeAddStepHandler;
+import org.jboss.as.connector.util.ConnectorServices;
+import org.jboss.as.connector.services.workmanager.NamedWorkManager;
+import org.jboss.as.connector.services.workmanager.WorkManagerService;
+import org.jboss.as.controller.AbstractAddStepHandler;
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.ServiceVerificationHandler;
@@ -51,7 +51,7 @@ import org.jboss.tm.JBossXATerminator;
  * @author <a href="jesper.pedersen@jboss.org">Jesper Pedersen</a>
  * @author <a href="stefano.maestri@redhat.com">Stefano Maestri</a>
  */
-public class WorkManagerAdd extends AbstractBoottimeAddStepHandler {
+public class WorkManagerAdd extends AbstractAddStepHandler {
 
     public static final WorkManagerAdd INSTANCE = new WorkManagerAdd();
 
@@ -84,10 +84,10 @@ public class WorkManagerAdd extends AbstractBoottimeAddStepHandler {
     }
 
     @Override
-    protected void performBoottime(final OperationContext context, final ModelNode operation, final ModelNode model,
+    protected void performRuntime(final OperationContext context, final ModelNode operation, final ModelNode model,
                                    final ServiceVerificationHandler verificationHandler, final List<ServiceController<?>> newControllers) throws OperationFailedException {
 
-        String name = WmParameters.NAME.getAttribute().validateResolvedOperation(model).asString();
+        String name = WmParameters.NAME.getAttribute().resolveModelAttribute(context, model).asString();
 
         ServiceTarget serviceTarget = context.getServiceTarget();
 
@@ -97,13 +97,13 @@ public class WorkManagerAdd extends AbstractBoottimeAddStepHandler {
         ServiceBuilder builder = serviceTarget
                 .addService(ConnectorServices.WORKMANAGER_SERVICE.append(name), wmService);
         if (operation.get(WORKMANAGER_LONG_RUNNING).isDefined() && operation.get(WORKMANAGER_LONG_RUNNING).asBoolean()) {
-            builder.addDependency(ThreadsServices.EXECUTOR.append(name + "-" + WORKMANAGER_LONG_RUNNING), Executor.class, wmService.getExecutorLongInjector());
+            builder.addDependency(ThreadsServices.EXECUTOR.append(WORKMANAGER_LONG_RUNNING).append(name), Executor.class, wmService.getExecutorLongInjector());
         }
-        builder.addDependency(ThreadsServices.EXECUTOR.append(name + "-" + WORKMANAGER_SHORT_RUNNING), Executor.class, wmService.getExecutorShortInjector());
+        builder.addDependency(ThreadsServices.EXECUTOR.append(WORKMANAGER_SHORT_RUNNING).append(name), Executor.class, wmService.getExecutorShortInjector());
 
         builder.addDependency(TxnServices.JBOSS_TXN_XA_TERMINATOR, JBossXATerminator.class, wmService.getXaTerminatorInjector())
                 .addListener(verificationHandler)
-                .setInitialMode(ServiceController.Mode.ACTIVE)
+                .setInitialMode(ServiceController.Mode.ON_DEMAND)
                 .install();
     }
 }

@@ -21,11 +21,14 @@
  */
 package org.jboss.as.test.integration.ejb.remote.entity.cmp.commerce;
 
-import static org.junit.Assert.fail;
+import java.util.Iterator;
+import java.util.Properties;
 
 import javax.ejb.EJBHome;
 import javax.ejb.ObjectNotFoundException;
-import java.util.Iterator;
+import javax.naming.Context;
+import javax.naming.InitialContext;
+import javax.naming.NamingException;
 
 import org.jboss.arquillian.container.test.api.Deployment;
 import org.jboss.arquillian.container.test.api.RunAsClient;
@@ -36,8 +39,11 @@ import org.jboss.shrinkwrap.api.Archive;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
 import org.jboss.shrinkwrap.api.spec.EnterpriseArchive;
 import org.jboss.shrinkwrap.api.spec.JavaArchive;
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+
+import static org.junit.Assert.fail;
 
 @RunWith(Arquillian.class)
 @RunAsClient
@@ -45,17 +51,24 @@ public class CascadeDeleteTestCase {
 
     private static final String APP_NAME = "cmp-commerce";
     private static final String MODULE_NAME = "ejb";
+    private static InitialContext context;
 
     @Deployment
     public static Archive<?> deploy() {
         final EnterpriseArchive ear = ShrinkWrap.create(EnterpriseArchive.class, APP_NAME + ".ear");
         JavaArchive jar = ShrinkWrap.create(JavaArchive.class, MODULE_NAME + ".jar");
         jar.addPackage(CascadeDeleteTestCase.class.getPackage());
-        jar.addAsManifestResource("ejb/remote/entity/cmp/commerce/ejb-jar.xml", "ejb-jar.xml");
-        jar.addAsManifestResource("ejb/remote/entity/cmp/commerce/jboss.xml", "jboss.xml");
-        jar.addAsManifestResource("ejb/remote/entity/cmp/commerce/jbosscmp-jdbc.xml", "jbosscmp-jdbc.xml");
+        jar.addAsManifestResource(CascadeDeleteTestCase.class.getPackage(), "ejb-jar.xml", "ejb-jar.xml");
+        jar.addAsManifestResource(CascadeDeleteTestCase.class.getPackage(), "jbosscmp-jdbc.xml", "jbosscmp-jdbc.xml");
         ear.addAsModule(jar);
         return ear;
+    }
+    
+    @BeforeClass
+    public static void setUp() throws NamingException {
+        Properties env = new Properties();
+        env.setProperty(Context.URL_PKG_PREFIXES, "org.jboss.ejb.client.naming");
+        context = new InitialContext(env);
     }
 
     private OrderHome getOrderHome() {
@@ -82,13 +95,18 @@ public class CascadeDeleteTestCase {
         return getHome(LineItemHome.class, "LineItemEJB");
     }
 
-    private AddressHome getAddressHome() {
-        return getHome(AddressHome.class, "AddressEJB");
+    private AddressHome getAddressHome() throws NamingException {
+        return getHomeByJndi(AddressHome.class, "AddressEJB");
     }
 
     private <T extends EJBHome> T getHome(final Class<T> homeClass, final String beanName) {
         final EJBHomeLocator<T> locator = new EJBHomeLocator<T>(homeClass, APP_NAME, MODULE_NAME, beanName, "");
         return EJBClient.createProxy(locator);
+    }
+    
+    private <T extends EJBHome> T getHomeByJndi(final Class<T> homeClass, final String beanName) throws NamingException {
+        String jndi = String.format("ejb:%s/%s//%s!%s", APP_NAME, MODULE_NAME, beanName, homeClass.getName());
+        return homeClass.cast(context.lookup(jndi));
     }
 
     @Test

@@ -28,10 +28,10 @@ import java.util.List;
 import javax.transaction.TransactionManager;
 import javax.transaction.TransactionSynchronizationRegistry;
 
-import org.jboss.as.connector.ConnectorServices;
-import org.jboss.as.connector.deployers.RaDeploymentActivator;
-import org.jboss.as.connector.registry.DriverRegistryService;
-import org.jboss.as.connector.transactionintegration.TransactionIntegrationService;
+import org.jboss.as.connector.util.ConnectorServices;
+import org.jboss.as.connector.deployers.ra.RaDeploymentActivator;
+import org.jboss.as.connector.services.driver.registry.DriverRegistryService;
+import org.jboss.as.connector.services.transactionintegration.TransactionIntegrationService;
 import org.jboss.as.controller.AbstractBoottimeAddStepHandler;
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.ServiceVerificationHandler;
@@ -61,11 +61,11 @@ class JcaSubsystemAdd extends AbstractBoottimeAddStepHandler {
     }
 
     protected void performBoottime(OperationContext context, ModelNode operation, ModelNode model, ServiceVerificationHandler verificationHandler, List<ServiceController<?>> newControllers) {
-        final RaDeploymentActivator deploymentActivator = new RaDeploymentActivator();
+        final RaDeploymentActivator raDeploymentActivator = new RaDeploymentActivator();
 
         context.addStep(new AbstractDeploymentChainStep() {
             protected void execute(DeploymentProcessorTarget processorTarget) {
-                deploymentActivator.activateProcessors(processorTarget);
+                raDeploymentActivator.activateProcessors(processorTarget);
             }
         }, OperationContext.Stage.RUNTIME);
 
@@ -94,6 +94,20 @@ class JcaSubsystemAdd extends AbstractBoottimeAddStepHandler {
                 .setInitialMode(Mode.ACTIVE)
                 .install());
 
+        final IdleRemoverService idleRemoverService = new IdleRemoverService();
+        newControllers.add(serviceTarget
+                .addService(ConnectorServices.IDLE_REMOVER_SERVICE, idleRemoverService)
+                .addListener(verificationHandler)
+                .setInitialMode(Mode.ACTIVE)
+                .install());
+
+        final ConnectionValidatorService connectionValidatorService = new ConnectionValidatorService();
+        newControllers.add(serviceTarget
+                .addService(ConnectorServices.CONNECTION_VALIDATOR_SERVICE, connectionValidatorService)
+                .addListener(verificationHandler)
+                .setInitialMode(Mode.ACTIVE)
+                .install());
+
         // TODO does the install of this and the DriverProcessor
         // belong in DataSourcesSubsystemAdd?
         final DriverRegistryService driverRegistryService = new DriverRegistryService();
@@ -101,6 +115,6 @@ class JcaSubsystemAdd extends AbstractBoottimeAddStepHandler {
                 .addListener(verificationHandler)
                 .install());
 
-        newControllers.addAll(deploymentActivator.activateServices(serviceTarget, verificationHandler));
+        newControllers.addAll(raDeploymentActivator.activateServices(serviceTarget, verificationHandler));
     }
 }

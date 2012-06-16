@@ -28,6 +28,7 @@ import java.security.PrivilegedAction;
 import java.security.PrivilegedActionException;
 import java.security.PrivilegedExceptionAction;
 
+import org.jboss.as.security.SecurityMessages;
 import org.jboss.modules.Module;
 import org.jboss.modules.ModuleClassLoader;
 import org.jboss.modules.ModuleIdentifier;
@@ -43,21 +44,19 @@ import org.jboss.security.SecurityContextAssociation;
  */
 class SecurityActions {
 
-    static ModuleClassLoader getModuleClassLoader(final String moduleSpec) throws ModuleLoadException {
+    static ModuleClassLoader getModuleClassLoader(final ModuleLoader loader, final String moduleSpec) throws ModuleLoadException {
         if (System.getSecurityManager() != null) {
             try {
                 return AccessController.doPrivileged(new PrivilegedExceptionAction<ModuleClassLoader>() {
                     public ModuleClassLoader run() throws ModuleLoadException {
-                        ModuleLoader loader = Module.getCallerModuleLoader();
                         ModuleIdentifier identifier = ModuleIdentifier.fromString(moduleSpec);
                         return loader.loadModule(identifier).getClassLoader();
                     }
                 });
             } catch (PrivilegedActionException pae) {
-                throw new ModuleLoadException(pae);
+                throw SecurityMessages.MESSAGES.moduleLoadException(pae);
             }
         } else {
-            ModuleLoader loader = Module.getCallerModuleLoader();
             ModuleIdentifier identifier = ModuleIdentifier.fromString(moduleSpec);
             return loader.loadModule(identifier).getClassLoader();
         }
@@ -119,4 +118,12 @@ class SecurityActions {
         }
     }
 
+    static ClassLoader getContextClassLoader() {
+        return AccessController.doPrivileged(new PrivilegedAction<ClassLoader>() {
+            @Override
+            public ClassLoader run() {
+                return Thread.currentThread().getContextClassLoader();
+            }
+        });
+    }
 }

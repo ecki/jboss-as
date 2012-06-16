@@ -21,22 +21,36 @@
  */
 package org.jboss.as.clustering.web.impl;
 
+import java.io.Externalizable;
+import java.io.IOException;
+import java.io.Serializable;
+import java.util.IdentityHashMap;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 import org.jboss.as.clustering.MarshallingContext;
+import org.jboss.as.clustering.VersionedMarshallingConfiguration;
 import org.jboss.as.clustering.web.LocalDistributableSessionManager;
 import org.jboss.as.clustering.web.SessionAttributeMarshaller;
 import org.jboss.as.clustering.web.SessionAttributeMarshallerFactory;
-import org.jboss.marshalling.AbstractClassResolver;
+import org.jboss.marshalling.ClassTable;
+import org.jboss.marshalling.Marshaller;
 import org.jboss.marshalling.MarshallerFactory;
 import org.jboss.marshalling.Marshalling;
 import org.jboss.marshalling.MarshallingConfiguration;
+import org.jboss.marshalling.Unmarshaller;
+import org.jboss.marshalling.reflect.ReflectiveCreator;
+import org.jboss.marshalling.reflect.SunReflectiveCreator;
 
 /**
  * Default factory for creating session attribute marshallers.
  *
  * @author Paul Ferraro
  */
-public class SessionAttributeMarshallerFactoryImpl implements SessionAttributeMarshallerFactory {
+public class SessionAttributeMarshallerFactoryImpl implements SessionAttributeMarshallerFactory, ClassTable, VersionedMarshallingConfiguration {
+    private static final int CURRENT_VERSION = 1;
     private final MarshallerFactory factory;
+    private final Map<Integer, MarshallingConfiguration> configurations = new ConcurrentHashMap<Integer, MarshallingConfiguration>();
 
     public SessionAttributeMarshallerFactoryImpl() {
         this(Marshalling.getMarshallerFactory("river", Marshalling.class.getClassLoader()));
@@ -49,26 +63,72 @@ public class SessionAttributeMarshallerFactoryImpl implements SessionAttributeMa
     /**
      * {@inheritDoc}
      *
-     * @see org.jboss.web.tomcat.service.session.distributedcache.spi.SessionAttributeMarshallerFactory#createMarshaller(org.jboss.web.tomcat.service.session.distributedcache.spi.LocalDistributableSessionManager)
+     * @see org.jboss.as.clustering.web.SessionAttributeMarshallerFactory#createMarshaller(org.jboss.as.clustering.web.LocalDistributableSessionManager)
      */
     @Override
     public SessionAttributeMarshaller createMarshaller(LocalDistributableSessionManager manager) {
         MarshallingConfiguration configuration = new MarshallingConfiguration();
-        ApplicationClassResolver resolver = new ApplicationClassResolver(manager);
-        configuration.setClassResolver(resolver);
-        return new SessionAttributeMarshallerImpl(new MarshallingContext(this.factory, configuration));
+        configuration.setClassResolver(manager.getApplicationClassResolver());
+        configuration.setSerializedCreator(new SunReflectiveCreator());
+        configuration.setExternalizerCreator(new ReflectiveCreator());
+        configuration.setClassTable(this);
+        this.configurations.put(CURRENT_VERSION, configuration);
+        return new SessionAttributeMarshallerImpl(new MarshallingContext(this.factory, this));
     }
 
-    private static class ApplicationClassResolver extends AbstractClassResolver {
-        private final LocalDistributableSessionManager manager;
+    @Override
+    public int getCurrentMarshallingVersion() {
+        return CURRENT_VERSION;
+    }
 
-        ApplicationClassResolver(LocalDistributableSessionManager manager) {
-            this.manager = manager;
+    @Override
+    public MarshallingConfiguration getMarshallingConfiguration(int version) {
+        MarshallingConfiguration config = this.configurations.get(version);
+        if (config == null) {
+            throw ClusteringWebMessages.MESSAGES.unsupportedMarshallingVersion(version);
+        }
+        return config;
+    }
+
+    // List session attribute classes for optimization
+    private static final Class<?>[] classes = new Class<?>[] {
+        Serializable.class,
+        Externalizable.class,
+    };
+
+    private static final Map<Class<?>, Writer> writers = createWriters();
+    private static Map<Class<?>, Writer> createWriters() {
+        Map<Class<?>, Writer> writers = new IdentityHashMap<Class<?>, Writer>();
+        for (int i = 0; i < classes.length; i++) {
+            writers.put(classes[i], new ByteWriter((byte) i));
+        }
+        return writers;
+    }
+
+    @Override
+    public Writer getClassWriter(Class<?> targetClass) throws IOException {
+        return writers.get(targetClass);
+    }
+
+    @Override
+    public Class<?> readClass(Unmarshaller unmarshaller) throws IOException, ClassNotFoundException {
+        int index = unmarshaller.readUnsignedByte();
+        if (index >= classes.length) {
+            throw ClusteringWebMessages.MESSAGES.classIndexNotFoundInClassTable(this.getClass().getName(), index);
+        }
+        return classes[index];
+    }
+
+    private static final class ByteWriter implements Writer {
+        final byte[] bytes;
+
+        ByteWriter(final byte... bytes) {
+            this.bytes = bytes;
         }
 
         @Override
-        public ClassLoader getClassLoader() {
-            return manager.getApplicationClassLoader();
+        public void writeClass(final Marshaller marshaller, final Class<?> clazz) throws IOException {
+            marshaller.write(bytes);
         }
     }
 }

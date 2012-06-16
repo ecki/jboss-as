@@ -27,17 +27,18 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SUBSYSTEM;
 import static org.jboss.as.controller.parsing.ParseUtils.duplicateAttribute;
+import static org.jboss.as.controller.parsing.ParseUtils.duplicateNamedElement;
 import static org.jboss.as.controller.parsing.ParseUtils.missingRequired;
 import static org.jboss.as.controller.parsing.ParseUtils.readArrayAttributeElement;
 import static org.jboss.as.controller.parsing.ParseUtils.readBooleanAttributeElement;
 import static org.jboss.as.controller.parsing.ParseUtils.readProperty;
 import static org.jboss.as.controller.parsing.ParseUtils.readStringAttributeElement;
+import static org.jboss.as.controller.parsing.ParseUtils.requireNoAttributes;
 import static org.jboss.as.controller.parsing.ParseUtils.requireNoContent;
 import static org.jboss.as.controller.parsing.ParseUtils.requireNoNamespaceAttribute;
 import static org.jboss.as.controller.parsing.ParseUtils.unexpectedAttribute;
 import static org.jboss.as.controller.parsing.ParseUtils.unexpectedElement;
 import static org.jboss.as.remoting.CommonAttributes.AUTHENTICATION_PROVIDER;
-import static org.jboss.as.remoting.CommonAttributes.CONNECTION_CREATION_OPTIONS;
 import static org.jboss.as.remoting.CommonAttributes.CONNECTOR;
 import static org.jboss.as.remoting.CommonAttributes.FORWARD_SECRECY;
 import static org.jboss.as.remoting.CommonAttributes.INCLUDE_MECHANISMS;
@@ -57,20 +58,24 @@ import static org.jboss.as.remoting.CommonAttributes.REUSE_SESSION;
 import static org.jboss.as.remoting.CommonAttributes.SASL;
 import static org.jboss.as.remoting.CommonAttributes.SASL_POLICY;
 import static org.jboss.as.remoting.CommonAttributes.SECURITY;
+import static org.jboss.as.remoting.CommonAttributes.SECURITY_REALM;
 import static org.jboss.as.remoting.CommonAttributes.SERVER_AUTH;
 import static org.jboss.as.remoting.CommonAttributes.SOCKET_BINDING;
 import static org.jboss.as.remoting.CommonAttributes.STRENGTH;
 import static org.jboss.as.remoting.CommonAttributes.URI;
 import static org.jboss.as.remoting.CommonAttributes.VALUE;
+import static org.jboss.as.remoting.RemotingMessages.MESSAGES;
+
+import java.util.EnumSet;
+import java.util.List;
+import java.util.Locale;
 
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
-import java.util.Collections;
-import java.util.EnumSet;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 
+import org.jboss.as.controller.PathAddress;
+import org.jboss.as.controller.PathElement;
+import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
 import org.jboss.as.controller.operations.common.Util;
 import org.jboss.as.controller.parsing.ParseUtils;
 import org.jboss.as.controller.persistence.SubsystemMarshallingContext;
@@ -101,58 +106,20 @@ class RemotingSubsystem11Parser implements XMLStreamConstants, XMLElementReader<
         final ModelNode subsystem = Util.getEmptyOperation(ADD, address);
         list.add(subsystem);
 
-        final int count = reader.getAttributeCount();
-        for (int i = 0; i < count; i++) {
-            requireNoNamespaceAttribute(reader, i);
-            final String value = reader.getAttributeValue(i);
-            final Attribute attribute = Attribute.forName(reader.getAttributeLocalName(i));
-            switch (attribute) {
-                case WORKER_READ_THREADS:
-                    if (subsystem.hasDefined(CommonAttributes.WORKER_READ_THREADS)) {
-                        throw duplicateAttribute(reader, CommonAttributes.WORKER_READ_THREADS);
-                    }
-                    RemotingSubsystemRootResource.WORKER_READ_THREADS.parseAndSetParameter(value, subsystem, reader.getLocation());
-                    break;
-                case WORKER_TASK_CORE_THREADS:
-                    if (subsystem.hasDefined(CommonAttributes.WORKER_TASK_CORE_THREADS)) {
-                        throw duplicateAttribute(reader, CommonAttributes.WORKER_TASK_CORE_THREADS);
-                    }
-                    RemotingSubsystemRootResource.WORKER_TASK_CORE_THREADS.parseAndSetParameter(value, subsystem, reader.getLocation());
-                    break;
-                case WORKER_TASK_KEEPALIVE:
-                    if (subsystem.hasDefined(CommonAttributes.WORKER_TASK_KEEPALIVE)) {
-                        throw duplicateAttribute(reader, CommonAttributes.WORKER_TASK_KEEPALIVE);
-                    }
-                    RemotingSubsystemRootResource.WORKER_TASK_KEEPALIVE.parseAndSetParameter(value, subsystem, reader.getLocation());
-                    break;
-                case WORKER_TASK_LIMIT:
-                    if (subsystem.hasDefined(CommonAttributes.WORKER_TASK_LIMIT)) {
-                        throw duplicateAttribute(reader, CommonAttributes.WORKER_TASK_LIMIT);
-                    }
-                    RemotingSubsystemRootResource.WORKER_TASK_LIMIT.parseAndSetParameter(value, subsystem, reader.getLocation());
-                    break;
-                case WORKER_TASK_MAX_THREADS:
-                    if (subsystem.hasDefined(CommonAttributes.WORKER_TASK_MAX_THREADS)) {
-                        throw duplicateAttribute(reader, CommonAttributes.WORKER_TASK_MAX_THREADS);
-                    }
-                    RemotingSubsystemRootResource.WORKER_TASK_MAX_THREADS.parseAndSetParameter(value, subsystem, reader.getLocation());
-                    break;
-                case WORKER_WRITE_THREADS:
-                    if (subsystem.hasDefined(CommonAttributes.WORKER_WRITE_THREADS)) {
-                        throw duplicateAttribute(reader, CommonAttributes.WORKER_WRITE_THREADS);
-                    }
-                    RemotingSubsystemRootResource.WORKER_WRITE_THREADS.parseAndSetParameter(value, subsystem, reader.getLocation());
-                    break;
-                default:
-                    throw unexpectedAttribute(reader, i);
-            }
-        }
-
+        requireNoAttributes(reader);
 
         // Handle elements
         while (reader.hasNext() && reader.nextTag() != END_ELEMENT) {
+            boolean doneWorkerThreadPool = false;
             final Element element = Element.forName(reader.getLocalName());
             switch (element) {
+                case WORKER_THREAD_POOL:
+                    if (doneWorkerThreadPool) {
+                        throw duplicateNamedElement(reader, Element.WORKER_THREAD_POOL.getLocalName());
+                    }
+                    doneWorkerThreadPool = true;
+                    parseWorkerThreadPool(reader, subsystem);
+                    break;
                 case CONNECTOR: {
                     // Add connector updates
                     parseConnector(reader, address, list);
@@ -168,12 +135,66 @@ class RemotingSubsystem11Parser implements XMLStreamConstants, XMLElementReader<
                 }
             }
         }
-
     }
 
-    void parseConnector(XMLExtendedStreamReader reader, final ModelNode address, final List<ModelNode> list) throws XMLStreamException {
+    /**
+     * Adds the worker thread pool attributes to the subysystem add method
+     */
+    void parseWorkerThreadPool(final XMLExtendedStreamReader reader, final ModelNode subsystemAdd) throws XMLStreamException {
+        final int count = reader.getAttributeCount();
+        for (int i = 0; i < count; i++) {
+            requireNoNamespaceAttribute(reader, i);
+            final String value = reader.getAttributeValue(i);
+            final Attribute attribute = Attribute.forName(reader.getAttributeLocalName(i));
+            switch (attribute) {
+                case WORKER_READ_THREADS:
+                    if (subsystemAdd.hasDefined(CommonAttributes.WORKER_READ_THREADS)) {
+                        throw duplicateAttribute(reader, CommonAttributes.WORKER_READ_THREADS);
+                    }
+                    RemotingSubsystemRootResource.WORKER_READ_THREADS.parseAndSetParameter(value, subsystemAdd, reader);
+                    break;
+                case WORKER_TASK_CORE_THREADS:
+                    if (subsystemAdd.hasDefined(CommonAttributes.WORKER_TASK_CORE_THREADS)) {
+                        throw duplicateAttribute(reader, CommonAttributes.WORKER_TASK_CORE_THREADS);
+                    }
+                    RemotingSubsystemRootResource.WORKER_TASK_CORE_THREADS.parseAndSetParameter(value, subsystemAdd, reader);
+                    break;
+                case WORKER_TASK_KEEPALIVE:
+                    if (subsystemAdd.hasDefined(CommonAttributes.WORKER_TASK_KEEPALIVE)) {
+                        throw duplicateAttribute(reader, CommonAttributes.WORKER_TASK_KEEPALIVE);
+                    }
+                    RemotingSubsystemRootResource.WORKER_TASK_KEEPALIVE.parseAndSetParameter(value, subsystemAdd, reader);
+                    break;
+                case WORKER_TASK_LIMIT:
+                    if (subsystemAdd.hasDefined(CommonAttributes.WORKER_TASK_LIMIT)) {
+                        throw duplicateAttribute(reader, CommonAttributes.WORKER_TASK_LIMIT);
+                    }
+                    RemotingSubsystemRootResource.WORKER_TASK_LIMIT.parseAndSetParameter(value, subsystemAdd, reader);
+                    break;
+                case WORKER_TASK_MAX_THREADS:
+                    if (subsystemAdd.hasDefined(CommonAttributes.WORKER_TASK_MAX_THREADS)) {
+                        throw duplicateAttribute(reader, CommonAttributes.WORKER_TASK_MAX_THREADS);
+                    }
+                    RemotingSubsystemRootResource.WORKER_TASK_MAX_THREADS.parseAndSetParameter(value, subsystemAdd, reader);
+                    break;
+                case WORKER_WRITE_THREADS:
+                    if (subsystemAdd.hasDefined(CommonAttributes.WORKER_WRITE_THREADS)) {
+                        throw duplicateAttribute(reader, CommonAttributes.WORKER_WRITE_THREADS);
+                    }
+                    RemotingSubsystemRootResource.WORKER_WRITE_THREADS.parseAndSetParameter(value, subsystemAdd, reader);
+                    break;
+                default:
+                    throw unexpectedAttribute(reader, i);
+            }
+        }
+
+        requireNoContent(reader);
+    }
+
+    void parseConnector(final XMLExtendedStreamReader reader, final ModelNode address, final List<ModelNode> list) throws XMLStreamException {
 
         String name = null;
+        String securityRealm = null;
         String socketBinding = null;
         final EnumSet<Attribute> required = EnumSet.of(Attribute.NAME, Attribute.SOCKET_BINDING);
         final int count = reader.getAttributeCount();
@@ -185,6 +206,10 @@ class RemotingSubsystem11Parser implements XMLStreamConstants, XMLElementReader<
             switch (attribute) {
                 case NAME: {
                     name = value;
+                    break;
+                }
+                case SECURITY_REALM: {
+                    securityRealm = value;
                     break;
                 }
                 case SOCKET_BINDING: {
@@ -206,6 +231,9 @@ class RemotingSubsystem11Parser implements XMLStreamConstants, XMLElementReader<
         connector.get(OP_ADDR).set(address).add(CONNECTOR, name);
         // requestProperties.get(NAME).set(name); // Name is part of the address
         connector.get(SOCKET_BINDING).set(socketBinding);
+        if (securityRealm != null) {
+            connector.get(SECURITY_REALM).set(securityRealm);
+        }
         list.add(connector);
 
         // Handle nested elements.
@@ -275,9 +303,9 @@ class RemotingSubsystem11Parser implements XMLStreamConstants, XMLElementReader<
                     String[] qop = readArrayAttributeElement(reader, "value", String.class);
                     for (String q : qop) {
                         try {
-                            saslElement.get(QOP).add(SaslQop.fromString(q).getString().toLowerCase());
+                            saslElement.get(QOP).add(SaslQop.fromString(q).getString().toLowerCase(Locale.ENGLISH));
                         } catch (IllegalArgumentException e) {
-                            throw new IllegalArgumentException("Invalid QOP value: " + q);
+                            throw MESSAGES.invalidQOPV(q);
                         }
                     }
                     break;
@@ -295,9 +323,9 @@ class RemotingSubsystem11Parser implements XMLStreamConstants, XMLElementReader<
                     String[] strength = readArrayAttributeElement(reader, "value", String.class);
                     for (String s : strength) {
                         try {
-                            saslElement.get(STRENGTH).add(SaslStrength.valueOf(s.toUpperCase()).name().toLowerCase());
+                            saslElement.get(STRENGTH).add(SaslStrength.valueOf(s.toUpperCase(Locale.ENGLISH)).name().toLowerCase(Locale.ENGLISH));
                         } catch (IllegalArgumentException e) {
-                            throw new IllegalArgumentException("Invalid Strength value: " + s);
+                            throw MESSAGES.invalidStrength(s);
                         }
                     }
                     break;
@@ -395,7 +423,68 @@ class RemotingSubsystem11Parser implements XMLStreamConstants, XMLElementReader<
         }
     }
 
-    private void parseRemoteOutboundConnection(final XMLExtendedStreamReader reader, final ModelNode address, final List<ModelNode> operations) throws XMLStreamException {
+    private void parseRemoteOutboundConnection(final XMLExtendedStreamReader reader, final ModelNode parentAddress, final List<ModelNode> operations) throws XMLStreamException {
+        final EnumSet<Attribute> required = EnumSet.of(Attribute.NAME, Attribute.OUTBOUND_SOCKET_BINDING_REF);
+        final int count = reader.getAttributeCount();
+        String name = null;
+        String outboundSocketBindingRef = null;
+        String username = null;
+        String securityRealm = null;
+        for (int i = 0; i < count; i++) {
+            requireNoNamespaceAttribute(reader, i);
+            final String value = reader.getAttributeValue(i);
+            final Attribute attribute = Attribute.forName(reader.getAttributeLocalName(i));
+            required.remove(attribute);
+            switch (attribute) {
+                case NAME: {
+                    name = value;
+                    break;
+                }
+                case OUTBOUND_SOCKET_BINDING_REF: {
+                    outboundSocketBindingRef = value;
+                    break;
+                }
+                case USERNAME: {
+                    username = value;
+                    break;
+                }
+                case SECURITY_REALM: {
+                    securityRealm = value;
+                    break;
+                }
+                default:
+                    throw unexpectedAttribute(reader, i);
+            }
+        }
+        if (!required.isEmpty()) {
+            throw missingRequired(reader, required);
+        }
+        final PathAddress address = PathAddress.pathAddress(PathAddress.pathAddress(parentAddress), PathElement.pathElement(CommonAttributes.REMOTE_OUTBOUND_CONNECTION, name));
+
+        // create add operation add it to the list of operations
+        operations.add(getConnectionAddOperation(name, outboundSocketBindingRef, username, securityRealm, address));
+        // parse the nested elements
+        final EnumSet<Element> visited = EnumSet.noneOf(Element.class);
+        while (reader.hasNext() && reader.nextTag() != END_ELEMENT) {
+            final Element element = Element.forName(reader.getLocalName());
+            if (visited.contains(element)) {
+                throw ParseUtils.unexpectedElement(reader);
+            }
+            visited.add(element);
+            switch (element) {
+                case PROPERTIES: {
+                    parseProperties(reader, address.toModelNode(), operations);
+                    break;
+                }
+                default: {
+                    throw unexpectedElement(reader);
+                }
+            }
+        }
+
+    }
+
+    private void parseLocalOutboundConnection(final XMLExtendedStreamReader reader, final ModelNode parentAddress, final List<ModelNode> operations) throws XMLStreamException {
         final EnumSet<Attribute> required = EnumSet.of(Attribute.NAME, Attribute.OUTBOUND_SOCKET_BINDING_REF);
         final int count = reader.getAttributeCount();
         String name = null;
@@ -422,8 +511,11 @@ class RemotingSubsystem11Parser implements XMLStreamConstants, XMLElementReader<
             throw missingRequired(reader, required);
         }
 
-        // parse the nested elements
-        Map<String, String> connectionCreationOptions = Collections.emptyMap();
+        final PathAddress address = PathAddress.pathAddress(PathAddress.pathAddress(parentAddress), PathElement.pathElement(CommonAttributes.LOCAL_OUTBOUND_CONNECTION, name));
+        // add it to the list of operations
+        operations.add(getConnectionAddOperation(name, outboundSocketBindingRef, address));
+        // create add operation parse the nested elements
+
         final EnumSet<Element> visited = EnumSet.noneOf(Element.class);
         while (reader.hasNext() && reader.nextTag() != END_ELEMENT) {
             final Element element = Element.forName(reader.getLocalName());
@@ -432,8 +524,8 @@ class RemotingSubsystem11Parser implements XMLStreamConstants, XMLElementReader<
             }
             visited.add(element);
             switch (element) {
-                case CONNECTION_CREATION_OPTIONS: {
-                    connectionCreationOptions = this.parseXnioOptions(reader);
+                case PROPERTIES: {
+                    parseProperties(reader, address.toModelNode(), operations);
                     break;
                 }
                 default: {
@@ -441,67 +533,9 @@ class RemotingSubsystem11Parser implements XMLStreamConstants, XMLElementReader<
                 }
             }
         }
-
-        // create add operation
-        final ModelNode addOperation = RemoteOutboundConnectionAdd.getAddOperation(name, outboundSocketBindingRef, connectionCreationOptions);
-        // add it to the list of operations
-        operations.add(addOperation);
     }
 
-    private void parseLocalOutboundConnection(final XMLExtendedStreamReader reader, final ModelNode address, final List<ModelNode> operations) throws XMLStreamException {
-        final EnumSet<Attribute> required = EnumSet.of(Attribute.NAME, Attribute.OUTBOUND_SOCKET_BINDING_REF);
-        final int count = reader.getAttributeCount();
-        String name = null;
-        String outboundSocketBindingRef = null;
-        for (int i = 0; i < count; i++) {
-            requireNoNamespaceAttribute(reader, i);
-            final String value = reader.getAttributeValue(i);
-            final Attribute attribute = Attribute.forName(reader.getAttributeLocalName(i));
-            required.remove(attribute);
-            switch (attribute) {
-                case NAME: {
-                    name = value;
-                    break;
-                }
-                case OUTBOUND_SOCKET_BINDING_REF: {
-                    outboundSocketBindingRef = value;
-                    break;
-                }
-                default:
-                    throw unexpectedAttribute(reader, i);
-            }
-        }
-        if (!required.isEmpty()) {
-            throw missingRequired(reader, required);
-        }
-
-        // parse the nested elements
-        Map<String, String> connectionCreationOptions = Collections.emptyMap();
-        final EnumSet<Element> visited = EnumSet.noneOf(Element.class);
-        while (reader.hasNext() && reader.nextTag() != END_ELEMENT) {
-            final Element element = Element.forName(reader.getLocalName());
-            if (visited.contains(element)) {
-                throw ParseUtils.unexpectedElement(reader);
-            }
-            visited.add(element);
-            switch (element) {
-                case CONNECTION_CREATION_OPTIONS: {
-                    connectionCreationOptions = this.parseXnioOptions(reader);
-                    break;
-                }
-                default: {
-                    throw unexpectedElement(reader);
-                }
-            }
-        }
-
-        // create add operation
-        final ModelNode addOperation = LocalOutboundConnectionAdd.getAddOperation(name, outboundSocketBindingRef, connectionCreationOptions);
-        // add it to the list of operations
-        operations.add(addOperation);
-    }
-
-    private void parseOutboundConnection(final XMLExtendedStreamReader reader, final ModelNode address, final List<ModelNode> operations) throws XMLStreamException {
+    private void parseOutboundConnection(final XMLExtendedStreamReader reader, final ModelNode parentAddress, final List<ModelNode> operations) throws XMLStreamException {
         final EnumSet<Attribute> required = EnumSet.of(Attribute.NAME, Attribute.URI);
         final int count = reader.getAttributeCount();
         String name = null;
@@ -528,8 +562,10 @@ class RemotingSubsystem11Parser implements XMLStreamConstants, XMLElementReader<
             throw missingRequired(reader, required);
         }
 
+        final PathAddress address = PathAddress.pathAddress(PathAddress.pathAddress(parentAddress), PathElement.pathElement(CommonAttributes.OUTBOUND_CONNECTION, name));
+        // create add operation add it to the list of operations
+        operations.add(GenericOutboundConnectionAdd.getAddOperation(name, uri, address));
         // parse the nested elements
-        Map<String, String> connectionCreationOptions = Collections.emptyMap();
         final EnumSet<Element> visited = EnumSet.noneOf(Element.class);
         while (reader.hasNext() && reader.nextTag() != END_ELEMENT) {
             final Element element = Element.forName(reader.getLocalName());
@@ -538,8 +574,8 @@ class RemotingSubsystem11Parser implements XMLStreamConstants, XMLElementReader<
             }
             visited.add(element);
             switch (element) {
-                case CONNECTION_CREATION_OPTIONS: {
-                    connectionCreationOptions = this.parseXnioOptions(reader);
+                case PROPERTIES: {
+                    parseProperties(reader, address.toModelNode(), operations);
                     break;
                 }
                 default: {
@@ -548,69 +584,40 @@ class RemotingSubsystem11Parser implements XMLStreamConstants, XMLElementReader<
             }
         }
 
-        // create add operation
-        final ModelNode addOperation = GenericOutboundConnectionAdd.getAddOperation(name, uri, connectionCreationOptions);
-        // add it to the list of operations
-        operations.add(addOperation);
 
     }
 
-    private Map<String, String> parseXnioOptions(final XMLExtendedStreamReader reader) throws XMLStreamException {
-        final Map<String, String> xnioOptions = new HashMap();
-        // Handle nested elements
-        while (reader.hasNext() && reader.nextTag() != END_ELEMENT) {
-            final Element element = Element.forName(reader.getLocalName());
-            switch (element) {
-                case OPTION: {
-                    final Map<String, String> xnioOption = this.parseXnioOption(reader);
-                    xnioOptions.putAll(xnioOption);
-                    break;
-                }
-                default: {
-                    throw unexpectedElement(reader);
-                }
-            }
-        }
-        return xnioOptions;
+    static ModelNode getConnectionAddOperation(final String connectionName, final String outboundSocketBindingRef, PathAddress address) {
+        return getConnectionAddOperation(connectionName, outboundSocketBindingRef, null, null, address);
     }
 
-    private Map<String, String> parseXnioOption(final XMLExtendedStreamReader reader) throws XMLStreamException {
-        final EnumSet<Attribute> required = EnumSet.of(Attribute.NAME, Attribute.VALUE);
-        final int count = reader.getAttributeCount();
-        String optionName = null;
-        String optionValue = null;
-        for (int i = 0; i < count; i++) {
-            requireNoNamespaceAttribute(reader, i);
-            final String value = reader.getAttributeValue(i);
-            final Attribute attribute = Attribute.forName(reader.getAttributeLocalName(i));
-            required.remove(attribute);
-            switch (attribute) {
-                case NAME: {
-                    if (value.trim().isEmpty()) {
-                        throw ParseUtils.invalidAttributeValue(reader, i);
-                    }
-                    optionName = value;
-                    break;
-                }
-                case VALUE: {
-                    optionValue = value;
-                    break;
-                }
-                default:
-                    throw unexpectedAttribute(reader, i);
-            }
+    static ModelNode getConnectionAddOperation(final String connectionName, final String outboundSocketBindingRef, final String userName, final String securityRealm, PathAddress address) {
+        if (connectionName == null || connectionName.trim().isEmpty()) {
+            throw MESSAGES.connectionNameEmpty();
         }
-        if (!required.isEmpty()) {
-            throw missingRequired(reader, required);
+        if (outboundSocketBindingRef == null || outboundSocketBindingRef.trim().isEmpty()) {
+            throw MESSAGES.outboundSocketBindingEmpty(connectionName);
         }
-        // This element is just composed of attributes which we already processed, so no more content
-        // is expected
-        requireNoContent(reader);
+        final ModelNode addOperation = new ModelNode();
+        addOperation.get(ModelDescriptionConstants.OP).set(ModelDescriptionConstants.ADD);
+        // /subsystem=remoting/local-outbound-connection=<connection-name>
+        addOperation.get(ModelDescriptionConstants.OP_ADDR).set(address.toModelNode());
 
-        return Collections.singletonMap(optionName, optionValue);
+        // set the other params
+        addOperation.get(CommonAttributes.OUTBOUND_SOCKET_BINDING_REF).set(outboundSocketBindingRef);
+        // optional connection creation options
+        if (userName != null) {
+            addOperation.get(CommonAttributes.USERNAME).set(userName);
+        }
+
+        if (securityRealm != null) {
+            addOperation.get(CommonAttributes.SECURITY_REALM).set(securityRealm);
+        }
+
+        return addOperation;
     }
 
-    /**
+   /**
      * {@inheritDoc}
      */
     @Override
@@ -618,12 +625,7 @@ class RemotingSubsystem11Parser implements XMLStreamConstants, XMLElementReader<
         context.startSubsystemElement(Namespace.CURRENT.getUriString(), false);
         final ModelNode model = context.getModelNode();
 
-        RemotingSubsystemRootResource.WORKER_READ_THREADS.marshallAsAttribute(model, false, writer);
-        RemotingSubsystemRootResource.WORKER_TASK_CORE_THREADS.marshallAsAttribute(model, false, writer);
-        RemotingSubsystemRootResource.WORKER_TASK_KEEPALIVE.marshallAsAttribute(model, false, writer);
-        RemotingSubsystemRootResource.WORKER_TASK_LIMIT.marshallAsAttribute(model, false, writer);
-        RemotingSubsystemRootResource.WORKER_TASK_MAX_THREADS.marshallAsAttribute(model, false, writer);
-        RemotingSubsystemRootResource.WORKER_WRITE_THREADS.marshallAsAttribute(model, false, writer);
+        writeWorkerThreadPoolIfAttributesSet(writer, model);
 
         if (model.hasDefined(CONNECTOR)) {
             final ModelNode connector = model.get(CONNECTOR);
@@ -674,12 +676,34 @@ class RemotingSubsystem11Parser implements XMLStreamConstants, XMLElementReader<
 
     }
 
+    private void writeWorkerThreadPoolIfAttributesSet(final XMLExtendedStreamWriter writer, final ModelNode node) throws XMLStreamException {
+        if (node.hasDefined(CommonAttributes.WORKER_READ_THREADS) || node.hasDefined(CommonAttributes.WORKER_TASK_CORE_THREADS) || node.hasDefined(CommonAttributes.WORKER_TASK_KEEPALIVE) ||
+                node.hasDefined(CommonAttributes.WORKER_TASK_LIMIT) || node.hasDefined(CommonAttributes.WORKER_TASK_MAX_THREADS) || node.hasDefined(CommonAttributes.WORKER_WRITE_THREADS)) {
+
+            writer.writeStartElement(Element.WORKER_THREAD_POOL.getLocalName());
+
+            RemotingSubsystemRootResource.WORKER_READ_THREADS.marshallAsAttribute(node, false, writer);
+            RemotingSubsystemRootResource.WORKER_TASK_CORE_THREADS.marshallAsAttribute(node, false, writer);
+            RemotingSubsystemRootResource.WORKER_TASK_KEEPALIVE.marshallAsAttribute(node, false, writer);
+            RemotingSubsystemRootResource.WORKER_TASK_LIMIT.marshallAsAttribute(node, false, writer);
+            RemotingSubsystemRootResource.WORKER_TASK_MAX_THREADS.marshallAsAttribute(node, false, writer);
+            RemotingSubsystemRootResource.WORKER_WRITE_THREADS.marshallAsAttribute(node, false, writer);
+
+            writer.writeEndElement();
+        }
+
+    }
+
     private void writeConnector(final XMLExtendedStreamWriter writer, final ModelNode node, final String name) throws XMLStreamException {
         writer.writeStartElement(Element.CONNECTOR.getLocalName());
         writer.writeAttribute(Attribute.NAME.getLocalName(), name);
 
         ConnectorResource.SOCKET_BINDING.marshallAsAttribute(node, writer);
+        if (node.hasDefined(SECURITY_REALM)) {
+            writer.writeAttribute(Attribute.SECURITY_REALM.getLocalName(), node.require(SECURITY_REALM).asString());
+        }
         ConnectorResource.AUTHENTICATION_PROVIDER.marshallAsElement(node, writer);
+
 
         if (node.hasDefined(PROPERTY)) {
             writeProperties(writer, node.get(PROPERTY));
@@ -741,8 +765,8 @@ class RemotingSubsystem11Parser implements XMLStreamConstants, XMLElementReader<
         writer.writeAttribute(Attribute.URI.getLocalName(), uri);
 
         // write the connection-creation-options if any
-        if (model.hasDefined(CommonAttributes.CONNECTION_CREATION_OPTIONS)) {
-            this.writeConnectionCreationOptions(writer, model);
+        if (model.hasDefined(PROPERTY)) {
+            writeProperties(writer, model.get(PROPERTY));
         }
 
         // </outbound-connection>
@@ -758,9 +782,17 @@ class RemotingSubsystem11Parser implements XMLStreamConstants, XMLElementReader<
         final String outboundSocketRef = model.get(OUTBOUND_SOCKET_BINDING_REF).asString();
         writer.writeAttribute(Attribute.OUTBOUND_SOCKET_BINDING_REF.getLocalName(), outboundSocketRef);
 
+        if (model.hasDefined(CommonAttributes.USERNAME)) {
+            writer.writeAttribute(Attribute.USERNAME.getLocalName(), model.require(CommonAttributes.USERNAME).asString());
+        }
+
+        if (model.hasDefined(CommonAttributes.SECURITY_REALM)) {
+            writer.writeAttribute(Attribute.SECURITY_REALM.getLocalName(), model.require(SECURITY_REALM).asString());
+        }
+
         // write the connection-creation-options if any
-        if (model.hasDefined(CommonAttributes.CONNECTION_CREATION_OPTIONS)) {
-            this.writeConnectionCreationOptions(writer, model);
+        if (model.hasDefined(PROPERTY)) {
+            writeProperties(writer, model.get(PROPERTY));
         }
 
         // </remote-outbound-connection>
@@ -777,31 +809,11 @@ class RemotingSubsystem11Parser implements XMLStreamConstants, XMLElementReader<
         writer.writeAttribute(Attribute.OUTBOUND_SOCKET_BINDING_REF.getLocalName(), outboundSocketRef);
 
         // write the connection-creation-options if any
-        if (model.hasDefined(CommonAttributes.CONNECTION_CREATION_OPTIONS)) {
-            this.writeConnectionCreationOptions(writer, model);
+        if (model.hasDefined(PROPERTY)) {
+            writeProperties(writer, model.get(PROPERTY));
         }
 
         // </local-outbound-connection>
-        writer.writeEndElement();
-    }
-
-    private void writeConnectionCreationOptions(final XMLExtendedStreamWriter writer, final ModelNode model) throws XMLStreamException {
-        // <connection-creation-options>
-        writer.writeStartElement(Element.CONNECTION_CREATION_OPTIONS.getLocalName());
-        final List<Property> connectionCreationOptions = model.get(CONNECTION_CREATION_OPTIONS).asPropertyList();
-        for (final Property connectionCreationOption : connectionCreationOptions) {
-            // <option>
-            writer.writeStartElement(Element.OPTION.getLocalName());
-            // write the name attribute
-            final String optionName = connectionCreationOption.getName();
-            writer.writeAttribute(Attribute.NAME.getLocalName(), optionName);
-            // write the value attribute
-            final String optionValue = connectionCreationOption.getValue().asString();
-            writer.writeAttribute(Attribute.VALUE.getLocalName(), optionValue);
-            // </option>
-            writer.writeEndElement();
-        }
-        // </connection-creation-options>
         writer.writeEndElement();
     }
 

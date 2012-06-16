@@ -24,62 +24,102 @@ package org.jboss.as.domain.management.security;
 
 import static org.jboss.as.domain.management.DomainManagementMessages.MESSAGES;
 
-import java.io.BufferedWriter;
-import java.io.Closeable;
-import java.io.Console;
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Properties;
 
-import org.jboss.sasl.util.UsernamePasswordHashUtil;
+import org.jboss.as.domain.management.security.state.ErrorState;
+import org.jboss.as.domain.management.security.state.PropertyFileFinder;
+import org.jboss.as.domain.management.security.state.PropertyFilePrompt;
+import org.jboss.as.domain.management.security.state.State;
+import org.jboss.as.domain.management.security.state.StateValues;
 
 /**
  * A command line utility to add new users to the mgmt-users.properties files.
  *
  * @author <a href="mailto:darran.lofthouse@jboss.com">Darran Lofthouse</a>
+ * @author <a href="mailto:g.grossetie@gmail.com">Guillaume Grossetie</a>
  */
 public class AddPropertiesUser {
 
-    private static final String[] badUsernames = { "admin", "administrator", "root" };
+    public static final String[] BAD_USER_NAMES = {"admin", "administrator", "root"};
 
-    private static final String DEFAULT_REALM = "ManagementRealm";
-    private static final String NEW_LINE = "\n";
-    private static final String SPACE = " ";
+    public static final String SERVER_BASE_DIR = "jboss.server.base.dir";
+    public static final String SERVER_CONFIG_DIR = "jboss.server.config.dir";
+    public static final String SERVER_CONFIG_USER_DIR = "jboss.server.config.user.dir";
+    public static final String DOMAIN_BASE_DIR = "jboss.domain.base.dir";
+    public static final String DOMAIN_CONFIG_DIR = "jboss.domain.config.dir";
+    public static final String DOMAIN_CONFIG_USER_DIR = "jboss.domain.config.user.dir";
 
-    private Console theConsole = System.console();
+    public static final String DEFAULT_MANAGEMENT_REALM = "ManagementRealm";
+    public static final String DEFAULT_APPLICATION_REALM = "ApplicationRealm";
+    public static final String MGMT_USERS_PROPERTIES = "mgmt-users.properties";
+    public static final String APPLICATION_USERS_PROPERTIES = "application-users.properties";
+    public static final String APPLICATION_ROLES_PROPERTIES = "application-roles.properties";
 
-    private List<File> propertiesFiles;
-    private State nextState;
+    public static final String NEW_LINE = String.format("%n");
+    public static final String SPACE = " ";
+    private static final Properties argsCliProps = new Properties();
 
-    private AddPropertiesUser() {
-        if (theConsole == null) {
+    private final ConsoleWrapper theConsole;
+
+    protected State nextState;
+
+    protected AddPropertiesUser(ConsoleWrapper console) {
+        theConsole = console;
+        StateValues stateValues = new StateValues();
+        stateValues.setJbossHome(System.getenv("JBOSS_HOME"));
+
+        if (theConsole.getConsole() == null) {
             throw MESSAGES.noConsoleAvailable();
         }
-        nextState = new PropertyFileFinder();
+        nextState = new PropertyFilePrompt(theConsole, stateValues);
     }
 
-    private AddPropertiesUser(final String user, final char[] password, final String realm) {
-        if (theConsole == null) {
+    private AddPropertiesUser(ConsoleWrapper console, final boolean management, final String user, final String password, final String realm) {
+        StateValues stateValues = new StateValues();
+        stateValues.setJbossHome(System.getenv("JBOSS_HOME"));
+
+        final Interactiveness howInteractive;
+        boolean silent = Boolean.valueOf(argsCliProps.getProperty(CommandLineArgument.SILENT.key()));
+        if (silent) {
+            howInteractive = Interactiveness.SILENT;
+        } else {
+            howInteractive = Interactiveness.NON_INTERACTIVE;
+        }
+        stateValues.setHowInteractive(howInteractive);
+
+        // Silent modes still need to be able to output an error on failure.
+        theConsole = console;
+        if (theConsole.getConsole() == null) {
             throw MESSAGES.noConsoleAvailable();
         }
-        Values values = new Values();
-        values.nonInteractive = true;
-        values.userName = user;
-        values.password = password;
-        values.realm = realm;
+        // Username should not be null or empty.
+        if (user == null || user.isEmpty()) {
+            nextState = new ErrorState(theConsole, MESSAGES.noUsernameExiting(), null, stateValues);
+            return;
+        }
+        stateValues.setUserName(user);
+        // Password should not be null or empty.
+        if (password == null || password.isEmpty()) {
+            nextState = new ErrorState(theConsole, MESSAGES.noPasswordExiting(), null, stateValues);
+            return;
+        }
+        stateValues.setPassword(password.toCharArray());
+        stateValues.setRealm(realm);
+        stateValues.setManagement(management);
+        stateValues.setRoles(argsCliProps.getProperty(CommandLineArgument.ROLE.key()));
 
-        nextState = new PropertyFileFinder(values);
+        nextState = new PropertyFileFinder(theConsole, stateValues);
     }
 
-    private AddPropertiesUser(final String user, final char[] password) {
-        this(user, password, DEFAULT_REALM);
+    private AddPropertiesUser(ConsoleWrapper consoleWrapper, boolean management, final String user, final String password) {
+        this(consoleWrapper, management, user, password, management ? DEFAULT_MANAGEMENT_REALM : DEFAULT_APPLICATION_REALM);
     }
 
-    private void run() {
+    protected void run() {
         while ((nextState = nextState.execute()) != null) {
         }
     }
@@ -88,380 +128,274 @@ public class AddPropertiesUser {
      * @param args
      */
     public static void main(String[] args) {
-        if (args.length == 3) {
-            new AddPropertiesUser(args[0], args[1].toCharArray(), args[2]).run();
-        } else if (args.length == 2) {
-            new AddPropertiesUser(args[0], args[1].toCharArray()).run();
+
+        boolean management = true;
+        JavaConsole javaConsole = new JavaConsole();
+
+        if (args.length >= 1) {
+
+            Iterator<String> it = Arrays.asList(args).iterator();
+            String temp;
+            while (it.hasNext()) {
+                temp = it.next();
+                if (CommandLineArgument.HELP.match(temp)) {
+                    usage(javaConsole);
+                    return;
+                }
+                if (CommandLineArgument.DOMAIN_CONFIG_DIR_USERS.match(temp)) {
+                    System.setProperty(DOMAIN_CONFIG_DIR, it.next());
+                } else if (CommandLineArgument.SERVER_CONFIG_DIR_USERS.match(temp)) {
+                    System.setProperty(SERVER_CONFIG_DIR, it.next());
+                } else if (CommandLineArgument.APPLICATION_USERS.match(temp)) {
+                    management = false;
+                } else {
+                    // Find the command-line option
+                    CommandLineArgument commandLineArgument = findCommandLineOption(temp);
+                    if (commandLineArgument != null) {
+                        final String value;
+                        if (CommandLineArgument.SILENT.equals(commandLineArgument)) {
+                            value = Boolean.TRUE.toString();
+                        } else {
+                            value = it.hasNext() ? it.next() : null;
+                        }
+                        if (value != null) {
+                            argsCliProps.setProperty(commandLineArgument.key(), value);
+                        }
+                    } else {
+                        // By default, the first arg without option is the username,
+                        final String userKey = CommandLineArgument.USER.key();
+                        if (!argsCliProps.containsKey(userKey)) {
+                            argsCliProps.setProperty(userKey, temp);
+                        }
+                        // the second arg is the password and,
+                        else {
+                            final String passwordKey = CommandLineArgument.PASSWORD.key();
+                            if (!argsCliProps.containsKey(passwordKey)) {
+                                argsCliProps.setProperty(passwordKey, temp);
+                            }
+                            // the third one is the realm.
+                            else {
+                                final String realmKey = CommandLineArgument.REALM.key();
+                                if (!argsCliProps.containsKey(realmKey)) {
+                                    argsCliProps.setProperty(realmKey, temp);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (argsCliProps.containsKey(CommandLineArgument.PASSWORD.key()) || argsCliProps.containsKey(CommandLineArgument.USER.key())) {
+            final String password = argsCliProps.getProperty(CommandLineArgument.PASSWORD.key());
+            final String user = argsCliProps.getProperty(CommandLineArgument.USER.key());
+            if (argsCliProps.containsKey(CommandLineArgument.REALM.key())) {
+                new AddPropertiesUser(javaConsole, management, user, password, argsCliProps.getProperty(CommandLineArgument.REALM.key())).run();
+            } else {
+                new AddPropertiesUser(javaConsole, management, user, password).run();
+            }
         } else {
-            new AddPropertiesUser().run();
+            new AddPropertiesUser(javaConsole).run();
         }
     }
 
-    /**
-     * The first state executed, responsible for searching for the relevent properties files.
-     */
-    private class PropertyFileFinder implements State {
+    private static void usage(ConsoleWrapper consoleWrapper) {
+        CommandLineArgument.printUsage(consoleWrapper);
+    }
 
-        private final Values values;
-
-        private PropertyFileFinder() {
-            values = null;
-        }
-
-        private PropertyFileFinder(final Values values) {
-            this.values = values;
-        }
-
-        @Override
-        public State execute() {
-            String jbossHome = System.getenv("JBOSS_HOME");
-            if (jbossHome == null) {
-                return new ErrorState(MESSAGES.jbossHomeNotSet());
-            }
-
-            List<File> foundFiles = new ArrayList<File>(2);
-            File standaloneProps = new File(jbossHome + "/standalone/configuration/mgmt-users.properties");
-            if (standaloneProps.exists()) {
-                foundFiles.add(standaloneProps);
-            }
-            File domainProps = new File(jbossHome + "/domain/configuration/mgmt-users.properties");
-            if (domainProps.exists()) {
-                foundFiles.add(domainProps);
-            }
-
-            if (foundFiles.size() == 0) {
-                return new ErrorState(MESSAGES.mgmtUsersPropertiesNotFound());
-            }
-
-            propertiesFiles = foundFiles;
-
-            if (values == null) {
-                return new PromptNewUserState();
-            } else {
-                return new PromptNewUserState(values);
-            }
-        }
-
+    public enum Interactiveness {
+        SILENT, NON_INTERACTIVE, INTERACTIVE
     }
 
     /**
-     * State to prompt the user for the realm, username and password to use, this State can be called back to so allows for a
-     * pre-defined realm and username to be used.
-     */
-    private class PromptNewUserState implements State {
-        private final Values values;
-
-        PromptNewUserState() {
-            values = new Values();
-            values.realm = DEFAULT_REALM;
-        }
-
-        PromptNewUserState(final Values values) {
-            this.values = values;
-        }
-
-        @Override
-        public State execute() {
-            if (values.nonInteractive == false) {
-                theConsole.printf(NEW_LINE);
-                theConsole.printf(MESSAGES.enterNewUserDetails());
-                theConsole.printf(NEW_LINE);
-                values.password = null; // If interactive we want to be sure to capture this.
-
-                /*
-                 * Prompt for realm.
-                 */
-                theConsole.printf(MESSAGES.realmPrompt(values.realm));
-                String temp = theConsole.readLine(" : ");
-                if (temp == null) {
-                    /*
-                     * This will return user to the command prompt so add a new line to
-                     * ensure the command prompt is on the next line.
-                     */
-                    theConsole.printf(NEW_LINE);
-                    return null;
-                }
-                if (temp.length() > 0) {
-                    values.realm = temp;
-                }
-
-                /*
-                 * Prompt for username.
-                 */
-                String existingUsername = values.userName;
-                String usernamePrompt = existingUsername == null ? MESSAGES.usernamePrompt() :
-                                                                   MESSAGES.usernamePrompt(existingUsername);
-                theConsole.printf(usernamePrompt);
-                temp = theConsole.readLine(" : ");
-                if (temp != null && temp.length() > 0) {
-                    existingUsername = temp;
-                }
-                // The user could have pressed Ctrl-D, in which case we do not use the default value.
-                if (temp == null || existingUsername == null || existingUsername.length() == 0) {
-                    return new ErrorState(MESSAGES.noUsernameExiting());
-                }
-                values.userName = existingUsername;
-
-                /*
-                 * Prompt for password.
-                 */
-                theConsole.printf(MESSAGES.passwordPrompt());
-                char[] tempChar = theConsole.readPassword(" : ");
-                if (tempChar == null || tempChar.length == 0) {
-                    return new ErrorState(MESSAGES.noPasswordExiting());
-                }
-
-                theConsole.printf(MESSAGES.passwordConfirmationPrompt());
-                char[] secondTempChar = theConsole.readPassword(" : ");
-                if (secondTempChar == null) {
-                    secondTempChar = new char[0]; // If re-entry missed allow fall through to comparison.
-                }
-
-                if (Arrays.equals(tempChar, secondTempChar) == false) {
-                    return new ErrorState(MESSAGES.passwordMisMatch(), this);
-                }
-                values.password = tempChar;
-            }
-
-            return new WeakCheckState(values);
-        }
-
-    }
-
-    /**
-     * State to check the strength of the values selected.
+     * Find the command-line arg corresponding to the parameter {@code arg}.
      *
-     * TODO - Currently only very basic checks are performed, this could be updated to perform additional password strength
-     * checks.
+     * @param arg
+     * @return The corresponding arg or null.
      */
-    private class WeakCheckState implements State {
+    private static CommandLineArgument findCommandLineOption(String arg) {
+        for (CommandLineArgument commandLineArgument : CommandLineArgument.values()) {
+            if (commandLineArgument.match(arg)) {
+                return commandLineArgument;
+            }
+        }
+        return null;
+    }
 
-        private Values values;
+    protected enum CommandLineArgument {
 
-        private WeakCheckState(Values values) {
-            this.values = values;
+        APPLICATION_USERS("-a") {
+            @Override
+            public String instructions() {
+                return MESSAGES.argApplicationUsers();
+            }
+        },
+        DOMAIN_CONFIG_DIR_USERS("-dc") {
+            @Override
+            public String argumentExample() {
+                return super.argumentExample().concat(" <value>");
+            }
+
+            @Override
+            public String instructions() {
+                return MESSAGES.argDomainConfigDirUsers();
+            }
+        },
+        SERVER_CONFIG_DIR_USERS("-sc") {
+            @Override
+            public String argumentExample() {
+                return super.argumentExample().concat(" <value>");
+            }
+
+            @Override
+            public String instructions() {
+                return MESSAGES.argServerConfigDirUsers();
+            }
+        },
+        PASSWORD("-p", "--password") {
+            @Override
+            public String argumentExample() {
+                return super.argumentExample().concat(" <value>");
+            }
+
+            @Override
+            public String instructions() {
+                return MESSAGES.argPassword();
+            }
+        },
+        USER("-u", "--user") {
+            @Override
+            public String argumentExample() {
+                return super.argumentExample().concat(" <value>");
+            }
+
+            @Override
+            public String instructions() {
+                return MESSAGES.argUser();
+            }
+        },
+        REALM("-r", "--realm") {
+            @Override
+            public String argumentExample() {
+                return super.argumentExample().concat(" <value>");
+            }
+
+            @Override
+            public String instructions() {
+                return MESSAGES.argRealm();
+            }
+        },
+        SILENT("-s", "--silent") {
+            @Override
+            public String instructions() {
+                return MESSAGES.argSilent();
+            }
+        },
+        ROLE("-ro", "--role") {
+            @Override
+            public String argumentExample() {
+                return super.argumentExample().concat(" <value>");
+            }
+
+            @Override
+            public String instructions() {
+                return MESSAGES.argRole();
+            }
+        },
+        HELP("-h", "--help") {
+            @Override
+            public String instructions() {
+                return MESSAGES.argHelp();
+            }
+        };
+
+        private static String USAGE;
+        private String shortArg;
+        private String longArg;
+
+        private CommandLineArgument(String option) {
+            this.shortArg = option;
         }
 
+        private CommandLineArgument(String shortArg, String longArg) {
+            this.shortArg = shortArg;
+            this.longArg = longArg;
+        }
+
+        public String key() {
+            return longArg != null ? longArg.substring(2) : shortArg.substring(1);
+        }
+
+        public boolean match(String option) {
+            return option.equals(shortArg) || option.equals(longArg);
+        }
+
+        public String getShortArg() {
+            return shortArg;
+        }
+
+        public String getLongArg() {
+            return longArg;
+        }
+
+        /**
+         * An example of how the argument is used.
+         *
+         * @return the example.
+         */
+        public String argumentExample() {
+            return (null != getShortArg() ? getShortArg() : "").concat(null != getLongArg() ? ", " + getLongArg() : "");
+        }
+
+        /**
+         * The argument instructions.
+         *
+         * @return the instructions.
+         */
+        public abstract String instructions();
+
         @Override
-        public State execute() {
-            State retryState = values.nonInteractive ? null : new PromptNewUserState(values);
-
-            if (Arrays.equals(values.userName.toCharArray(), values.password)) {
-                return new ErrorState(MESSAGES.usernamePasswordMatch(), retryState);
+        public String toString() {
+            final List<String> instructions = new ArrayList<String>();
+            segmentInstructions(instructions(), instructions);
+            StringBuilder sb = new StringBuilder(String.format("    %-35s %s", argumentExample(), instructions.get(0)));
+            for (int i = 1; i < instructions.size(); i++) {
+                sb.append(NEW_LINE);
+                sb.append(String.format("%-40s%s", " ", instructions.get(i)));
             }
+            sb.append(NEW_LINE);
+            return sb.toString();
+        }
 
-            for (char currentChar : values.userName.toCharArray()) {
-                if ((Character.isLetter(currentChar) || Character.isDigit(currentChar)) == false) {
-                    return new ErrorState(MESSAGES.usernameNotAlphaNumeric(), retryState);
-                }
-            }
-
-            boolean weakUserName = false;
-            for (String current : badUsernames) {
-                if (current.equals(values.userName.toLowerCase())) {
-                    weakUserName = true;
-                    break;
-                }
-            }
-
-            State addState = new AddUser(values);
-            final State continuingState;
-            if (values.nonInteractive) {
-                continuingState = addState;
+        private static void segmentInstructions(String instructions, List<String> segments) {
+            if (instructions.length() <= 40) {
+                segments.add(instructions);
             } else {
-                String message = MESSAGES.aboutToAddUser(values.userName, values.realm);
-                String prompt = MESSAGES.isCorrectPrompt();
-
-                continuingState = new ConfirmationChoice(message, prompt, addState, new PromptNewUserState(values));
-            }
-
-            if (weakUserName && values.nonInteractive == false) {
-                String message = MESSAGES.usernameEasyToGuess(values.userName);
-                String prompt = MESSAGES.sureToAddUser(values.userName);
-                State noState = new PromptNewUserState(values);
-
-                return new ConfirmationChoice(message, prompt, continuingState, noState);
-            }
-
-            return continuingState;
-        }
-
-    }
-
-    /**
-     * State to display a message to the user with option to confirm a choice.
-     *
-     * This state handles either a yes or no outcome and will loop with an error
-     * on invalid input.
-     */
-    private class ConfirmationChoice implements State {
-
-        private final String message;
-        private final String prompt;
-        private final State yesState;
-        private final State noState;
-
-        private static final int YES = 0;
-        private static final int NO = 1;
-        private static final int INVALID = 2;
-
-        private ConfirmationChoice(final String message, final String prompt, final State yesState, final State noState) {
-            this.message = message;
-            this.prompt = prompt;
-            this.yesState = yesState;
-            this.noState = noState;
-        }
-
-        @Override
-        public State execute() {
-            if (message != null) {
-                theConsole.printf(message);
-                theConsole.printf(NEW_LINE);
-            }
-
-            theConsole.printf(prompt);
-            String temp = theConsole.readLine(SPACE);
-
-            switch (convertResponse(temp)) {
-                case YES:
-                    return yesState;
-                case NO:
-                    return noState;
-                default:
-                    return new ErrorState(MESSAGES.invalidConfirmationResponse(), this);
-            }
-        }
-
-        private int convertResponse(final String response) {
-            if (response != null) {
-                String temp = response.toLowerCase();
-                if ("yes".equals(temp) || "y".equals(temp)) {
-                    return YES;
+                String testFragment = instructions.substring(0, 40);
+                int lastSpace = testFragment.lastIndexOf(' ');
+                if (lastSpace < 0) {
+                    // degenerate case; we just have to chop not at a space
+                    lastSpace = 39;
                 }
+                segments.add(instructions.substring(0, lastSpace + 1));
+                segmentInstructions(instructions.substring(lastSpace + 1), segments);
+            }
+        }
 
-                if ("no".equals(temp) || "n".equals(temp)) {
-                    return NO;
+        public static void printUsage(ConsoleWrapper consoleWrapper) {
+            consoleWrapper.printf(usage());
+        }
+
+        public static String usage() {
+            if (USAGE == null) {
+                final StringBuilder sb = new StringBuilder();
+                sb.append(MESSAGES.argUsage()).append(NEW_LINE);
+                for (CommandLineArgument arg : CommandLineArgument.values()) {
+                    sb.append(arg.toString()).append(NEW_LINE);
                 }
+                USAGE = sb.toString();
             }
-
-            return INVALID;
+            return USAGE;
         }
-
     }
-
-    /**
-     * State to perform the actual addition to the discovered properties files.
-     */
-    private class AddUser implements State {
-
-        private final Values values;
-
-        private AddUser(final Values values) {
-            this.values = values;
-        }
-
-        @Override
-        public State execute() {
-            String entry;
-
-            try {
-                String hash = new UsernamePasswordHashUtil().generateHashedHexURP(values.userName, values.realm,
-                        values.password);
-                entry = values.userName + "=" + hash;
-            } catch (NoSuchAlgorithmException e) {
-                return new ErrorState(e.getMessage());
-            }
-
-            for (File current : propertiesFiles) {
-                try {
-                    append(entry, current);
-                    theConsole.printf(MESSAGES.addedUser(values.userName, current.getCanonicalPath()));
-                    theConsole.printf(NEW_LINE);
-                } catch (IOException e) {
-                    return new ErrorState(MESSAGES.unableToAddUser(current.getAbsolutePath(), e.getMessage()));
-                }
-            }
-
-            /*
-             * At this point the files have been written and confirmation passed back so nothing else to do.
-             */
-            return null;
-        }
-
-        private void append(final String entry, final File toFile) throws IOException {
-            FileWriter fw = null;
-            BufferedWriter bw = null;
-
-            try {
-                fw = new FileWriter(toFile, true);
-                bw = new BufferedWriter(fw);
-
-                bw.append(entry);
-                bw.newLine();
-            } finally {
-                safeClose(bw);
-                safeClose(fw);
-            }
-
-        }
-
-        private void safeClose(Closeable c) {
-            if (c != null) {
-                try {
-                    c.close();
-                } catch (IOException e) {
-                }
-            }
-        }
-
-    }
-
-    /**
-     * State to report an error to the user, optionally a nextState can be supplied so the process can continue even though an
-     * error has been reported.
-     */
-    private class ErrorState implements State {
-
-        private final State nextState;
-        private final String errorMessage;
-
-        private ErrorState(String errorMessage) {
-            this(errorMessage, null);
-        }
-
-        private ErrorState(String errorMessage, State nextState) {
-            this.errorMessage = errorMessage;
-            this.nextState = nextState;
-        }
-
-        @Override
-        public State execute() {
-            theConsole.printf(NEW_LINE);
-            theConsole.printf(" * ");
-            theConsole.printf(MESSAGES.errorHeader());
-            theConsole.printf(" * ");
-            theConsole.printf(NEW_LINE);
-
-            theConsole.printf(errorMessage);
-            theConsole.printf(NEW_LINE);
-            theConsole.printf(NEW_LINE);
-
-            return nextState;
-        }
-
-    }
-
-    private class Values {
-        private boolean nonInteractive = false;
-        private String realm;
-        private String userName;
-        private char[] password;
-    }
-
-    private interface State {
-
-        State execute();
-
-    }
-
 }

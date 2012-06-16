@@ -21,20 +21,32 @@
  */
 package org.jboss.as.test.integration.management.cli;
 
-import static org.junit.Assert.assertFalse;
+import org.jboss.as.test.integration.management.base.AbstractCliTestBase;
 import static org.junit.Assert.assertTrue;
 
 import org.jboss.arquillian.junit.Arquillian;
+import org.junit.AfterClass;
+import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
 /**
- * TODO add/remove-jms-topic/queue/cf commands are deprecated and shouldn't be used.
  *
  * @author Dominik Pospisil <dpospisi@redhat.com>
  */
 @RunWith(Arquillian.class)
 public class JmsTestCase extends AbstractCliTestBase {
+
+    @BeforeClass
+    public static void before() throws Exception {
+        AbstractCliTestBase.initCLI();
+    }
+
+    @AfterClass
+    public static void after() throws Exception {
+        AbstractCliTestBase.closeCLI();
+    }
 
     @Test
     public void testAddRemoveJmsQueue() throws Exception {
@@ -52,59 +64,59 @@ public class JmsTestCase extends AbstractCliTestBase {
 
         // check the queue is not registered
         cli.sendLine("cd /subsystem=messaging/hornetq-server=default/jms-queue");
-        cli.sendLine("ls");        
-        String ls = cli.readAllUnformated(WAIT_TIMEOUT, WAIT_LINETIMEOUT);
-        assertFalse(ls.contains("testJmsQueue"));              
-        
+        cli.sendLine("ls");
+        String ls = cli.readOutput();
+        Assert.assertNull(ls);
+
         // create queue
-        cli.sendLine("add-jms-queue --name=testJmsQueue");
+        cli.sendLine("jms-queue add --queue-address=testJmsQueue --entries=testJmsQueue");
 
         // check it is listed
         cli.sendLine("cd /subsystem=messaging/hornetq-server=default/jms-queue");
-        cli.sendLine("ls");        
-        ls = cli.readAllUnformated(WAIT_TIMEOUT, WAIT_LINETIMEOUT);
-        assertTrue(ls.contains("testJmsQueue"));              
+        cli.sendLine("ls");
+        ls = cli.readOutput();
+        assertTrue(ls.contains("testJmsQueue"));
     }
 
     private void testRemoveJmsQueue() throws Exception {
 
         // create queue
-        cli.sendLine("remove-jms-queue --name=testJmsQueue");
+        cli.sendLine("jms-queue remove --queue-address=testJmsQueue");
 
         // check it is listed
         cli.sendLine("cd /subsystem=messaging/hornetq-server=default/jms-queue");
-        cli.sendLine("ls");        
-        String ls = cli.readAllUnformated(WAIT_TIMEOUT, WAIT_LINETIMEOUT);
-        assertFalse(ls.contains("testJmsQueue"));              
-    }    
-    
+        cli.sendLine("ls");
+        String ls = cli.readOutput();
+        Assert.assertNull(ls);
+    }
+
     private void testAddJmsTopic() throws Exception {
 
         // check the queue is not registered
         cli.sendLine("cd /subsystem=messaging/hornetq-server=default/jms-topic");
-        cli.sendLine("ls");        
-        String ls = cli.readAllUnformated(WAIT_TIMEOUT, WAIT_LINETIMEOUT);
-        assertFalse(ls.contains("testJmsTopic"));              
-        
-        // create queue
-        cli.sendLine("add-jms-topic --name=testJmsTopic");
+        cli.sendLine("ls");
+        String ls = cli.readOutput();
+        Assert.assertNull(ls);
+
+        // create topic
+        cli.sendLine("jms-topic add --topic-address=testJmsTopic --entries=testJmsTopic");
 
         // check it is listed
         cli.sendLine("cd /subsystem=messaging/hornetq-server=default/jms-topic");
-        cli.sendLine("ls");        
-        ls = cli.readAllUnformated(WAIT_TIMEOUT, WAIT_LINETIMEOUT);
-        assertTrue(ls.contains("testJmsTopic"));              
+        cli.sendLine("ls");
+        ls = cli.readOutput();
+        assertTrue(ls.contains("testJmsTopic"));
     }
 
     private void testRemoveJmsTopic() throws Exception {
 
         // create queue
-        cli.sendLine("remove-jms-topic --name=testJmsTopic");
+        cli.sendLine("jms-topic remove --topic-address=testJmsTopic");
 
         // check it is listed
         cli.sendLine("cd /subsystem=messaging/hornetq-server=default/jms-topic");
-        cli.sendLine("ls");        
-        String ls = cli.readAllUnformated(WAIT_TIMEOUT, WAIT_LINETIMEOUT);
-        assertFalse(ls.contains("testJmsTopic"));              
-    }       
+        cli.sendLine("ls");
+        String ls = cli.readOutput();
+        Assert.assertNull(ls);
+    }
 }

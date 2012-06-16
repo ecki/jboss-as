@@ -18,16 +18,6 @@
  */
 package org.jboss.as.server.deployment;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.Locale;
-import org.jboss.as.controller.HashUtil;
-import org.jboss.as.controller.OperationContext;
-import org.jboss.as.controller.OperationStepHandler;
-import org.jboss.as.controller.OperationFailedException;
-import org.jboss.as.controller.PathAddress;
-import org.jboss.as.controller.PathElement;
-import org.jboss.as.controller.descriptions.DescriptionProvider;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ARCHIVE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.BYTES;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.CONTENT;
@@ -41,9 +31,30 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PAT
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RELATIVE_TO;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RUNTIME_NAME;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.URL;
+import static org.jboss.as.controller.operations.validation.ChainedParameterValidator.chain;
+import static org.jboss.as.server.ServerMessages.MESSAGES;
+import static org.jboss.as.server.deployment.AbstractDeploymentHandler.CONTENT_ADDITION_PARAMETERS;
+import static org.jboss.as.server.deployment.AbstractDeploymentHandler.asString;
+import static org.jboss.as.server.deployment.AbstractDeploymentHandler.createFailureException;
+import static org.jboss.as.server.deployment.AbstractDeploymentHandler.getInputStream;
+import static org.jboss.as.server.deployment.AbstractDeploymentHandler.hasValidContentAdditionParameterDefined;
+import static org.jboss.as.server.deployment.AbstractDeploymentHandler.validateOnePieceOfContent;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Arrays;
+import java.util.Locale;
+
+import org.jboss.as.controller.HashUtil;
+import org.jboss.as.controller.OperationContext;
+import org.jboss.as.controller.OperationContext.ResultAction;
+import org.jboss.as.controller.OperationFailedException;
+import org.jboss.as.controller.OperationStepHandler;
+import org.jboss.as.controller.PathAddress;
+import org.jboss.as.controller.PathElement;
+import org.jboss.as.controller.descriptions.DescriptionProvider;
 import org.jboss.as.controller.descriptions.common.DeploymentDescription;
 import org.jboss.as.controller.operations.validation.AbstractParameterValidator;
-import static org.jboss.as.controller.operations.validation.ChainedParameterValidator.chain;
 import org.jboss.as.controller.operations.validation.ListValidator;
 import org.jboss.as.controller.operations.validation.ModelTypeValidator;
 import org.jboss.as.controller.operations.validation.ParametersOfValidator;
@@ -51,14 +62,10 @@ import org.jboss.as.controller.operations.validation.ParametersValidator;
 import org.jboss.as.controller.operations.validation.StringLengthValidator;
 import org.jboss.as.controller.registry.Resource;
 import org.jboss.as.protocol.StreamUtils;
-
-import static org.jboss.as.server.deployment.AbstractDeploymentHandler.CONTENT_ADDITION_PARAMETERS;
-import static org.jboss.as.server.deployment.AbstractDeploymentHandler.asString;
-import static org.jboss.as.server.deployment.AbstractDeploymentHandler.createFailureException;
-import static org.jboss.as.server.deployment.AbstractDeploymentHandler.getInputStream;
-import static org.jboss.as.server.deployment.AbstractDeploymentHandler.hasValidContentAdditionParameterDefined;
-import static org.jboss.as.server.deployment.AbstractDeploymentHandler.validateOnePieceOfContent;
-import org.jboss.as.server.deployment.repository.api.ContentRepository;
+import org.jboss.as.repository.ContentRepository;
+import org.jboss.as.repository.DeploymentFileRepository;
+import org.jboss.as.server.ServerMessages;
+import org.jboss.as.server.services.security.AbstractVaultReader;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.ModelType;
 
@@ -71,13 +78,16 @@ public class DeploymentFullReplaceHandler implements OperationStepHandler, Descr
 
     public static final String OPERATION_NAME = FULL_REPLACE_DEPLOYMENT;
 
-    private final ContentRepository contentRepository;
+    protected final ContentRepository contentRepository;
 
     private final ParametersValidator validator = new ParametersValidator();
     private final ParametersValidator unmanagedContentValidator = new ParametersValidator();
     private final ParametersValidator managedContentValidator = new ParametersValidator();
 
-    public DeploymentFullReplaceHandler(final ContentRepository contentRepository) {
+    private final AbstractVaultReader vaultReader;
+
+    protected DeploymentFullReplaceHandler(final ContentRepository contentRepository, final AbstractVaultReader vaultReader) {
+        assert contentRepository != null : "Null contentRepository";
         this.contentRepository = contentRepository;
         this.validator.registerValidator(NAME, new StringLengthValidator(1, Integer.MAX_VALUE, false, false));
         this.validator.registerValidator(RUNTIME_NAME, new StringLengthValidator(1, Integer.MAX_VALUE, true, false));
@@ -105,6 +115,15 @@ public class DeploymentFullReplaceHandler implements OperationStepHandler, Descr
         this.unmanagedContentValidator.registerValidator(ARCHIVE, new ModelTypeValidator(ModelType.BOOLEAN));
         this.unmanagedContentValidator.registerValidator(PATH, new StringLengthValidator(1));
 
+        this.vaultReader = vaultReader;
+    }
+
+    public static DeploymentFullReplaceHandler createForStandalone(final ContentRepository  contentRepository, final AbstractVaultReader vaultReader) {
+        return new DeploymentFullReplaceHandler(contentRepository, vaultReader);
+    }
+
+    public static DeploymentFullReplaceHandler createForDomainServer(final ContentRepository contentRepository, DeploymentFileRepository remoteFileRepository, final AbstractVaultReader vaultReader) {
+        return new DomainServerDeploymentFullReplaceHandler(contentRepository, remoteFileRepository, vaultReader);
     }
 
     @Override
@@ -122,14 +141,13 @@ public class DeploymentFullReplaceHandler implements OperationStepHandler, Descr
         final Resource root = context.readResource(PathAddress.EMPTY_ADDRESS);
         boolean exists = root.hasChild(PathElement.pathElement(DEPLOYMENT, name));
         if (! exists) {
-            throw createFailureException("No deployment with name %s found", name);
+            ServerMessages.MESSAGES.noSuchDeployment(name);
         }
 
-        final ModelNode replaceNode = context.readModelForUpdate(address);
+        final ModelNode replaceNode = context.readResourceForUpdate(address).getModel();
         final String replacedRuntimeName = replaceNode.require(RUNTIME_NAME).asString();
-        final String runtimeName = operation.hasDefined(RUNTIME_NAME) ? operation.get(RUNTIME_NAME).asString() : replaceNode.require(RUNTIME_NAME).asString();
+        final String runtimeName = operation.hasDefined(RUNTIME_NAME) ? operation.get(RUNTIME_NAME).asString() : replacedRuntimeName;
 
-        final byte[] hash;
         // clone it, so we can modify it to our own content
         final ModelNode content = operation.require(CONTENT).clone();
         // TODO: JBAS-9020: for the moment overlays are not supported, so there is a single content item
@@ -137,37 +155,20 @@ public class DeploymentFullReplaceHandler implements OperationStepHandler, Descr
         final ModelNode contentItemNode = content.require(0);
         if (contentItemNode.hasDefined(HASH)) {
             managedContentValidator.validate(contentItemNode);
-            hash = contentItemNode.require(HASH).asBytes();
-            if (!contentRepository.hasContent(hash))
-                throw createFailureException("No deployment content with hash %s is available in the deployment content repository.", HashUtil.bytesToHexString(hash));
-            contentItem = new DeploymentHandlerUtil.ContentItem(hash);
-        } else if (hasValidContentAdditionParameterDefined(contentItemNode)) {
-            InputStream in = getInputStream(context, contentItemNode);
-            try {
-                try {
-                    hash = contentRepository.addContent(in);
-                } catch (IOException e) {
-                    throw createFailureException(e.toString());
-                }
+            byte[] hash = contentItemNode.require(HASH).asBytes();
 
-            } finally {
-                StreamUtils.safeClose(in);
-            }
-            contentItemNode.clear(); // AS7-1029
-            contentItemNode.get(HASH).set(hash);
-            // TODO: remove the content addition stuff?
-            contentItem = new DeploymentHandlerUtil.ContentItem(hash);
+            contentItem = addFromHash(hash);
+        } else if (hasValidContentAdditionParameterDefined(contentItemNode)) {
+            contentItem = addFromContentAdditionParameter(context, contentItemNode);
         } else {
-            unmanagedContentValidator.validate(contentItemNode);
-            final String path = contentItemNode.require(PATH).asString();
-            final String relativeTo = asString(contentItemNode, RELATIVE_TO);
-            final boolean archive = contentItemNode.require(ARCHIVE).asBoolean();
-            contentItem = new DeploymentHandlerUtil.ContentItem(path, relativeTo, archive);
+            contentItem = addUnmanaged(contentItemNode);
         }
 
         boolean start = replaceNode.get(ENABLED).asBoolean();
 
-        final ModelNode deployNode = context.readModelForUpdate(address);
+        byte[] originalHash = replaceNode.get(CONTENT).get(0).hasDefined(HASH) ? replaceNode.get(CONTENT).get(0).get(HASH).asBytes() : null;
+
+        final ModelNode deployNode = context.readResourceForUpdate(address).getModel();
         deployNode.get(NAME).set(name);
         deployNode.get(RUNTIME_NAME).set(runtimeName);
         deployNode.get(CONTENT).set(content);
@@ -177,9 +178,24 @@ public class DeploymentFullReplaceHandler implements OperationStepHandler, Descr
         removeContentAdditions(deployNode.require(CONTENT));
 
         if (start) {
-            DeploymentHandlerUtil.replace(context, replaceNode, runtimeName, name, replacedRuntimeName, contentItem);
+            DeploymentHandlerUtil.replace(context, replaceNode, runtimeName, name, replacedRuntimeName, vaultReader, contentItem);
         }
-        context.completeStep();
+
+        if (context.completeStep() == ResultAction.KEEP) {
+            if (originalHash != null) {
+                if (replaceNode.get(CONTENT).get(0).hasDefined(HASH)) {
+                    byte[] newHash = replaceNode.get(CONTENT).get(0).get(HASH).asBytes();
+                    if (!Arrays.equals(originalHash, newHash)) {
+                        contentRepository.removeContent(originalHash);
+                    }
+                }
+            }
+        } else {
+            if (replaceNode.get(CONTENT).get(0).hasDefined(HASH)) {
+                byte[] newHash = replaceNode.get(CONTENT).get(0).get(HASH).asBytes();
+                contentRepository.removeContent(newHash);
+            }
+        }
     }
 
     private static void removeAttributes(final ModelNode node, final Iterable<String> attributeNames) {
@@ -191,6 +207,61 @@ public class DeploymentFullReplaceHandler implements OperationStepHandler, Descr
     private static void removeContentAdditions(final ModelNode content) {
         for (final ModelNode contentItem : content.asList()) {
             removeAttributes(contentItem, CONTENT_ADDITION_PARAMETERS);
+        }
+    }
+
+    DeploymentHandlerUtil.ContentItem addFromHash(byte[] hash) throws OperationFailedException {
+        if (!contentRepository.hasContent(hash)) {
+            throw ServerMessages.MESSAGES.noSuchDeploymentContent(HashUtil.bytesToHexString(hash));
+        }
+        return new DeploymentHandlerUtil.ContentItem(hash);
+    }
+
+    DeploymentHandlerUtil.ContentItem addFromContentAdditionParameter(OperationContext context, ModelNode contentItemNode) throws OperationFailedException {
+        byte[] hash;
+        InputStream in = getInputStream(context, contentItemNode);
+        try {
+            try {
+                hash = contentRepository.addContent(in);
+            } catch (IOException e) {
+                throw createFailureException(e.toString());
+            }
+
+        } finally {
+            StreamUtils.safeClose(in);
+        }
+        contentItemNode.clear(); // AS7-1029
+        contentItemNode.get(HASH).set(hash);
+        // TODO: remove the content addition stuff?
+        return new DeploymentHandlerUtil.ContentItem(hash);
+    }
+
+    DeploymentHandlerUtil.ContentItem addUnmanaged(ModelNode contentItemNode) throws OperationFailedException {
+        unmanagedContentValidator.validate(contentItemNode);
+        final String path = contentItemNode.require(PATH).asString();
+        final String relativeTo = asString(contentItemNode, RELATIVE_TO);
+        final boolean archive = contentItemNode.require(ARCHIVE).asBoolean();
+        return new DeploymentHandlerUtil.ContentItem(path, relativeTo, archive);
+    }
+
+    private static class DomainServerDeploymentFullReplaceHandler extends DeploymentFullReplaceHandler {
+        final DeploymentFileRepository remoteFileRepository;
+
+        DomainServerDeploymentFullReplaceHandler(ContentRepository contentRepository, DeploymentFileRepository remoteFileRepository, final AbstractVaultReader vaultReader) {
+            super(contentRepository, vaultReader);
+            assert remoteFileRepository != null : "Null remoteFileRepository";
+            this.remoteFileRepository = remoteFileRepository;
+        }
+
+        @Override
+        DeploymentHandlerUtil.ContentItem addFromHash(byte[] hash) throws OperationFailedException {
+            remoteFileRepository.getDeploymentFiles(hash);
+            return super.addFromHash(hash);
+        }
+
+        @Override
+        DeploymentHandlerUtil.ContentItem addFromContentAdditionParameter(OperationContext context, ModelNode contentItemNode) throws OperationFailedException {
+            throw MESSAGES.onlyHashAllowedForDeploymentFullReplaceInDomainServer(contentItemNode);
         }
     }
 }

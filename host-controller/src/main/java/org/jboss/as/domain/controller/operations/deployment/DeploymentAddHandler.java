@@ -31,6 +31,7 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.REL
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RUNTIME_NAME;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.URL;
 import static org.jboss.as.controller.operations.validation.ChainedParameterValidator.chain;
+import static org.jboss.as.domain.controller.DomainControllerMessages.MESSAGES;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -43,12 +44,12 @@ import java.util.Locale;
 
 import org.jboss.as.controller.HashUtil;
 import org.jboss.as.controller.OperationContext;
-import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.OperationFailedException;
+import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.PathAddress;
+import org.jboss.as.controller.RunningMode;
 import org.jboss.as.controller.descriptions.DescriptionProvider;
 import org.jboss.as.controller.descriptions.common.DeploymentDescription;
-import org.jboss.as.controller.operations.common.Util;
 import org.jboss.as.controller.operations.validation.AbstractParameterValidator;
 import org.jboss.as.controller.operations.validation.ListValidator;
 import org.jboss.as.controller.operations.validation.ModelTypeValidator;
@@ -56,8 +57,9 @@ import org.jboss.as.controller.operations.validation.ParametersOfValidator;
 import org.jboss.as.controller.operations.validation.ParametersValidator;
 import org.jboss.as.controller.operations.validation.StringLengthValidator;
 import org.jboss.as.controller.registry.Resource;
+import org.jboss.as.domain.controller.DomainControllerLogger;
 import org.jboss.as.protocol.StreamUtils;
-import org.jboss.as.server.deployment.repository.api.ContentRepository;
+import org.jboss.as.repository.ContentRepository;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.ModelType;
 
@@ -70,13 +72,6 @@ public class DeploymentAddHandler implements OperationStepHandler, DescriptionPr
 
     public static final String OPERATION_NAME = ADD;
 
-    static final ModelNode getOperation(ModelNode address, ModelNode state) {
-        ModelNode op = Util.getEmptyOperation(OPERATION_NAME, address);
-        op.get(RUNTIME_NAME).set(state.get(RUNTIME_NAME));
-        op.get(CONTENT).set(state.get(CONTENT));
-        return op;
-    }
-
     private static final List<String> CONTENT_ADDITION_PARAMETERS = Arrays.asList(INPUT_STREAM_INDEX, BYTES, URL);
 
     private final ContentRepository contentRepository;
@@ -85,6 +80,16 @@ public class DeploymentAddHandler implements OperationStepHandler, DescriptionPr
     private final ParametersValidator unmanagedContentValidator = new ParametersValidator();
     private final ParametersValidator managedContentValidator = new ParametersValidator();
 
+    /** Constructor for a slave Host Controller */
+    public DeploymentAddHandler() {
+        this(null);
+    }
+
+    /**
+     * Constructor for a master Host Controller
+     *
+     * @param contentRepository the master content repository. If {@code null} this handler will function as a slave handler would.
+     */
     public DeploymentAddHandler(final ContentRepository contentRepository) {
         this.contentRepository = contentRepository;
         this.validator.registerValidator(RUNTIME_NAME, new StringLengthValidator(1, Integer.MAX_VALUE, true, false));
@@ -136,12 +141,23 @@ public class DeploymentAddHandler implements OperationStepHandler, DescriptionPr
             // If we are the master, validate that we actually have this content. If we're not the master
             // we do not need the content until it's added to a server group we care about, so we defer
             // pulling it until then
-            if (contentRepository != null && !contentRepository.hasContent(hash))
-                throw createFailureException("No deployment content with hash %s is available in the deployment content repository.", HashUtil.bytesToHexString(hash));
+            if (contentRepository != null && !contentRepository.hasContent(hash)) {
+                if (context.isBooting()) {
+                    if (context.getRunningMode() == RunningMode.ADMIN_ONLY) {
+                        // The deployment content is missing, which would be a fatal boot error if we were going to actually
+                        // install services. In ADMIN-ONLY mode we allow it to give the admin a chance to correct the problem
+                        DomainControllerLogger.HOST_CONTROLLER_LOGGER.reportAdminOnlyMissingDeploymentContent(HashUtil.bytesToHexString(hash), name);
+                    } else {
+                        throw createFailureException(MESSAGES.noDeploymentContentWithHashAtBoot(HashUtil.bytesToHexString(hash), name));
+                    }
+                } else {
+                    throw createFailureException(MESSAGES.noDeploymentContentWithHash(HashUtil.bytesToHexString(hash)));
+                }
+            }
         } else if (hasValidContentAdditionParameterDefined(contentItemNode)) {
             if (contentRepository == null) {
                 // This is a slave DC. We can't handle this operation; it should have been fixed up on the master DC
-                throw createFailureException("A slave domain controller cannot accept deployment content uploads");
+                throw createFailureException(MESSAGES.slaveCannotAcceptUploads());
             }
 
             InputStream in = getInputStream(context, contentItemNode);
@@ -169,7 +185,7 @@ public class DeploymentAddHandler implements OperationStepHandler, DescriptionPr
         subModel.get(RUNTIME_NAME).set(runtimeName);
         subModel.get(CONTENT).set(content);
 
-        context.completeStep();
+        context.completeStep(OperationContext.RollbackHandler.NOOP_ROLLBACK_HANDLER);
     }
 
     private static InputStream getInputStream(OperationContext context, ModelNode operation) throws OperationFailedException {
@@ -177,15 +193,15 @@ public class DeploymentAddHandler implements OperationStepHandler, DescriptionPr
         String message = "";
         if (operation.hasDefined(INPUT_STREAM_INDEX)) {
             int streamIndex = operation.get(INPUT_STREAM_INDEX).asInt();
-            message = "Null stream at index " + streamIndex;
+            message = MESSAGES.nullStream(streamIndex);
             in = context.getAttachmentStream(streamIndex);
         } else if (operation.hasDefined(BYTES)) {
-            message = "Invalid byte stream.";
+            message = MESSAGES.invalidByteStream();
             in = new ByteArrayInputStream(operation.get(BYTES).asBytes());
         } else if (operation.hasDefined(URL)) {
             final String urlSpec = operation.get(URL).asString();
             try {
-                message = "Invalid url stream.";
+                message = MESSAGES.invalidUrlStream();
                 in = new URL(urlSpec).openStream();
             } catch (MalformedURLException e) {
                 throw createFailureException(message);
@@ -214,25 +230,13 @@ public class DeploymentAddHandler implements OperationStepHandler, DescriptionPr
         return false;
     }
 
-    private static OperationFailedException createFailureException(String format, Object... params) {
-        return createFailureException(String.format(format, params));
-    }
-
-    private static OperationFailedException createFailureException(Throwable cause, String format, Object... params) {
-        return createFailureException(cause, String.format(format, params));
-    }
-
     private static OperationFailedException createFailureException(String msg) {
-        return new OperationFailedException(new ModelNode().set(msg));
-    }
-
-    private static OperationFailedException createFailureException(Throwable cause, String msg) {
-        return new OperationFailedException(cause, new ModelNode().set(msg));
+        return new OperationFailedException(msg);
     }
 
     private static void validateOnePieceOfContent(final ModelNode content) throws OperationFailedException {
         // TODO: implement overlays
         if (content.asList().size() != 1)
-            throw createFailureException("Only 1 piece of content is current supported (AS7-431");
+            throw createFailureException(MESSAGES.as7431());
     }
 }

@@ -30,20 +30,20 @@ import java.io.PrintStream;
 import java.io.Serializable;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.UnknownHostException;
 import java.util.Arrays;
-import java.util.concurrent.CountDownLatch;
 
 import org.jboss.as.controller.ModelController;
+import org.jboss.as.network.NetworkUtils;
 import org.jboss.as.process.protocol.StreamUtils;
-import org.jboss.as.protocol.mgmt.ManagementChannel;
+import org.jboss.as.protocol.ProtocolChannelClient;
 import org.jboss.as.remoting.EndpointService;
 import org.jboss.as.remoting.RemotingServices;
 import org.jboss.as.remoting.management.ManagementRemotingServices;
-import org.jboss.as.server.mgmt.domain.HostControllerConnectionService;
 import org.jboss.as.server.mgmt.domain.HostControllerServerClient;
+import org.jboss.as.server.mgmt.domain.RemoteFileRepository;
 import org.jboss.logmanager.Level;
 import org.jboss.logmanager.handlers.ConsoleHandler;
-import org.jboss.logmanager.log4j.BridgeRepositorySelector;
 import org.jboss.marshalling.ByteInput;
 import org.jboss.marshalling.MarshallerFactory;
 import org.jboss.marshalling.Marshalling;
@@ -52,18 +52,20 @@ import org.jboss.marshalling.SimpleClassResolver;
 import org.jboss.marshalling.Unmarshaller;
 import org.jboss.modules.Module;
 import org.jboss.modules.ModuleIdentifier;
-import org.jboss.msc.service.AbstractServiceListener;
 import org.jboss.msc.service.ServiceActivator;
 import org.jboss.msc.service.ServiceActivatorContext;
 import org.jboss.msc.service.ServiceContainer;
 import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.service.ServiceTarget;
+import org.jboss.remoting3.Endpoint;
+import org.jboss.remoting3.RemotingOptions;
 import org.jboss.stdio.LoggingOutputStream;
 import org.jboss.stdio.NullInputStream;
 import org.jboss.stdio.SimpleStdioContextSelector;
 import org.jboss.stdio.StdioContext;
 import org.jboss.threads.AsyncFuture;
+import org.xnio.OptionMap;
 
 /**
  * The main entry point for domain-managed server instances.
@@ -81,9 +83,6 @@ public final class DomainServerMain {
      * @param args ignored
      */
     public static void main(String[] args) {
-        // TODO: privileged block
-        System.setProperty("log4j.defaultInitOverride", "true");
-        new BridgeRepositorySelector().start();
 
         final InputStream initialInput = System.in;
         final PrintStream initialError = System.err;
@@ -141,33 +140,19 @@ public final class DomainServerMain {
         for (;;) try {
             String hostName = StreamUtils.readUTFZBytes(initialInput);
             int port = StreamUtils.readInt(initialInput);
+            // TODO remove managementSubsystemEndpoint ?
+            // This property does not make sense on reconnect, since there can't be any configuration changes
+            // while the channel is down. Other changes are either applied to the runtime directly or require a restart.
             boolean managementSubsystemEndpoint = StreamUtils.readBoolean(initialInput);
             byte[] asAuthKey = new byte[16];
             StreamUtils.readFully(initialInput, asAuthKey);
 
-            final CountDownLatch latch = new CountDownLatch(2);
-            final UninstallListener connectionListener = new UninstallListener(latch, HostControllerConnectionService.SERVICE_NAME);
-            final UninstallListener clientListener = new UninstallListener(latch, HostControllerServerClient.SERVICE_NAME);
-
-            //Disconnect from the old HC
+            // Get the host-controller server client
             final ServiceContainer container = containerFuture.get();
-            final ServiceController<?> client = container.getRequiredService(HostControllerServerClient.SERVICE_NAME);
-            final String name = ((HostControllerServerClient)client.getValue()).getServerName();
-            final String processName = ((HostControllerServerClient)client.getValue()).getServerProcessName();
-            client.addListener(clientListener);
-            client.setMode(ServiceController.Mode.REMOVE);
-
-            final ServiceController<?> connection = container.getRequiredService(HostControllerConnectionService.SERVICE_NAME);
-            connection.addListener(connectionListener);
-            connection.setMode(ServiceController.Mode.REMOVE);
-
-            latch.await();
-
-            client.removeListener(clientListener);
-            connection.removeListener(connectionListener);
-
-            //Connect to the new HC address
-            addCommunicationServices(container, name, processName, asAuthKey, new InetSocketAddress(InetAddress.getByName(hostName), port), managementSubsystemEndpoint, true);
+            final ServiceController<?> controller = container.getRequiredService(HostControllerServerClient.SERVICE_NAME);
+            final HostControllerServerClient client = (HostControllerServerClient) controller.getValue();
+            // Reconnect to the host-controller
+            client.reconnect(hostName, port, asAuthKey);
 
         } catch (InterruptedIOException e) {
             Thread.interrupted();
@@ -188,26 +173,26 @@ public final class DomainServerMain {
     private static void addCommunicationServices(final ServiceTarget serviceTarget, final String serverName, final String serverProcessName, final byte[] authKey,
             final InetSocketAddress managementSocket, final boolean managementSubsystemEndpoint, final boolean isReconnect) {
 
-
         final ServiceName endpointName;
         if (!managementSubsystemEndpoint) {
             endpointName = ManagementRemotingServices.MANAGEMENT_ENDPOINT;
             if (!isReconnect) {
                 ManagementRemotingServices.installRemotingEndpoint(serviceTarget, ManagementRemotingServices.MANAGEMENT_ENDPOINT,
-                        SecurityActions.getSystemProperty(ServerEnvironment.NODE_NAME), EndpointService.EndpointType.MANAGEMENT, null, null);
+                        SecurityActions.getSystemProperty(ServerEnvironment.NODE_NAME), EndpointService.EndpointType.MANAGEMENT, OptionMap.create(RemotingOptions.RECEIVE_WINDOW_SIZE, ProtocolChannelClient.Configuration.WINDOW_SIZE), null, null);
             }
         } else {
             endpointName = RemotingServices.SUBSYSTEM_ENDPOINT;
         }
 
-        HostControllerConnectionService.install(serviceTarget, endpointName, managementSocket, serverName, authKey);
-
-        final HostControllerServerClient client = new HostControllerServerClient(serverName, serverProcessName);
-        serviceTarget.addService(HostControllerServerClient.SERVICE_NAME, client)
-            .addDependency(HostControllerConnectionService.SERVICE_NAME, ManagementChannel.class, client.getHcChannelInjector())
-            .addDependency(Services.JBOSS_SERVER_CONTROLLER, ModelController.class, client.getServerControllerInjector())
-            .setInitialMode(ServiceController.Mode.ACTIVE)
-            .install();
+        final int port = managementSocket.getPort();
+        final String host = NetworkUtils.formatPossibleIpv6Address(managementSocket.getAddress().getHostAddress());
+        final HostControllerServerClient client = new HostControllerServerClient(serverName, serverProcessName, host, port, authKey);
+                serviceTarget.addService(HostControllerServerClient.SERVICE_NAME, client)
+                    .addDependency(endpointName, Endpoint.class, client.getEndpointInjector())
+                    .addDependency(Services.JBOSS_SERVER_CONTROLLER, ModelController.class, client.getServerControllerInjector())
+                    .addDependency(RemoteFileRepository.SERVICE_NAME, RemoteFileRepository.class, client.getRemoteFileRepositoryInjector())
+                    .setInitialMode(ServiceController.Mode.ACTIVE)
+                    .install();
     }
 
     public static final class HostControllerCommunicationActivator implements ServiceActivator, Serializable {
@@ -234,21 +219,4 @@ public final class DomainServerMain {
         }
     }
 
-    private static final class UninstallListener extends AbstractServiceListener<Object>{
-        private final CountDownLatch latch;
-        private final ServiceName name;
-
-        UninstallListener(CountDownLatch latch, ServiceName name) {
-            this.latch = latch;
-            this.name = name;
-        }
-
-        public void transition(final ServiceController<? extends Object> controller, final ServiceController.Transition transition) {
-            if (transition == ServiceController.Transition.REMOVING_to_REMOVED) {
-                if (controller.getName().equals(name)){
-                    latch.countDown();
-                }
-            }
-        }
-    }
 }

@@ -41,10 +41,12 @@ interface CommonAttributes {
     String OBJECT_STORE_RELATIVE_TO = "object-store-relative-to";
 
     String JTS = "jts";
+    String USEHORNETQSTORE = "use-hornetq-store";
 
     /** The com.arjuna.ats.arjuna.utils.Process implementation type */
     String PROCESS_ID = "process-id";
     String CONFIGURATION = "configuration";
+    String LOG_STORE = "log-store";
     String RECOVERY_ENVIRONMENT = "recovery-environment";
     String RECOVERY_LISTENER = "recovery-listener";
     /** The process-id/socket element */
@@ -64,5 +66,9 @@ interface CommonAttributes {
     String NUMBER_OF_TIMED_OUT_TRANSACTIONS = "number-of-timed-out-transactions";
     String NUMBER_OF_APPLICATION_ROLLBACKS = "number-of-application-rollbacks";
     String NUMBER_OF_RESOURCE_ROLLBACKS = "number-of-resource-rollbacks";
+
+
+    String PARTICIPANT = "participant";
+    String TRANSACTION = "transaction";
     // TODO, process-id/mbean, process-id/file
 }

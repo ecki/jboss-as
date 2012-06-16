@@ -22,27 +22,20 @@
 
 package org.jboss.as.domain.management.security;
 
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.KEYSTORE;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PASSWORD;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PATH;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.PROTOCOL;
 import static org.jboss.as.domain.management.DomainManagementMessages.MESSAGES;
 
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.IOException;
 import java.security.KeyManagementException;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.security.UnrecoverableKeyException;
-import java.security.cert.CertificateException;
 
 import javax.net.ssl.KeyManager;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.TrustManagerFactory;
 
-import org.jboss.dmr.ModelNode;
 import org.jboss.msc.service.Service;
 import org.jboss.msc.service.StartContext;
 import org.jboss.msc.service.StartException;
@@ -58,62 +51,48 @@ public class SSLIdentityService implements Service<SSLIdentityService> {
 
     public static final String SERVICE_SUFFIX = "ssl";
 
-    private final ModelNode ssl;
-    private final String unmaskedPassword;
-    private final InjectedValue<String> relativeTo = new InjectedValue<String>();
+    private final String protocol;
+    private final char[] keystorePassword;
+    private final char[] keyPassword;
+    private final InjectedValue<KeyStore> keystore = new InjectedValue<KeyStore>();
+    private final InjectedValue<KeyStore> truststore = new InjectedValue<KeyStore>();
 
     private volatile SSLContext sslContext;
 
-    public SSLIdentityService(ModelNode ssl, String unmaskedPassword) {
-        this.ssl = ssl;
-        this.unmaskedPassword = unmaskedPassword;
+    public SSLIdentityService(String protocol, char[] keystorePassword, char[] keyPassword) {
+        this.protocol = protocol;
+        this.keystorePassword = keystorePassword;
+        this.keyPassword = keyPassword;
     }
 
     public void start(StartContext context) throws StartException {
         try {
             KeyManager[] keyManagers = null;
-
-            String protocol = "TLS";
-            if (ssl.has(PROTOCOL)) {
-                protocol = ssl.get(PROTOCOL).asString();
-            }
-
-            if (ssl.has(KEYSTORE)) {
-                ModelNode keystoreNode = ssl.get(KEYSTORE);
-
-                String relativeTo = this.relativeTo.getOptionalValue();
-                String path = keystoreNode.require(PATH).asString();
-                String file = relativeTo == null ? path : relativeTo + "/" + path;
-                char[] password = keystoreNode.require(PASSWORD).asString().toCharArray();
-
-                // TODO - Support different KeyStore types?
-                KeyStore keystore = KeyStore.getInstance("JKS");
-                // TODO - Safer way to read from filesystem?
-                FileInputStream fis = new FileInputStream(file);
-                keystore.load(fis, password);
-
-                // TODO - Support configuration of KeyManagerFactory?
-                KeyManagerFactory keyManagerFactory = KeyManagerFactory.getInstance("SunX509");
-                keyManagerFactory.init(keystore, password);
+            KeyStore theKeyStore = keystore.getOptionalValue();
+            if (theKeyStore != null) {
+                KeyManagerFactory keyManagerFactory = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+                keyManagerFactory.init(theKeyStore, keyPassword == null ? keystorePassword : keyPassword);
                 keyManagers = keyManagerFactory.getKeyManagers();
             }
 
+            TrustManager[] trustManagers = null;
+            KeyStore theTrustStore = truststore.getOptionalValue();
+            if (theTrustStore != null) {
+                TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+                trustManagerFactory.init(theTrustStore);
+                trustManagers = trustManagerFactory.getTrustManagers();
+            }
+
             SSLContext sslContext = SSLContext.getInstance(protocol);
-            sslContext.init(keyManagers, null, null);
+            sslContext.init(keyManagers, trustManagers, null);
 
             this.sslContext = sslContext;
-        } catch (NoSuchAlgorithmException nsae) {
+       } catch (NoSuchAlgorithmException nsae) {
             throw MESSAGES.unableToStart(nsae);
         } catch (KeyManagementException kme) {
             throw MESSAGES.unableToStart(kme);
         } catch (KeyStoreException kse) {
             throw MESSAGES.unableToStart(kse);
-        } catch (FileNotFoundException fnfe) {
-            throw MESSAGES.unableToStart(fnfe);
-        } catch (CertificateException e) {
-            throw MESSAGES.unableToStart(e);
-        } catch (IOException e) {
-            throw MESSAGES.unableToStart(e);
         } catch (UnrecoverableKeyException e) {
             throw MESSAGES.unableToStart(e);
         }
@@ -126,12 +105,20 @@ public class SSLIdentityService implements Service<SSLIdentityService> {
         return this;
     }
 
-    public InjectedValue<String> getRelativeToInjector() {
-        return relativeTo;
+    public InjectedValue<KeyStore> getKeyStoreInjector() {
+        return keystore;
+    }
+
+    public InjectedValue<KeyStore> getTrustStoreInjector() {
+        return truststore;
     }
 
     SSLContext getSSLContext() {
         return sslContext;
+    }
+
+    boolean hasTrustStore() {
+        return (truststore.getOptionalValue() != null);
     }
 
 }

@@ -24,7 +24,7 @@ import org.jboss.as.controller.descriptions.DescriptionProvider;
 import org.jboss.as.controller.descriptions.common.DeploymentDescription;
 import org.jboss.as.controller.operations.validation.ParametersValidator;
 import org.jboss.as.controller.operations.validation.StringLengthValidator;
-import org.jboss.as.server.deployment.repository.api.ContentRepository;
+import org.jboss.as.repository.ContentRepository;
 import org.jboss.dmr.ModelNode;
 
 import java.io.IOException;
@@ -35,6 +35,7 @@ import java.util.Locale;
 
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.UPLOAD_DEPLOYMENT_URL;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.URL;
+import static org.jboss.as.domain.controller.DomainControllerMessages.MESSAGES;
 
 /**
  * Handler for the upload-deployment-url operation.
@@ -49,6 +50,16 @@ implements DescriptionProvider {
 
     private final ParametersValidator urlValidator = new ParametersValidator();
 
+    /** Constructor for a slave Host Controller */
+    public DeploymentUploadURLHandler() {
+        this(null);
+    }
+
+    /**
+     * Constructor for a master Host Controller
+     *
+     * @param repository the master content repository. If {@code null} this handler will function as a slave handler would.
+     */
     public DeploymentUploadURLHandler(final ContentRepository repository) {
         super(repository);
         this.urlValidator.registerValidator(URL, new StringLengthValidator(1));
@@ -71,9 +82,9 @@ implements DescriptionProvider {
             URL url = new URL(urlSpec);
             return url.openStream();
         } catch (MalformedURLException e) {
-            throw new OperationFailedException(new ModelNode().set(String.format("%s is not a valid URL -- %s", urlSpec, e.toString())));
+            throw new OperationFailedException(new ModelNode().set(MESSAGES.invalidUrl(urlSpec, e.toString())));
         } catch (IOException e) {
-            throw new OperationFailedException(new ModelNode().set(String.format("Error obtaining input stream from URL %s -- %s", urlSpec, e.toString())));
+            throw new OperationFailedException(new ModelNode().set(MESSAGES.errorObtainingUrlStream(urlSpec, e.toString())));
         }
     }
 

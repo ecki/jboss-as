@@ -23,88 +23,62 @@ package org.jboss.as.test.integration.management.api.web;
 
 import java.io.File;
 import java.io.IOException;
-import org.apache.http.conn.ClientConnectionManager;
-import java.security.cert.CertificateException;
-import java.security.cert.X509Certificate;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.X509TrustManager;
-import org.apache.http.conn.scheme.Scheme;
-import org.apache.http.conn.scheme.SchemeRegistry;
-import org.apache.http.conn.ssl.SSLSocketFactory;
+import java.net.URL;
+import java.util.HashSet;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+
+import org.apache.commons.io.FileUtils;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.HttpClient;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.http.util.EntityUtils;
-import java.util.HashSet;
-import java.util.List;
-import java.net.URL;
-import java.util.concurrent.TimeUnit;
-import org.apache.commons.io.FileUtils;
 import org.jboss.arquillian.container.test.api.Deployment;
+import org.jboss.arquillian.container.test.api.RunAsClient;
+import org.jboss.arquillian.junit.Arquillian;
 import org.jboss.arquillian.test.api.ArquillianResource;
+import org.jboss.as.controller.operations.common.Util;
+import org.jboss.as.test.http.util.HttpClientUtils;
 import org.jboss.as.test.integration.common.HttpRequest;
+import org.jboss.as.test.integration.management.Connector;
+import org.jboss.as.test.integration.management.base.ContainerResourceMgmtTestBase;
 import org.jboss.as.test.integration.management.cli.GlobalOpsTestCase;
+import org.jboss.as.test.integration.management.util.WebUtil;
+import org.jboss.dmr.ModelNode;
 import org.jboss.shrinkwrap.api.Archive;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
 import org.jboss.shrinkwrap.api.spec.JavaArchive;
-import org.jboss.arquillian.container.test.api.RunAsClient;
-import org.jboss.arquillian.junit.Arquillian;
-import org.jboss.as.test.integration.management.api.AbstractMgmtTestBase;
-import org.jboss.dmr.ModelNode;
-import org.junit.AfterClass;
 import org.junit.Before;
-import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import static org.junit.Assert.*;
+
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.COMPOSITE;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.STEPS;
+import static org.jboss.as.test.integration.management.util.ModelUtil.createOpNode;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 /**
- *
  * @author Dominik Pospisil <dpospisi@redhat.com>
  */
 @RunWith(Arquillian.class)
 @RunAsClient
-public class ConnectorTestCase extends AbstractMgmtTestBase {
+public class ConnectorTestCase extends ContainerResourceMgmtTestBase {
 
-    private final File keyStoreFile = new File( System.getProperty("java.io.tmpdir"), "test.keystore");
+    private final File keyStoreFile = new File(System.getProperty("java.io.tmpdir"), "test.keystore");
+    private final File keyPEMFile = new File(System.getProperty("java.io.tmpdir"), "newkey.pem");
+    private final File certPEMFile = new File(System.getProperty("java.io.tmpdir"), "newcert.pem");
+    private boolean isNative = false;
 
-    public enum Connector {
-
-        HTTP("http", "http", "HTTP/1.1", false),
-        HTTPS("http", "https", "HTTP/1.1", true),
-        AJP("ajp", "http", "AJP/1.3", false);
-        private final String name;
-        private final String scheme;
-        private final String protocol;
-        private final boolean secure;
-
-        private Connector(String name, String scheme, String protocol, boolean secure) {
-            this.name = name;
-            this.scheme = scheme;
-            this.protocol = protocol;
-            this.secure = secure;
-        }
-
-        final String getName() {
-            return name;
-        }
-
-        final String getScheme() {
-            return scheme;
-        }
-
-        final String getProtrocol() {
-            return protocol;
-        }
-
-        final boolean isSecure() {
-            return secure;
-        }
-    }
     @ArquillianResource
-    URL url;
+    private URL url;
+
+    /**
+     * We use a different socket binding name for each test, as if the socket is still up the service
+     * will not be removed. Rather than adding a sleep we use this approach
+     */
+    private static int socketBindingCount = 0;
 
     @Deployment
     public static Archive<?> getDeployment() {
@@ -115,12 +89,20 @@ public class ConnectorTestCase extends AbstractMgmtTestBase {
 
     @Before
     public void before() throws IOException {
-        initModelControllerClient(url.getHost(), MGMT_PORT);
-    }
+        try {
+            addConnector(Connector.HTTPNATIVE);
+            isNative = true;
+            removeConnector(Connector.HTTPNATIVE);
+        } catch (Exception ex) {
+            // Assume native not enable on installed.
 
-    @AfterClass
-    public static void after() throws IOException {
-        closeModelControllerClient();
+            try {
+                ModelNode op = getRemoveSocketBindingOp(Connector.HTTPNATIVE);
+                executeOperation(op);
+            } catch (Exception e) {
+                // hmmm
+            }
+        }
     }
 
     @Test
@@ -143,36 +125,83 @@ public class ConnectorTestCase extends AbstractMgmtTestBase {
         String cURL = "http://" + url.getHost() + ":8181";
         String response = HttpRequest.get(cURL, 10, TimeUnit.SECONDS);
         assertTrue("Invalid response: " + response, response.indexOf("JBoss") >= 0);
-
         removeConnector(Connector.HTTP);
+    }
+
+    @Test
+    public void testHttpOtherConnector() throws Exception {
+        if (isNative) {
+            /* test the standard JIO connector too */
+            addConnector(Connector.HTTPJIO);
+
+            // check that the connector is live
+            String cURL = "http://" + url.getHost() + ":8181";
+            String response = HttpRequest.get(cURL, 10, TimeUnit.SECONDS);
+            assertTrue("Invalid response: " + response, response.indexOf("JBoss") >= 0);
+            removeConnector(Connector.HTTPJIO);
+        }
     }
 
     @Test
     public void testHttpsConnector() throws Exception {
 
-
         FileUtils.copyURLToFile(ConnectorTestCase.class.getResource("test.keystore"), keyStoreFile);
 
-        addConnector(Connector.HTTPS);
+        if (isNative)
+            addConnector(Connector.HTTPSJIO);
+        else
+            addConnector(Connector.HTTPS);
 
         // check that the connector is live
         String cURL = "https://" + url.getHost() + ":8181";
-        HttpClient httpClient = wrapClient(new DefaultHttpClient());
+        HttpClient httpClient = HttpClientUtils.wrapHttpsClient(new DefaultHttpClient());
         HttpGet get = new HttpGet(cURL);
 
         HttpResponse hr = httpClient.execute(get);
         String response = EntityUtils.toString(hr.getEntity());
         assertTrue("Invalid response: " + response, response.indexOf("JBoss") >= 0);
 
-        removeConnector(Connector.HTTPS);
+        if (isNative)
+            removeConnector(Connector.HTTPSJIO);
+        else
+            removeConnector(Connector.HTTPS);
 
-        if (keyStoreFile.exists()) keyStoreFile.delete();
+        if (keyStoreFile.exists())
+            keyStoreFile.delete();
+    }
+
+    @Test
+    public void testHttpsNativeConnector() throws Exception {
+        if (isNative) {
+            FileUtils.copyURLToFile(ConnectorTestCase.class.getResource("newkey.pem"), keyPEMFile);
+            FileUtils.copyURLToFile(ConnectorTestCase.class.getResource("newcert.pem"), certPEMFile);
+            addConnector(Connector.HTTPSNATIVE);
+            // check that the connector is live
+            String cURL = "https://" + url.getHost() + ":8181";
+            HttpClient httpClient = HttpClientUtils.wrapHttpsClient(new DefaultHttpClient());
+            HttpGet get = new HttpGet(cURL);
+
+            HttpResponse hr = httpClient.execute(get);
+            String response = EntityUtils.toString(hr.getEntity());
+            assertTrue("Invalid response: " + response, response.indexOf("JBoss") >= 0);
+            removeConnector(Connector.HTTPSNATIVE);
+
+            if (keyPEMFile.exists())
+                keyPEMFile.delete();
+            if (certPEMFile.exists())
+                certPEMFile.delete();
+        }
     }
 
     @Test
     public void testAjpConnector() throws Exception {
         addConnector(Connector.AJP);
         removeConnector(Connector.AJP);
+        if (isNative) {
+            /* Test the JIO connector too */
+            addConnector(Connector.AJPJIO);
+            removeConnector(Connector.AJPJIO);
+        }
     }
 
     @Test
@@ -209,7 +238,7 @@ public class ConnectorTestCase extends AbstractMgmtTestBase {
         // check that the connector is not live
         String cURL = Connector.HTTP.getScheme() + "://" + url.getHost() + ":8181";
 
-        assertTrue("Connector not removed.", testRequestFail(cURL));
+        assertFalse("Connector not removed.", WebUtil.testHttpURL(cURL));
 
         // execute and rollback remove socket binding
         ModelNode removeSocketOp = getRemoveSocketBindingOp(Connector.HTTP);
@@ -235,27 +264,34 @@ public class ConnectorTestCase extends AbstractMgmtTestBase {
     }
 
     private ModelNode getAddSocketBindingOp(Connector conn) {
-        ModelNode op = createOpNode("socket-binding-group=standard-sockets/socket-binding=test-" + conn.getName(), "add");
+        ModelNode op = createOpNode("socket-binding-group=standard-sockets/socket-binding=test-" + conn.getName() + (++socketBindingCount), "add");
         op.get("port").set(8181);
         return op;
     }
 
     private ModelNode getAddConnectorOp(Connector conn) {
+        final ModelNode composite = Util.getEmptyOperation(COMPOSITE, new ModelNode());
+        final ModelNode steps = composite.get(STEPS);
         ModelNode op = createOpNode("subsystem=web/connector=test-" + conn.getName() + "-connector", "add");
-        op.get("socket-binding").set("test-" + conn.getName());
+        op.get("socket-binding").set("test-" + conn.getName() + socketBindingCount);
         op.get("scheme").set(conn.getScheme());
-        op.get("protocol").set(conn.getProtrocol());
+        op.get("protocol").set(conn.getProtocol());
         op.get("secure").set(conn.isSecure());
         op.get("enabled").set(true);
+        steps.add(op);
         if (conn.isSecure()) {
-            ModelNode ssl = new ModelNode();
-            ssl.get("certificate-key-file").set(keyStoreFile.getAbsolutePath());
+            ModelNode ssl = createOpNode("subsystem=web/connector=test-" + conn.getName() + "-connector/ssl=configuration", "add");
+            if (conn.equals(Connector.HTTPSNATIVE)) {
+                ssl.get("certificate-key-file").set(keyPEMFile.getAbsolutePath());
+                ssl.get("certificate-file").set(certPEMFile.getAbsolutePath());
+            } else {
+                ssl.get("certificate-key-file").set(keyStoreFile.getAbsolutePath());
+            }
             ssl.get("password").set("test123");
-            op.get("ssl").set(ssl);
+            steps.add(ssl);
         }
-        return op;
+        return composite;
     }
-
 
     private void removeConnector(Connector conn) throws Exception {
 
@@ -263,12 +299,11 @@ public class ConnectorTestCase extends AbstractMgmtTestBase {
         ModelNode op = getRemoveConnectorOp(conn);
         executeOperation(op);
 
-
         Thread.sleep(5000);
         // check that the connector is not live
         String cURL = conn.getScheme() + "://" + url.getHost() + ":8181";
 
-        assertTrue("Connector not removed.", testRequestFail(cURL));
+        assertFalse("Connector not removed.", WebUtil.testHttpURL(cURL));
 
         // remove socket binding
         op = getRemoveSocketBindingOp(conn);
@@ -277,7 +312,7 @@ public class ConnectorTestCase extends AbstractMgmtTestBase {
     }
 
     private ModelNode getRemoveSocketBindingOp(Connector conn) {
-        ModelNode op = createOpNode("socket-binding-group=standard-sockets/socket-binding=test-" + conn.getName(), "remove");
+        ModelNode op = createOpNode("socket-binding-group=standard-sockets/socket-binding=test-" + conn.getName() + socketBindingCount, "remove");
         return op;
     }
 
@@ -300,31 +335,4 @@ public class ConnectorTestCase extends AbstractMgmtTestBase {
         return connNames;
     }
 
-    public static HttpClient wrapClient(HttpClient base) {
-        try {
-            SSLContext ctx = SSLContext.getInstance("TLS");
-            X509TrustManager tm = new X509TrustManager() {
-
-                public void checkClientTrusted(X509Certificate[] xcs, String string) throws CertificateException {
-                }
-
-                public void checkServerTrusted(X509Certificate[] xcs, String string) throws CertificateException {
-                }
-
-                public X509Certificate[] getAcceptedIssuers() {
-                    return null;
-                }
-            };
-            ctx.init(null, new TrustManager[]{tm}, null);
-            SSLSocketFactory ssf = new SSLSocketFactory(ctx);
-            ssf.setHostnameVerifier(SSLSocketFactory.ALLOW_ALL_HOSTNAME_VERIFIER);
-            ClientConnectionManager ccm = base.getConnectionManager();
-            SchemeRegistry sr = ccm.getSchemeRegistry();
-            sr.register(new Scheme("https", ssf, 443));
-            return new DefaultHttpClient(ccm, base.getParams());
-        } catch (Exception ex) {
-            ex.printStackTrace();
-            return null;
-        }
-    }
 }

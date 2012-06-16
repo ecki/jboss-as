@@ -34,6 +34,7 @@ import org.jboss.as.server.deployment.DeploymentPhaseContext;
 import org.jboss.as.server.deployment.DeploymentUnitProcessingException;
 import org.jboss.invocation.proxy.ProxyFactory;
 import org.jboss.msc.service.ServiceName;
+import org.jboss.msc.value.Value;
 
 /**
  * EJB specific view description.
@@ -87,19 +88,22 @@ public class EJBViewDescription extends ViewDescription {
         if (hasJNDIBindings != that.hasJNDIBindings) return false;
         if (methodIntf != that.methodIntf) return false;
         if (!getViewClassName().equals(that.getViewClassName())) return false;
+        //we compare the components based on ==
+        //as you can have two components with the same name
+        if (getComponentDescription() != that.getComponentDescription()) return false;
 
-        return true;
+        return super.equals(o);
     }
 
     @Override
-    protected InjectionSource createInjectionSource(final ServiceName serviceName) {
+    protected InjectionSource createInjectionSource(final ServiceName serviceName, Value<ClassLoader> viewClassLoader) {
         if(methodIntf != MethodIntf.REMOTE && methodIntf != MethodIntf.HOME) {
-            return super.createInjectionSource(serviceName);
+            return super.createInjectionSource(serviceName, viewClassLoader);
         } else {
             final EJBComponentDescription componentDescription = getComponentDescription();
             final EEModuleDescription desc = componentDescription.getModuleDescription();
             final String earApplicationName = desc.getEarApplicationName();
-            return new RemoteViewInjectionSource(serviceName, earApplicationName, desc.getModuleName(), desc.getDistinctName(), componentDescription.getComponentName(), getViewClassName() , componentDescription.isStateful());
+            return new RemoteViewInjectionSource(serviceName, earApplicationName, desc.getModuleName(), desc.getDistinctName(), componentDescription.getComponentName(), getViewClassName() , componentDescription.isStateful(),viewClassLoader);
         }
     }
 
@@ -118,6 +122,7 @@ public class EJBViewDescription extends ViewDescription {
         int result = methodIntf.hashCode();
         result = 31 * result + (hasJNDIBindings ? 1 : 0);
         result = 31 * result + getViewClassName().hashCode();
+        result = 31 * result + getComponentDescription().getComponentName().hashCode();
         return result;
     }
 

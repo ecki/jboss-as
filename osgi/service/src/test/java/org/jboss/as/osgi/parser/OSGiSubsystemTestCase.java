@@ -21,13 +21,7 @@
  */
 package org.jboss.as.osgi.parser;
 
-import java.io.IOException;
-import java.util.List;
-
 import junit.framework.Assert;
-
-import org.jboss.as.controller.OperationContext;
-import org.jboss.as.controller.OperationContext.Type;
 import org.jboss.as.controller.PathAddress;
 import org.jboss.as.controller.PathElement;
 import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
@@ -37,10 +31,32 @@ import org.jboss.as.subsystem.test.KernelServices;
 import org.jboss.dmr.ModelNode;
 import org.junit.Test;
 
+import java.io.IOException;
+import java.util.List;
+
 /**
+ * Test the subsystem parser
+ *
+ * @author Thomas.Diesler@jboss.com
  * @author David Bosschaert
  */
 public class OSGiSubsystemTestCase extends AbstractSubsystemBaseTest {
+
+    private static final String SUBSYSTEM_XML_1_2 =
+        "<subsystem xmlns='urn:jboss:domain:osgi:1.2' activation='lazy'>" +
+        "  <!-- Some Comment -->" +
+        "  <properties>" +
+        "    <property name='prop1'>val1</property>" +
+        "    <property name='prop2'>" +
+        "       val2a," +
+        "       val2b," +
+        "    </property>" +
+        "  </properties>" +
+        "  <capabilities>" +
+        "    <capability name='org.acme.module2' startlevel='1'/>" +
+        "    <capability name='org.acme.module1'/>" +
+        "  </capabilities>" +
+        "</subsystem>";
 
     private static final String SUBSYSTEM_XML_1_1 =
         "<subsystem xmlns='urn:jboss:domain:osgi:1.1' activation='lazy'>" +
@@ -92,7 +108,7 @@ public class OSGiSubsystemTestCase extends AbstractSubsystemBaseTest {
 
     @Override
     protected String getSubsystemXml() throws IOException {
-        return SUBSYSTEM_XML_1_1;
+        return SUBSYSTEM_XML_1_2;
     }
 
     @Test
@@ -116,33 +132,9 @@ public class OSGiSubsystemTestCase extends AbstractSubsystemBaseTest {
     }
 
     @Test
-    public void testParseSubsystemWithConfiguration() throws Exception {
-        String subsystemXml =
-            "<subsystem xmlns='urn:jboss:domain:osgi:1.1' activation='lazy'>" +
-            "  <configuration pid='org.acme.MyPid'>" +
-            "    <property name='propname' value='propval'/>" +
-            "  </configuration>" +
-            "  <configuration pid='org.acme.MyOtherPid'>" +
-            "    <property name='prop.name' value='prop.val'/>" +
-            "  </configuration>" +
-            "</subsystem>";
-
-        List<ModelNode> operations = parse(subsystemXml);
-        Assert.assertEquals(3, operations.size());
-
-        ModelNode addSubsystem = operations.get(0);
-        Assert.assertEquals(ModelDescriptionConstants.ADD, addSubsystem.get(ModelDescriptionConstants.OP).asString());
-        assertOSGiSubsystemAddress(addSubsystem.get(ModelDescriptionConstants.OP_ADDR));
-        Assert.assertEquals("lazy", addSubsystem.get(ModelConstants.ACTIVATION).asString());
-
-        checkData(operations, 1, ModelConstants.CONFIGURATION, "org.acme.MyPid", ModelConstants.ENTRIES, "{\"propname\" => \"propval\"}");
-        checkData(operations, 2, ModelConstants.CONFIGURATION, "org.acme.MyOtherPid", ModelConstants.ENTRIES, "{\"prop.name\" => \"prop.val\"}");
-    }
-
-    @Test
     public void testParseSubsystemWithProperties() throws Exception {
         String subsystemXml =
-            "<subsystem xmlns='urn:jboss:domain:osgi:1.1' activation='eager'>" +
+            "<subsystem xmlns='urn:jboss:domain:osgi:1.2' activation='eager'>" +
             "  <properties>" +
             "    <property name='org.acme.myProperty'>" +
             "      hi ho" +
@@ -168,7 +160,7 @@ public class OSGiSubsystemTestCase extends AbstractSubsystemBaseTest {
     @Test
     public void testParseSubsystemWithCapabilities() throws Exception {
         String subsystemXml =
-            "<subsystem xmlns='urn:jboss:domain:osgi:1.1' activation='lazy'>" +
+            "<subsystem xmlns='urn:jboss:domain:osgi:1.2' activation='lazy'>" +
             "  <capabilities>" +
             "    <capability name='org.acme.module1'/>" +
             "    <capability name='org.acme.module2' startlevel='1'/>" +
@@ -193,47 +185,32 @@ public class OSGiSubsystemTestCase extends AbstractSubsystemBaseTest {
             "</subsystem>";
 
         ModelNode testModel = new ModelNode();
-        testModel.get(ModelDescriptionConstants.SUBSYSTEM).get(Namespace.CURRENT.getUriString()).setEmptyObject();
+        testModel.get(ModelDescriptionConstants.SUBSYSTEM, OSGiExtension.SUBSYSTEM_NAME).setEmptyObject();
         String triggered = outputModel(testModel);
         Assert.assertEquals(normalizeXML(subsystemXml), normalizeXML(triggered));
     }
 
     @Test
     public void testReadWriteNamespace10() throws Exception {
-        KernelServices services = installInController(new AdditionalInitialization() {
-            @Override
-            protected Type getType() {
-                return Type.MANAGEMENT;
-            }
-        }, SUBSYSTEM_XML_1_0);
+        KernelServices services = installInController(AdditionalInitialization.MANAGEMENT, SUBSYSTEM_XML_1_0);
         ModelNode model = services.readWholeModel();
 
         String marshalled = outputModel(model);
-        Assert.assertEquals(normalizeXML(SUBSYSTEM_XML_1_1), normalizeXML(marshalled));
+        Assert.assertEquals(normalizeXML(SUBSYSTEM_XML_1_2), normalizeXML(marshalled));
     }
 
     @Test
     public void testReadWriteNamespace11() throws Exception {
-        KernelServices services = installInController(new AdditionalInitialization() {
-            @Override
-            protected Type getType() {
-                return Type.MANAGEMENT;
-            }
-        }, SUBSYSTEM_XML_1_1);
+        KernelServices services = installInController(AdditionalInitialization.MANAGEMENT, SUBSYSTEM_XML_1_1);
         ModelNode model = services.readWholeModel();
 
         String marshalled = outputModel(model);
-        Assert.assertEquals(normalizeXML(SUBSYSTEM_XML_1_1), normalizeXML(marshalled));
+        Assert.assertEquals(normalizeXML(SUBSYSTEM_XML_1_2), normalizeXML(marshalled));
     }
 
     @Test
     public void testDescribeHandler() throws Exception {
-        KernelServices servicesA = installInController(new AdditionalInitialization() {
-            @Override
-            protected Type getType() {
-                return Type.MANAGEMENT;
-            }
-        }, SUBSYSTEM_XML_1_1);
+        KernelServices servicesA = installInController(AdditionalInitialization.MANAGEMENT, SUBSYSTEM_XML_1_2);
         ModelNode modelA = servicesA.readWholeModel();
         ModelNode describeOp = new ModelNode();
         describeOp.get(ModelDescriptionConstants.OP).set(ModelDescriptionConstants.DESCRIBE);
@@ -241,12 +218,7 @@ public class OSGiSubsystemTestCase extends AbstractSubsystemBaseTest {
                 PathAddress.pathAddress(PathElement.pathElement(ModelDescriptionConstants.SUBSYSTEM, OSGiExtension.SUBSYSTEM_NAME)).toModelNode());
         List<ModelNode> operations = checkResultAndGetContents(servicesA.executeOperation(describeOp)).asList();
 
-        KernelServices servicesB = installInController(new AdditionalInitialization() {
-            @Override
-            public Type getType() {
-                return Type.MANAGEMENT;
-            }
-        }, operations);
+        KernelServices servicesB = installInController(AdditionalInitialization.MANAGEMENT, operations);
         ModelNode modelB = servicesB.readWholeModel();
 
         compare(modelA, modelB);
@@ -272,12 +244,6 @@ public class OSGiSubsystemTestCase extends AbstractSubsystemBaseTest {
     }
 
     protected AdditionalInitialization createAdditionalInitialization() {
-        return new AdditionalInitialization(){
-            @Override
-            protected OperationContext.Type getType() {
-                return OperationContext.Type.MANAGEMENT;
-            }
-        };
+        return AdditionalInitialization.MANAGEMENT;
     }
-
 }

@@ -25,10 +25,13 @@ package org.jboss.as.service;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
 
-import org.jboss.as.server.deployment.DeploymentUnitProcessingException;
 import org.jboss.as.server.deployment.reflect.ClassReflectionIndex;
+import org.jboss.as.server.deployment.reflect.DeploymentReflectionIndex;
 
 /**
  * Reflection utility methods.
@@ -41,86 +44,99 @@ final class ReflectionUtils {
         // forbidden instantiation
     }
 
-    static Method getGetter(final ClassReflectionIndex<?> classIndex, final String propertyName) {
+    static Method getGetter(final List<ClassReflectionIndex<?>> classHierarchy, final String propertyName) {
         final String getterName = "get" + Character.toUpperCase(propertyName.charAt(0)) + propertyName.substring(1);
         final String iserName = "is" + Character.toUpperCase(propertyName.charAt(0)) + propertyName.substring(1);
-        final Iterator<Method> methods = classIndex.getMethods().iterator();
-        Method method = null;
-        String methodName = null;
-        while (methods.hasNext()) {
-            method = methods.next();
-            methodName = method.getName();
-            if ((getterName.equals(methodName) || iserName.equals(methodName)) && method.getParameterTypes().length == 0) {
-                return method;
+
+        for (final ClassReflectionIndex<?> classIndex : classHierarchy) {
+            final Iterator<Method> methods = classIndex.getMethods().iterator();
+            Method method = null;
+            String methodName = null;
+            while (methods.hasNext()) {
+                method = methods.next();
+                methodName = method.getName();
+                if ((getterName.equals(methodName) || iserName.equals(methodName)) && method.getParameterTypes().length == 0) {
+                    return method;
+                }
             }
         }
 
-        throw new IllegalStateException("No such get method for property '" + propertyName + "' found on " + classIndex.getIndexedClass());
+        final String className = classHierarchy.get(0).getIndexedClass().getName();
+        throw SarMessages.MESSAGES.propertyMethodNotFound("Get", propertyName, className);
     }
 
-    static Method getSetter(final ClassReflectionIndex<?> classIndex, final String propertyName) {
+    static Method getSetter(final List<ClassReflectionIndex<?>> classHierarchy, final String propertyName) {
         final String setterName = "set" + Character.toUpperCase(propertyName.charAt(0)) + propertyName.substring(1);
 
-        final Iterator<Method> methods = classIndex.getMethods().iterator();
-        Method method = null;
-        String methodName = null;
-        while (methods.hasNext()) {
-            method = methods.next();
-            methodName = method.getName();
-            if (setterName.equals(methodName) && method.getParameterTypes().length == 1) {
-                return method;
+        for (final ClassReflectionIndex<?> classIndex : classHierarchy) {
+            final Iterator<Method> methods = classIndex.getMethods().iterator();
+            Method method = null;
+            String methodName = null;
+            while (methods.hasNext()) {
+                method = methods.next();
+                methodName = method.getName();
+                if (setterName.equals(methodName) && method.getParameterTypes().length == 1) {
+                    return method;
+                }
             }
         }
 
-        throw new IllegalStateException("No such set method for property '" + propertyName + "' found on " + classIndex.getIndexedClass());
+        final String className = classHierarchy.get(0).getIndexedClass().getName();
+        throw SarMessages.MESSAGES.propertyMethodNotFound("Set", propertyName, className);
     }
 
-    static Method getMethod(final ClassReflectionIndex<?> classIndex, final String methodName, final Class<?>[] types, final boolean fail) {
-        final Collection<Method> methods = classIndex.getMethods(methodName, types);
-        if (methods.size() == 1) {
-            return methods.iterator().next();
+    static Method getMethod(final List<ClassReflectionIndex<?>> classHierarchy, final String methodName, final Class<?>[] types, final boolean fail) {
+        for (final ClassReflectionIndex<?> classIndex : classHierarchy) {
+            final Collection<Method> methods = classIndex.getMethods(methodName, types);
+            if (methods.size() == 1) {
+                return methods.iterator().next();
+            }
         }
         if (fail) {
-            throw new IllegalStateException(noSuchMethod(classIndex, methodName, types));
+            final String className = classHierarchy.get(0).getIndexedClass().getName();
+            throw SarMessages.MESSAGES.methodNotFound(methodName, parameterList(types), className);
         } else {
             return null;
         }
     }
 
-    static Object newInstance(final Constructor<?> constructor, final Object[] args) throws DeploymentUnitProcessingException {
+    static Object newInstance(final Constructor<?> constructor, final Object[] args) {
         try {
             return constructor.newInstance(args);
         } catch (Exception e) {
-            throw new DeploymentUnitProcessingException("Component class not instantiated", e);
+            throw SarMessages.MESSAGES.classNotInstantiated(e);
         }
     }
 
-    static Class<?> getClass(final String className, final ClassLoader classLoader) throws DeploymentUnitProcessingException {
+    static Class<?> getClass(final String className, final ClassLoader classLoader) {
         try {
             return Class.forName(className, false, classLoader);
-        } catch (ClassNotFoundException e) {
-            throw new DeploymentUnitProcessingException("Component class not found", e);
+        } catch (final ClassNotFoundException e) {
+            throw SarMessages.MESSAGES.classNotFound(e);
         }
     }
 
-    private static String noSuchMethod(final ClassReflectionIndex<?> classIndex, final String methodName, final Class<?>[] parameterTypes) {
-        StringBuffer message = new StringBuffer();
-        message.append("No such method '");
-        message.append(methodName);
-        appendParameterList(message, parameterTypes);
-        message.append("' found on ").append(classIndex.getIndexedClass());
-        return message.toString();
+    static List<ClassReflectionIndex<?>> getClassHierarchy(final String className, final DeploymentReflectionIndex index, final ClassLoader classLoader) {
+        final List<ClassReflectionIndex<?>> retVal = new LinkedList<ClassReflectionIndex<?>>();
+
+        Class<?> temp = getClass(className, classLoader);
+        while (temp != null) {
+            retVal.add(index.getClassIndex(temp));
+            temp = temp.getSuperclass();
+        }
+
+        return Collections.unmodifiableList(retVal);
     }
 
-    private static void appendParameterList(final StringBuffer stringBuffer, final Class<?>[] parameterTypes) {
-        stringBuffer.append('(');
+    private static String parameterList(final Class<?>[] parameterTypes) {
+        final StringBuilder result = new StringBuilder();
         if (parameterTypes != null && parameterTypes.length > 0) {
-            stringBuffer.append(parameterTypes[0]);
+            result.append(parameterTypes[0]);
             for (int i = 1; i < parameterTypes.length; i++) {
-                stringBuffer.append(", ").append(parameterTypes[i]);
+                result.append(", ").append(parameterTypes[i]);
             }
         }
-        stringBuffer.append(')');
+        return result.toString();
     }
 
 }

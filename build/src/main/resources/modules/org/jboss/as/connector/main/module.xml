@@ -23,6 +23,9 @@
   -->
 
 <module xmlns="urn:jboss:module:1.1" name="org.jboss.as.connector">
+    <properties>
+        <property name="jboss.api" value="private"/>
+    </properties>
 
     <resources>
         <!-- Insert resources here -->
@@ -33,6 +36,8 @@
         <module name="javax.resource.api"/>
         <module name="javax.transaction.api"/>
         <module name="javax.annotation.api"/>
+        <module name="javax.validation.api"/>
+        <module name="org.hibernate.validator"/>
         <module name="org.jboss.as.controller"/>
         <module name="org.jboss.as.naming"/>
         <module name="org.jboss.as.server" />

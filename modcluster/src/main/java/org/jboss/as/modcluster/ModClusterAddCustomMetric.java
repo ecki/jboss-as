@@ -22,90 +22,33 @@
 
 package org.jboss.as.modcluster;
 
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Locale;
-
+import org.jboss.as.controller.AttributeDefinition;
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.PathAddress;
-import org.jboss.as.controller.descriptions.DescriptionProvider;
+import org.jboss.as.controller.PathElement;
+import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
+import org.jboss.as.controller.operations.common.Util;
 import org.jboss.dmr.ModelNode;
-import org.jboss.dmr.Property;
 
-import static org.jboss.as.modcluster.ModClusterMessages.MESSAGES;
-
-// implements ModelQueryOperationHandler, DescriptionProvider
-public class ModClusterAddCustomMetric implements OperationStepHandler, DescriptionProvider{
+public class ModClusterAddCustomMetric implements OperationStepHandler {
 
     static final ModClusterAddCustomMetric INSTANCE = new ModClusterAddCustomMetric();
 
-    @Override
-    public ModelNode getModelDescription(Locale locale) {
-        return ModClusterSubsystemDescriptions.getAddCustomMetricDescription(locale);
-    }
 
     @Override
-    public void execute(OperationContext context, ModelNode operation)
-            throws OperationFailedException {
-        if (context.getType() == OperationContext.Type.SERVER) {
-            context.addStep(new OperationStepHandler() {
-                @Override
-                public void execute(OperationContext context, ModelNode operation) throws OperationFailedException {
+    public void execute(OperationContext context, ModelNode operation) throws OperationFailedException {
+        PathAddress opAddress = PathAddress.pathAddress(operation.get(ModelDescriptionConstants.OP_ADDR));
+        PathAddress parent = opAddress.append(ModClusterExtension.DYNAMIC_LOAD_PROVIDER);
+        String name = CustomLoadMetricDefinition.CLASS.resolveModelAttribute(context, operation).asString();
 
-                    // Look for the dynamic-load-provider
-                    final ModelNode dynamicLoadProvider = context.readResourceForUpdate(PathAddress.EMPTY_ADDRESS).getModel().get(CommonAttributes.DYNAMIC_LOAD_PROVIDER);
+        ModelNode targetOperation = Util.createAddOperation(parent.append(PathElement.pathElement(ModClusterExtension.CUSTOM_LOAD_METRIC.getKey(), name)));
 
-                    // Add the metric to the dynamic-load-provider.
-                    final ModelNode metric = new ModelNode();
-                    List<Property> list = operation.asPropertyList();
-                    Iterator<Property> it = list.iterator();
-                    while(it.hasNext()) {
-                        Property prop = it.next();
-                        if (prop.getName().equals("property")) {
-                            String properties = prop.getValue().asString();
-                            ModelNode props =  ModelNode.fromString(properties);
-                            metric.get("property").set(props);
-                        } else {
-                            metric.get(prop.getName()).set(prop.getValue().asString());
-                        }
-                    }
-                    if (!metric.get("class").isDefined()) {
-                        throw new OperationFailedException(new ModelNode().set(MESSAGES.classAttributeRequired("add-custom-metric")));
-                    }
-                    if (!dynamicLoadProvider.isDefined()) {
-                        // Create a default one.
-                        dynamicLoadProvider.get(CommonAttributes.HISTORY).set(9);
-                        dynamicLoadProvider.get(CommonAttributes.DECAY).set(2);
-                    }
-                    replaceMetric(dynamicLoadProvider, metric);
-
-                    context.completeStep();
-                }
-
-                private void replaceMetric(ModelNode dynamicLoadProvider, ModelNode metric) {
-                    List<ModelNode> newlist = Collections.<ModelNode>emptyList();
-                    if (dynamicLoadProvider.get(CommonAttributes.CUSTOM_LOAD_METRIC).isDefined()) {
-                        String classname = metric.get("class").asString();
-                        List<ModelNode> list = dynamicLoadProvider.get(CommonAttributes.CUSTOM_LOAD_METRIC).asList();
-                        Iterator<ModelNode> it = list.iterator();
-                        dynamicLoadProvider.get(CommonAttributes.CUSTOM_LOAD_METRIC).set(newlist);
-                        while(it.hasNext()) {
-                            ModelNode node = it.next();
-                            if (!node.get("class").asString().equals(classname)) {
-                                dynamicLoadProvider.get(CommonAttributes.CUSTOM_LOAD_METRIC).add(node);
-                            }
-                        }
-                    } else {
-                        dynamicLoadProvider.get(CommonAttributes.CUSTOM_LOAD_METRIC).set(newlist);
-                    }
-                    dynamicLoadProvider.get(CommonAttributes.CUSTOM_LOAD_METRIC).add(metric);
-                }
-            }, OperationContext.Stage.MODEL);
+        for (AttributeDefinition def : LoadMetricDefinition.ATTRIBUTES) {
+            def.validateAndSet(operation, targetOperation);
         }
-
-        context.completeStep();
+        context.addStep(targetOperation, CustomLoadMetricAdd.INSTANCE, OperationContext.Stage.IMMEDIATE);
+        context.completeStep(OperationContext.RollbackHandler.NOOP_ROLLBACK_HANDLER);
     }
 }

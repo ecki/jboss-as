@@ -22,25 +22,8 @@
 
 package org.jboss.as.connector.subsystems.datasources;
 
-import static org.jboss.as.connector.ConnectorLogger.DS_DEPLOYER_LOGGER;
-import static org.jboss.as.connector.ConnectorMessages.MESSAGES;
-
-import java.net.MalformedURLException;
-import java.net.URL;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
-import java.sql.Driver;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
-import javax.resource.ResourceException;
-import javax.resource.spi.ManagedConnectionFactory;
-import javax.sql.DataSource;
-
-import org.jboss.as.connector.registry.DriverRegistry;
-import org.jboss.as.connector.registry.InstalledDriver;
+import org.jboss.as.connector.services.driver.InstalledDriver;
+import org.jboss.as.connector.services.driver.registry.DriverRegistry;
 import org.jboss.as.connector.util.Injection;
 import org.jboss.jca.adapters.jdbc.BaseWrapperManagedConnectionFactory;
 import org.jboss.jca.adapters.jdbc.local.LocalManagedConnectionFactory;
@@ -58,6 +41,7 @@ import org.jboss.jca.common.api.metadata.ra.ConfigProperty;
 import org.jboss.jca.common.api.validator.ValidateException;
 import org.jboss.jca.common.metadata.ds.DatasourcesImpl;
 import org.jboss.jca.common.metadata.ds.DriverImpl;
+import org.jboss.jca.core.api.connectionmanager.ccm.CachedConnectionManager;
 import org.jboss.jca.core.api.management.ManagementRepository;
 import org.jboss.jca.core.connectionmanager.ConnectionManager;
 import org.jboss.jca.core.spi.mdr.NotFoundException;
@@ -77,6 +61,23 @@ import org.jboss.msc.service.StopContext;
 import org.jboss.msc.value.InjectedValue;
 import org.jboss.security.SubjectFactory;
 
+import javax.naming.Reference;
+import javax.resource.ResourceException;
+import javax.resource.spi.ManagedConnectionFactory;
+import javax.sql.DataSource;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
+import java.sql.Driver;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import static org.jboss.as.connector.logging.ConnectorLogger.DS_DEPLOYER_LOGGER;
+import static org.jboss.as.connector.logging.ConnectorMessages.MESSAGES;
+
 /**
  * Base service for managing a data-source.
  * @author John Bailey
@@ -91,14 +92,21 @@ public abstract class AbstractDataSourceService implements Service<DataSource> {
     private final InjectedValue<ManagementRepository> managementRepositoryValue = new InjectedValue<ManagementRepository>();
     private final InjectedValue<SubjectFactory> subjectFactory = new InjectedValue<SubjectFactory>();
     private final InjectedValue<DriverRegistry> driverRegistry = new InjectedValue<DriverRegistry>();
+    private final InjectedValue<CachedConnectionManager> ccmValue = new InjectedValue<CachedConnectionManager>();
 
     private final String jndiName;
 
     protected CommonDeployment deploymentMD;
     private javax.sql.DataSource sqlDataSource;
 
-    protected AbstractDataSourceService(final String jndiName) {
+    /**
+     * The class loader to use. If null the Driver class loader will be used instead.
+     */
+    private final ClassLoader classLoader;
+
+    protected AbstractDataSourceService(final String jndiName, final ClassLoader classLoader) {
         this.jndiName = jndiName;
+        this.classLoader = classLoader;
     }
 
     public synchronized void start(StartContext startContext) throws StartException {
@@ -137,6 +145,10 @@ public abstract class AbstractDataSourceService implements Service<DataSource> {
         sqlDataSource = null;
     }
 
+    public CommonDeployment getDeploymentMD() {
+        return deploymentMD;
+    }
+
     public synchronized DataSource getValue() throws IllegalStateException, IllegalArgumentException {
         return sqlDataSource;
     }
@@ -149,7 +161,7 @@ public abstract class AbstractDataSourceService implements Service<DataSource> {
         return driverValue;
     }
 
-    public Injector<ManagementRepository> getmanagementRepositoryInjector() {
+    public Injector<ManagementRepository> getManagementRepositoryInjector() {
         return managementRepositoryValue;
     }
 
@@ -159,6 +171,10 @@ public abstract class AbstractDataSourceService implements Service<DataSource> {
 
     public Injector<SubjectFactory> getSubjectFactoryInjector() {
         return subjectFactory;
+    }
+
+    public Injector<CachedConnectionManager> getCcmInjector() {
+        return ccmValue;
     }
 
     protected String buildConfigPropsString(Map<String, String> configProps) {
@@ -181,6 +197,13 @@ public abstract class AbstractDataSourceService implements Service<DataSource> {
         }
     }
 
+    private ClassLoader driverClassLoader() {
+        if(classLoader != null) {
+            return classLoader;
+        }
+        return driverValue.getValue().getClass().getClassLoader();
+    }
+
     private static final SetContextLoaderAction CLEAR_ACTION = new SetContextLoaderAction(null);
 
     private static class SetContextLoaderAction implements PrivilegedAction<Void> {
@@ -200,8 +223,8 @@ public abstract class AbstractDataSourceService implements Service<DataSource> {
     protected class AS7DataSourceDeployer extends AbstractDsDeployer {
 
         private final org.jboss.jca.common.api.metadata.ds.DataSource dataSourceConfig;
-
         private final XaDataSource xaDataSourceConfig;
+
         private ServiceContainer serviceContainer;
 
         public AS7DataSourceDeployer(XaDataSource xaDataSourceConfig) {
@@ -240,8 +263,8 @@ public abstract class AbstractDataSourceService implements Service<DataSource> {
                                 moduleName, installedDriver.getDriverClassName(),
                                 installedDriver.getDataSourceClassName(), installedDriver.getXaDataSourceClassName());
                         drivers.put(driverName, driver);
-                        dataSources = new DatasourcesImpl(Arrays.asList(dataSourceConfig), null, drivers);
                     }
+                    dataSources = new DatasourcesImpl(Arrays.asList(dataSourceConfig), null, drivers);
                 } else if (xaDataSourceConfig != null) {
                     String driverName = xaDataSourceConfig.getDriver();
                     InstalledDriver installedDriver = driverRegistry.getValue().getInstalledDriver(driverName);
@@ -253,8 +276,8 @@ public abstract class AbstractDataSourceService implements Service<DataSource> {
                                 installedDriver.getDriverClassName(),
                                 installedDriver.getDataSourceClassName(), installedDriver.getXaDataSourceClassName());
                         drivers.put(driverName, driver);
-                        dataSources = new DatasourcesImpl(null, Arrays.asList(xaDataSourceConfig), drivers);
                     }
+                    dataSources = new DatasourcesImpl(null, Arrays.asList(xaDataSourceConfig), drivers);
                 }
 
                 CommonDeployment c = createObjectsAndInjectValue(new URL("file://DataSourceDeployment"), jndiName,
@@ -270,12 +293,17 @@ public abstract class AbstractDataSourceService implements Service<DataSource> {
 
         @Override
         protected ClassLoader getDeploymentClassLoader(String uniqueId) {
-            return driverValue.getValue().getClass().getClassLoader();
+            return driverClassLoader();
         }
 
         @Override
         protected String[] bindConnectionFactory(String deployment, final String jndi, Object cf) throws Throwable {
-            // don't register because it's one durin add operation
+            // AS7-2222: Just hack it
+            if (cf instanceof javax.resource.Referenceable) {
+                ((javax.resource.Referenceable)cf).setReference(new Reference(jndi));
+            }
+
+            // don't register because it's one during add operation
             return new String[] { jndi };
         }
 
@@ -322,6 +350,11 @@ public abstract class AbstractDataSourceService implements Service<DataSource> {
         }
 
         @Override
+        public CachedConnectionManager getCachedConnectionManager() {
+            return ccmValue.getValue();
+        }
+
+        @Override
         public ManagementRepository getManagementRepository() {
             return managementRepositoryValue.getValue();
         }
@@ -333,7 +366,7 @@ public abstract class AbstractDataSourceService implements Service<DataSource> {
 
                 @Override
                 public ClassLoader getClassLoader() {
-                    return driverValue.getValue().getClass().getClassLoader();
+                    return driverClassLoader();
                 }
             });
         }
@@ -395,6 +428,15 @@ public abstract class AbstractDataSourceService implements Service<DataSource> {
             final LocalManagedConnectionFactory managedConnectionFactory = new LocalManagedConnectionFactory();
             managedConnectionFactory.setUserTransactionJndiName("java:comp/UserTransaction");
             managedConnectionFactory.setDriverClass(dataSourceConfig.getDriverClass());
+
+            if (dataSourceConfig.getUrlDelimiter() != null) {
+                try {
+                    managedConnectionFactory.setURLDelimiter(dataSourceConfig.getUrlDelimiter());
+                } catch (Exception e) {
+                    throw MESSAGES.failedToGetUrlDelimiter(e);
+                }
+            }
+
             if (dataSourceConfig.getDataSourceClass() != null) {
                 managedConnectionFactory.setDataSourceClass(dataSourceConfig.getDataSourceClass());
             }
@@ -443,6 +485,9 @@ public abstract class AbstractDataSourceService implements Service<DataSource> {
                 }
                 if (timeOut.getQueryTimeout() != null) {
                     managedConnectionFactory.setQueryTimeout(timeOut.getQueryTimeout().intValue());
+                }
+                if (timeOut.isSetTxQueryTimeout()) {
+                    managedConnectionFactory.setTransactionQueryTimeout(true);
                 }
             }
 

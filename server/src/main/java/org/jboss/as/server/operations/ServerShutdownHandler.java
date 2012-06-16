@@ -22,12 +22,16 @@
 
 package org.jboss.as.server.operations;
 
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RESTART;
+
 import java.util.Locale;
 
+import org.jboss.as.controller.ControlledProcessState;
 import org.jboss.as.controller.OperationContext;
-import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.OperationFailedException;
+import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.descriptions.DescriptionProvider;
+import org.jboss.as.process.ExitCodes;
 import org.jboss.as.server.controller.descriptions.ServerRootDescription;
 import org.jboss.dmr.ModelNode;
 
@@ -39,20 +43,24 @@ import org.jboss.dmr.ModelNode;
 public class ServerShutdownHandler implements OperationStepHandler, DescriptionProvider {
 
     public static final String OPERATION_NAME = "shutdown";
-    public static final ServerShutdownHandler INSTANCE = new ServerShutdownHandler();
 
-    private ServerShutdownHandler() {
+    private final ControlledProcessState processState;
+
+    public ServerShutdownHandler(ControlledProcessState processState) {
+        this.processState = processState;
     }
 
     /** {@inheritDoc} */
     @Override
     public void execute(OperationContext context, ModelNode operation) throws OperationFailedException {
+        final boolean restart = operation.hasDefined(RESTART) ? operation.get(RESTART).asBoolean() : false;
         context.addStep(new OperationStepHandler() {
             @Override
             public void execute(OperationContext context, ModelNode operation) throws OperationFailedException {
+                processState.setStopping();
                 final Thread thread = new Thread(new Runnable() {
                     public void run() {
-                        System.exit(0);
+                        System.exit(restart ? ExitCodes.RESTART_PROCESS_FROM_STARTUP_SCRIPT : 0);
                     }
                 });
                 // The intention is that this shutdown is graceful, and so the client gets a reply.

@@ -22,6 +22,10 @@
 
 package org.jboss.as.server.deployment.module;
 
+import java.util.List;
+import java.util.jar.Manifest;
+
+import org.jboss.as.server.ServerMessages;
 import org.jboss.as.server.deployment.Attachments;
 import org.jboss.as.server.deployment.DeploymentPhaseContext;
 import org.jboss.as.server.deployment.DeploymentUnit;
@@ -32,9 +36,7 @@ import org.jboss.as.server.moduleservice.ServiceModuleLoader;
 import org.jboss.modules.Module;
 import org.jboss.modules.ModuleIdentifier;
 import org.jboss.modules.ModuleLoader;
-
-import java.util.List;
-import java.util.jar.Manifest;
+import org.jboss.modules.filter.PathFilters;
 
 /**
  * Deployment unit processor that will extract module dependencies from an and attach them.
@@ -50,6 +52,7 @@ public final class ManifestDependencyProcessor implements DeploymentUnitProcesso
     private static final String OPTIONAL_PARAM = "optional";
     private static final String SERVICES_PARAM = "services";
     private static final String ANNOTATIONS_PARAM = "annotations";
+    private static final String META_INF = "meta-inf";
 
     /**
      * Process the deployment root for module dependency information.
@@ -75,7 +78,7 @@ public final class ManifestDependencyProcessor implements DeploymentUnitProcesso
             for (final String dependencyDef : dependencyDefs) {
                 final String[] dependencyParts = dependencyDef.trim().split(" ");
                 if (dependencyParts.length == 0) {
-                    throw new RuntimeException("Invalid dependency: " + dependencyString);
+                    throw ServerMessages.MESSAGES.invalidDependency(dependencyString);
                 }
 
                 final ModuleIdentifier dependencyId = ModuleIdentifier.fromString(dependencyParts[0]);
@@ -83,6 +86,7 @@ public final class ManifestDependencyProcessor implements DeploymentUnitProcesso
                 final boolean optional = containsParam(dependencyParts, OPTIONAL_PARAM);
                 final boolean services = containsParam(dependencyParts, SERVICES_PARAM);
                 final boolean annotations = containsParam(dependencyParts, ANNOTATIONS_PARAM);
+                final boolean metaInf = containsParam(dependencyParts, META_INF);
                 final ModuleLoader dependencyLoader;
                 if (dependencyId.getName().startsWith("deployment.")) {
                     dependencyLoader = deploymentModuleLoader;
@@ -93,7 +97,10 @@ public final class ManifestDependencyProcessor implements DeploymentUnitProcesso
                     deploymentUnit.addToAttachmentList(Attachments.ADDITIONAL_ANNOTATION_INDEXES, dependencyId);
                 }
 
-                final ModuleDependency dependency = new ModuleDependency(dependencyLoader, dependencyId, optional, export, services);
+                final ModuleDependency dependency = new ModuleDependency(dependencyLoader, dependencyId, optional, export, services, true);
+                if(metaInf) {
+                    dependency.addImportFilter(PathFilters.getMetaInfSubdirectoriesFilter(), true);
+                }
                 deploymentUnit.addToAttachmentList(Attachments.MANIFEST_DEPENDENCIES, dependency);
             }
         }

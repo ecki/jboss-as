@@ -22,7 +22,7 @@
 
 package org.jboss.as.clustering.infinispan.subsystem;
 
-import org.infinispan.config.Configuration.CacheMode;
+import org.infinispan.configuration.cache.CacheMode;
 
 /**
  * @author Paul Ferraro
@@ -50,6 +50,7 @@ public enum Mode {
 
     @Override
     public String toString() {
-        return this.name().toLowerCase();
+        // remove conversion to lower case (AS7-3478)
+         return this.name();
     }
 }

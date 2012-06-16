@@ -43,12 +43,16 @@ public enum Namespace {
     // domain versions, oldest to newest
     DOMAIN_1_0("urn:jboss:domain:1.0"),
 
-    DOMAIN_1_1("urn:jboss:domain:1.1"), ;
+    DOMAIN_1_1("urn:jboss:domain:1.1"),
+
+    DOMAIN_1_2("urn:jboss:domain:1.2"),
+
+    DOMAIN_1_3("urn:jboss:domain:1.3") ;
 
     /**
      * The current namespace version.
      */
-    public static final Namespace CURRENT = DOMAIN_1_1;
+    public static final Namespace CURRENT = DOMAIN_1_3;
 
     private final String name;
 
@@ -89,4 +93,19 @@ public enum Namespace {
         final Namespace element = MAP.get(uri);
         return element == null ? UNKNOWN : element;
     }
+
+    public static Namespace[] domainValues() {
+        Namespace[] temp = values();
+        // The 3 is for the 3 namespaces excluded below.
+        Namespace[] response = new Namespace[temp.length - 3];
+        int nextPos = 0;
+        for (Namespace current : temp) {
+            if (current != UNKNOWN && current != NONE && current != XML_SCHEMA_INSTANCE) {
+                response[nextPos++] = current;
+            }
+        }
+
+        return response;
+    }
+
 }

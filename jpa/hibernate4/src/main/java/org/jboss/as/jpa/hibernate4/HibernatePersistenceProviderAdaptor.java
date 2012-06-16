@@ -22,8 +22,8 @@
 
 package org.jboss.as.jpa.hibernate4;
 
-import java.util.ArrayList;
 import java.util.Map;
+import java.util.Properties;
 
 import org.hibernate.cfg.AvailableSettings;
 import org.hibernate.cfg.Configuration;
@@ -32,9 +32,9 @@ import org.jboss.as.jpa.spi.JtaManager;
 import org.jboss.as.jpa.spi.ManagementAdaptor;
 import org.jboss.as.jpa.spi.PersistenceProviderAdaptor;
 import org.jboss.as.jpa.spi.PersistenceUnitMetadata;
-import org.jboss.as.naming.deployment.ContextNames;
-import org.jboss.as.naming.deployment.JndiName;
-import org.jboss.msc.service.ServiceName;
+import org.jboss.msc.service.ServiceBuilder;
+import org.jboss.msc.service.ServiceRegistry;
+import org.jboss.msc.service.ServiceTarget;
 
 /**
  * Implements the PersistenceProviderAdaptor for Hibernate
@@ -43,66 +43,41 @@ import org.jboss.msc.service.ServiceName;
  */
 public class HibernatePersistenceProviderAdaptor implements PersistenceProviderAdaptor {
 
-
     private volatile JBossAppServerJtaPlatform appServerJtaPlatform;
-    private final HibernateManagementAdaptor hibernateManagementAdaptor = new HibernateManagementAdaptor();
 
     @Override
     public void injectJtaManager(JtaManager jtaManager) {
         appServerJtaPlatform = new JBossAppServerJtaPlatform(jtaManager);
     }
 
+    @SuppressWarnings("deprecation")
     @Override
     public void addProviderProperties(Map properties, PersistenceUnitMetadata pu) {
-        putPropertyIfAbsent(properties, Configuration.USE_NEW_ID_GENERATOR_MAPPINGS, "true");
-        putPropertyIfAbsent(properties, org.hibernate.ejb.AvailableSettings.SCANNER, "org.jboss.as.jpa.hibernate4.HibernateAnnotationScanner");
+        putPropertyIfAbsent(pu, properties, Configuration.USE_NEW_ID_GENERATOR_MAPPINGS, "true");
+        putPropertyIfAbsent(pu, properties, org.hibernate.ejb.AvailableSettings.SCANNER, HibernateAnnotationScanner.class.getName());
         properties.put(AvailableSettings.APP_CLASSLOADER, pu.getClassLoader());
-        putPropertyIfAbsent(properties, AvailableSettings.JTA_PLATFORM, appServerJtaPlatform);
+        putPropertyIfAbsent(pu, properties, AvailableSettings.JTA_PLATFORM, appServerJtaPlatform);
         properties.remove(AvailableSettings.TRANSACTION_MANAGER_STRATEGY);  // remove legacy way of specifying TX manager (conflicts with JTA_PLATFORM)
+        putPropertyIfAbsent(pu,properties, org.hibernate.ejb.AvailableSettings.ENTITY_MANAGER_FACTORY_NAME, pu.getScopedPersistenceUnitName());
+        putPropertyIfAbsent(pu, properties, AvailableSettings.SESSION_FACTORY_NAME, pu.getScopedPersistenceUnitName());
+        if (!pu.getProperties().containsKey(AvailableSettings.SESSION_FACTORY_NAME)) {
+            putPropertyIfAbsent(pu, properties, AvailableSettings.SESSION_FACTORY_NAME_IS_JNDI, Boolean.FALSE);
+        }
     }
 
     @Override
-    public Iterable<ServiceName> getProviderDependencies(PersistenceUnitMetadata pu) {
-        //
-        String cacheManager = pu.getProperties().getProperty("hibernate.cache.infinispan.cachemanager");
-        String useCache = pu.getProperties().getProperty("hibernate.cache.use_second_level_cache");
-        String regionFactoryClass = pu.getProperties().getProperty("hibernate.cache.region.factory_class");
-        if ((useCache != null && useCache.equalsIgnoreCase("true")) ||
-            cacheManager != null) {
-            if (regionFactoryClass == null) {
-                regionFactoryClass = "org.hibernate.cache.infinispan.JndiInfinispanRegionFactory";
-                pu.getProperties().put("hibernate.cache.region.factory_class", regionFactoryClass);
-            }
-            if (cacheManager == null) {
-                cacheManager = "java:jboss/infinispan/hibernate";
-                pu.getProperties().put("hibernate.cache.infinispan.cachemanager", cacheManager);
-            }
-            if (pu.getProperties().getProperty("hibernate.cache.region_prefix") == null) {
-                // cache entries for this PU will be identified by scoped pu name + Entity class name
-                pu.getProperties().put("hibernate.cache.region_prefix", pu.getScopedPersistenceUnitName());
-            }
-            ArrayList<ServiceName> result = new ArrayList<ServiceName>();
-            result.add(adjustJndiName(cacheManager));
-            return result;
+    public void addProviderDependencies(ServiceRegistry registry, ServiceTarget target, ServiceBuilder<?> builder, PersistenceUnitMetadata pu) {
+        Properties properties = pu.getProperties();
+        if (Boolean.parseBoolean(properties.getProperty(AvailableSettings.USE_SECOND_LEVEL_CACHE))) {
+            HibernateSecondLevelCache.addSecondLevelCacheDependencies(registry, target, builder, pu);
         }
-        return null;
     }
 
-    private void putPropertyIfAbsent(Map properties, String property, Object value) {
-        if (!properties.containsKey(property)) {
+    private void putPropertyIfAbsent(PersistenceUnitMetadata pu, Map properties, String property, Object value) {
+        if (!pu.getProperties().containsKey(property)) {
             properties.put(property, value);
         }
     }
-
-    private ServiceName adjustJndiName(String jndiName) {
-        jndiName = toJndiName(jndiName).toString();
-        return ContextNames.bindInfoFor(jndiName).getBinderServiceName();
-    }
-
-    private static JndiName toJndiName(String value) {
-        return value.startsWith("java:") ? JndiName.of(value) : JndiName.of("java:jboss").append(value.startsWith("/") ? value.substring(1) : value);
-    }
-
 
     @Override
     public void beforeCreateContainerEntityManagerFactory(PersistenceUnitMetadata pu) {
@@ -118,8 +93,25 @@ public class HibernatePersistenceProviderAdaptor implements PersistenceProviderA
 
     @Override
     public ManagementAdaptor getManagementAdaptor() {
-        return hibernateManagementAdaptor;
+        return HibernateManagementAdaptor.getInstance();
     }
 
+    /**
+     * determine if management console can display the second level cache entries
+     *
+     * @param pu
+     * @return false if a custom AvailableSettings.CACHE_REGION_PREFIX property is specified.
+     *         true if the scoped persistence unit name is used to prefix cache entries.
+     */
+    @Override
+    public boolean doesScopedPersistenceUnitNameIdentifyCacheRegionName(PersistenceUnitMetadata pu) {
+        String cacheRegionPrefix = pu.getProperties().getProperty(AvailableSettings.CACHE_REGION_PREFIX);
+
+        return cacheRegionPrefix == null || cacheRegionPrefix.equals(pu.getScopedPersistenceUnitName());
+    }
+
+    public void cleanup(PersistenceUnitMetadata pu) {
+        HibernateAnnotationScanner.cleanup(pu);
+    }
 }
 

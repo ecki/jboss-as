@@ -23,6 +23,9 @@ package org.jboss.as.jaxrs.deployment;
 
 import static org.jboss.as.jaxrs.JaxrsLogger.JAXRS_LOGGER;
 import static org.jboss.as.jaxrs.JaxrsMessages.MESSAGES;
+import static org.jboss.resteasy.plugins.server.servlet.ResteasyContextParameters.RESTEASY_SCAN;
+import static org.jboss.resteasy.plugins.server.servlet.ResteasyContextParameters.RESTEASY_SCAN_PROVIDERS;
+import static org.jboss.resteasy.plugins.server.servlet.ResteasyContextParameters.RESTEASY_SCAN_RESOURCES;
 
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
@@ -30,12 +33,14 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
 import javax.ws.rs.core.Application;
 
 import org.jboss.as.jaxrs.JaxrsAnnotations;
+import org.jboss.as.jaxrs.JaxrsMessages;
 import org.jboss.as.server.Services;
 import org.jboss.as.server.deployment.Attachments;
 import org.jboss.as.server.deployment.DeploymentPhaseContext;
@@ -80,7 +85,7 @@ public class JaxrsScanningProcessor implements DeploymentUnitProcessor {
         }
         final DeploymentUnit parent = deploymentUnit.getParent() == null ? deploymentUnit : deploymentUnit.getParent();
         final Map<ModuleIdentifier, ResteasyDeploymentData> deploymentData;
-        if(deploymentUnit.getParent() == null) {
+        if (deploymentUnit.getParent() == null) {
             deploymentData = Collections.synchronizedMap(new HashMap<ModuleIdentifier, ResteasyDeploymentData>());
             deploymentUnit.putAttachment(JaxrsAttachments.ADDITIONAL_RESTEASY_DEPLOYMENT_DATA, deploymentData);
         } else {
@@ -171,12 +176,12 @@ public class JaxrsScanningProcessor implements DeploymentUnitProcessor {
 
         if (contextParams != null) {
             for (ParamValueMetaData param : contextParams) {
-                if (param.getParamName().equals(ResteasyContextParameters.RESTEASY_SCAN)) {
-                    resteasyDeploymentData.setScanAll(Boolean.valueOf(param.getParamValue()));
+                if (param.getParamName().equals(RESTEASY_SCAN)) {
+                    resteasyDeploymentData.setScanAll(valueOf(RESTEASY_SCAN, param.getParamValue()));
                 } else if (param.getParamName().equals(ResteasyContextParameters.RESTEASY_SCAN_PROVIDERS)) {
-                    resteasyDeploymentData.setScanProviders(Boolean.valueOf(param.getParamValue()));
-                } else if (param.getParamName().equals(ResteasyContextParameters.RESTEASY_SCAN_RESOURCES)) {
-                    resteasyDeploymentData.setScanResources(Boolean.valueOf(param.getParamValue()));
+                    resteasyDeploymentData.setScanProviders(valueOf(RESTEASY_SCAN_PROVIDERS, param.getParamValue()));
+                } else if (param.getParamName().equals(RESTEASY_SCAN_RESOURCES)) {
+                    resteasyDeploymentData.setScanResources(valueOf(RESTEASY_SCAN_RESOURCES, param.getParamValue()));
                 } else if (param.getParamName().equals(ResteasyContextParameters.RESTEASY_UNWRAPPED_EXCEPTIONS)) {
                     resteasyDeploymentData.setUnwrappedExceptionsParameterSet(true);
                 }
@@ -306,6 +311,20 @@ public class JaxrsScanningProcessor implements DeploymentUnitProcessor {
             }
         }
         return null;
+    }
+
+
+    private boolean valueOf(String paramName, String value) throws DeploymentUnitProcessingException {
+        if (value == null) {
+            throw JaxrsMessages.MESSAGES.invalidParamValue(paramName, value);
+        }
+        if (value.toLowerCase(Locale.ENGLISH).equals("true")) {
+            return true;
+        } else if (value.toLowerCase(Locale.ENGLISH).equals("false")) {
+            return false;
+        } else {
+            throw JaxrsMessages.MESSAGES.invalidParamValue(paramName, value);
+        }
     }
 
 }

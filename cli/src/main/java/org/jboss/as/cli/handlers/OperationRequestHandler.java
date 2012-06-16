@@ -32,6 +32,7 @@ import org.jboss.as.cli.CommandArgument;
 import org.jboss.as.cli.CommandContext;
 import org.jboss.as.cli.CommandFormatException;
 import org.jboss.as.cli.CommandHandler;
+import org.jboss.as.cli.CommandLineException;
 import org.jboss.as.cli.OperationCommand;
 import org.jboss.as.cli.Util;
 import org.jboss.as.cli.operation.impl.DefaultCallbackHandler;
@@ -46,7 +47,7 @@ import org.jboss.dmr.ModelNode;
 public class OperationRequestHandler implements CommandHandler, OperationCommand {
 
     @Override
-    public boolean isBatchMode() {
+    public boolean isBatchMode(CommandContext ctx) {
         return true;
     }
 
@@ -54,41 +55,40 @@ public class OperationRequestHandler implements CommandHandler, OperationCommand
      * @see org.jboss.as.cli.CommandHandler#handle(org.jboss.as.cli.CommandContext)
      */
     @Override
-    public void handle(CommandContext ctx) {
+    public void handle(CommandContext ctx) throws CommandLineException {
 
         ModelControllerClient client = ctx.getModelControllerClient();
         if(client == null) {
-            ctx.printLine("You are disconnected at the moment." +
+            throw new CommandFormatException("You are disconnected at the moment." +
                     " Type 'connect' to connect to the server" +
                     " or 'help' for the list of supported commands.");
-            return;
         }
 
         ModelNode request = (ModelNode) ctx.get("OP_REQ");
         if(request == null) {
-            ctx.printLine("Parsed request isn't available.");
-            return;
+            throw new CommandFormatException("Parsed request isn't available.");
         }
 
-        try {
+        if(ctx.getConfig().isValidateOperationRequests()) {
             validateRequest(ctx, request);
-        } catch(CommandFormatException e) {
-            ctx.printLine(e.getLocalizedMessage());
-            return;
         }
 
         try {
-            ModelNode result = client.execute(request);
-            ctx.printLine(result.toString());
+            final ModelNode result = client.execute(request);
+            if(Util.isSuccess(result)) {
+                ctx.printLine(result.toString());
+            } else {
+                throw new CommandFormatException(result.toString());
+            }
         } catch(NoSuchElementException e) {
-            ctx.printLine("ModelNode request is incomplete: " + e.getMessage());
+            throw new CommandFormatException("ModelNode request is incomplete: " + e.getMessage());
         } catch (CancellationException e) {
-            ctx.printLine("The result couldn't be retrieved (perhaps the task was cancelled: " + e.getLocalizedMessage());
+            throw new CommandFormatException("The result couldn't be retrieved (perhaps the task was cancelled: " + e.getLocalizedMessage());
         } catch (IOException e) {
-            ctx.printLine("Communication error: " + e.getLocalizedMessage());
             ctx.disconnectController();
+            throw new CommandFormatException("Communication error: " + e.getLocalizedMessage());
         } catch (RuntimeException e) {
-            throw e;
+            throw new CommandFormatException("Failed to execute operation.", e);
         }
     }
 
@@ -99,16 +99,21 @@ public class OperationRequestHandler implements CommandHandler, OperationCommand
 
     @Override
     public ModelNode buildRequest(CommandContext ctx) throws CommandFormatException {
-        return ((DefaultCallbackHandler)ctx.getParsedCommandLine()).toOperationRequest();
+        return ((DefaultCallbackHandler)ctx.getParsedCommandLine()).toOperationRequest(ctx);
     }
 
     @Override
-    public boolean hasArgument(String name) {
+    public CommandArgument getArgument(CommandContext ctx, String name) {
+        return null;
+    }
+
+    @Override
+    public boolean hasArgument(CommandContext ctx, String name) {
         return false;
     }
 
     @Override
-    public boolean hasArgument(int index) {
+    public boolean hasArgument(CommandContext ctx, int index) {
         return false;
     }
 
@@ -160,22 +165,27 @@ public class OperationRequestHandler implements CommandHandler, OperationCommand
         }
         final ModelNode result = outcome.get(Util.RESULT);
         if(!result.hasDefined(Util.REQUEST_PROPERTIES)) {
-            throw new CommandFormatException("Operation '" + operationName + "' does not expect any property.");
-        }
-        final Set<String> definedProps = result.get("request-properties").keys();
-        if(definedProps.isEmpty()) {
-            throw new CommandFormatException("Operation '" + operationName + "' does not expect any property.");
-        }
-
-        int skipped = 0;
-        for(String prop : keys) {
-            if(skipped < 2 && (prop.equals(Util.ADDRESS) || prop.equals(Util.OPERATION))) {
-                ++skipped;
-                continue;
+            if(!(keys.size() == 3 && keys.contains(Util.OPERATION_HEADERS))) {
+                throw new CommandFormatException("Operation '" + operationName + "' does not expect any property.");
             }
-            if(!definedProps.contains(prop)) {
-                if(!Util.OPERATION_HEADERS.equals(prop)) {
-                    throw new CommandFormatException("'" + prop + "' is not found among the supported properties: " + definedProps);
+        } else {
+            final Set<String> definedProps = result.get(Util.REQUEST_PROPERTIES).keys();
+            if(definedProps.isEmpty()) {
+                if(!(keys.size() == 3 && keys.contains(Util.OPERATION_HEADERS))) {
+                    throw new CommandFormatException("Operation '" + operationName + "' does not expect any property.");
+                }
+            }
+
+            int skipped = 0;
+            for(String prop : keys) {
+                if(skipped < 2 && (prop.equals(Util.ADDRESS) || prop.equals(Util.OPERATION))) {
+                    ++skipped;
+                    continue;
+                }
+                if(!definedProps.contains(prop)) {
+                    if(!Util.OPERATION_HEADERS.equals(prop)) {
+                        throw new CommandFormatException("'" + prop + "' is not found among the supported properties: " + definedProps);
+                    }
                 }
             }
         }

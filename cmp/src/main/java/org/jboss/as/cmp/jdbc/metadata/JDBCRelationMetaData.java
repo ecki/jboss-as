@@ -23,6 +23,7 @@ package org.jboss.as.cmp.jdbc.metadata;
 
 import java.util.ArrayList;
 import java.util.List;
+import static org.jboss.as.cmp.CmpMessages.MESSAGES;
 import org.jboss.as.cmp.jdbc.metadata.parser.ParsedEntity;
 import org.jboss.as.cmp.jdbc.metadata.parser.ParsedRelationship;
 import org.jboss.as.cmp.jdbc.metadata.parser.ParsedRelationshipRole;
@@ -211,21 +212,18 @@ public final class JDBCRelationMetaData {
 
         // at least one side of a fk relation must have keys
         if (isForeignKeyMappingStyle() && left.getKeyFields().isEmpty() && right.getKeyFields().isEmpty()) {
-            throw new RuntimeException("Atleast one role of a foreign-key "
-                    + "mapped relationship must have key fields " + "(or <primkey-field> is missing from ejb-jar.xml): "
-                    + "ejb-relation-name=" + relationName);
+            throw MESSAGES.atLeastOneRelationshipRoleMustHaveField(relationName);
         }
 
         // both sides of a table relation must have keys
         if (isTableMappingStyle() && (left.getKeyFields().isEmpty() || right.getKeyFields().isEmpty())) {
-            throw new RuntimeException("Both roles of a relation-table " + "mapped relationship must have key fields: "
-                    + "ejb-relation-name=" + relationName);
+            throw MESSAGES.bothRolesMustHaveFields(relationName);
         }
     }
 
     public JDBCRelationMetaData(JDBCApplicationMetaData jdbcApplication, ParsedEntity defaultEntity, JDBCRelationMetaData defaultValues) {
-        String perferredRelationMapping = defaultEntity.getPreferredMappingStyle();
-        if ("relation-table".equals(perferredRelationMapping) || defaultValues.isManyToMany()) {
+        String preferredRelationMapping = defaultEntity.getPreferredMappingStyle();
+        if ("relation-table".equals(preferredRelationMapping) || defaultValues.isManyToMany()) {
             mappingStyle = MappingStyle.TABLE;
         } else {
             mappingStyle = MappingStyle.FOREIGN_KEY;
@@ -255,7 +253,7 @@ public final class JDBCRelationMetaData {
         if (defaultEntity.getDataSourceMappingName() != null) {
             datasourceMapping = jdbcApplication.getTypeMappingByName(defaultEntity.getDataSourceMappingName());
             if (datasourceMapping == null) {
-                throw new RuntimeException("Error in jbosscmp-jdbc.xml : datasource-mapping " + defaultEntity.getDataSourceMappingName() + " not found");
+                throw MESSAGES.datasourceMappingNotFound(defaultEntity.getDataSourceMappingName());
             }
         } else if (defaultValues.getTypeMapping() != null) {
             datasourceMapping = defaultValues.getTypeMapping();
@@ -362,8 +360,7 @@ public final class JDBCRelationMetaData {
         if (parsedRelationship.getDatasourceMapping() != null) {
             datasourceMapping = jdbcApplication.getTypeMappingByName(parsedRelationship.getDatasourceMapping());
             if (datasourceMapping == null) {
-                throw new RuntimeException("Error in jbosscmp-jdbc.xml : " + "datasource-mapping "
-                        + parsedRelationship.getDatasourceMapping() + " not found");
+                throw MESSAGES.datasourceMappingNotFound(parsedRelationship.getDatasourceMapping());
             }
         } else if (defaultValues.getTypeMapping() != null) {
             datasourceMapping = defaultValues.getTypeMapping();
@@ -454,15 +451,12 @@ public final class JDBCRelationMetaData {
 
         // at least one side of a fk relation must have keys
         if (isForeignKeyMappingStyle() && left.getKeyFields().isEmpty() && right.getKeyFields().isEmpty()) {
-            throw new RuntimeException("Atleast one role of a foreign-key "
-                    + "mapped relationship must have key fields " + "(or <primkey-field> is missing from ejb-jar.xml): "
-                    + "ejb-relation-name=" + relationName);
+            throw MESSAGES.atLeastOneRelationshipRoleMustHaveField(relationName);
         }
 
         // both sides of a table relation must have keys
         if (isTableMappingStyle() && (left.getKeyFields().isEmpty() || right.getKeyFields().isEmpty())) {
-            throw new RuntimeException("Both roles of a relation-table " + "mapped relationship must have key fields: "
-                    + "ejb-relation-name=" + relationName);
+            throw MESSAGES.bothRolesMustHaveFields(relationName);
         }
     }
 
@@ -470,7 +464,7 @@ public final class JDBCRelationMetaData {
         final String roleName = defaultRole.getRelationshipRoleName();
 
         if (roleName == null) {
-            throw new IllegalArgumentException("No ejb-relationship-role-name element found");
+            throw MESSAGES.noEjbRelationRoleNameElement();
         }
 
         for (ParsedRelationshipRole role : roles) {
@@ -478,7 +472,7 @@ public final class JDBCRelationMetaData {
                 return role;
             }
         }
-        throw new IllegalArgumentException("An ejb-relationship-role element was " + "not found for role '" + roleName + "'");
+        throw MESSAGES.noEjbRelationshipRole(roleName);
     }
 
     /**
@@ -516,7 +510,7 @@ public final class JDBCRelationMetaData {
         } else if (right == role) {
             return left;
         } else {
-            throw new IllegalArgumentException("Specified role is not the left " + "or right role. role=" + role);
+            throw MESSAGES.roleNotLeftOrRightRole(role.getRelationshipRoleName());
         }
     }
 
@@ -579,8 +573,8 @@ public final class JDBCRelationMetaData {
 
     /**
      * Does the table exist yet? This does not mean that table has been created
-     * by the appilcation, or the the database metadata has been checked for the
-     * existance of the table, but that at this point the table is assumed to
+     * by the application, or the the database metadata has been checked for the
+     * existence of the table, but that at this point the table is assumed to
      * exist.
      *
      * @return true if the table exists
@@ -607,7 +601,7 @@ public final class JDBCRelationMetaData {
     /**
      * Should the relation table be created on startup.
      *
-     * @return true if the store mananager should attempt to create the relation
+     * @return true if the store manager should attempt to create the relation
      *         table
      */
     public boolean getCreateTable() {
@@ -617,7 +611,7 @@ public final class JDBCRelationMetaData {
     /**
      * Should the relation table be removed on shutdown.
      *
-     * @return true if the store mananager should attempt to remove the relation
+     * @return true if the store manager should attempt to remove the relation
      *         table
      */
     public boolean getRemoveTable() {
@@ -635,7 +629,7 @@ public final class JDBCRelationMetaData {
      * When the relation table is created, should it have a primary key
      * constraint.
      *
-     * @return true if the store mananager should add a primary key constraint
+     * @return true if the store manager should add a primary key constraint
      *         to the the create table sql statement
      */
     public boolean hasPrimaryKeyConstraint() {

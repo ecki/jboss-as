@@ -22,14 +22,16 @@
 
 package org.jboss.as.controller.resource;
 
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.INTERFACE;
+
 import java.util.Locale;
-import java.util.ResourceBundle;
 
-import javax.xml.stream.XMLStreamException;
-import javax.xml.stream.XMLStreamWriter;
-
+import org.jboss.as.controller.ControllerMessages;
 import org.jboss.as.controller.ListAttributeDefinition;
+import org.jboss.as.controller.OperationContext;
+import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.OperationStepHandler;
+import org.jboss.as.controller.PathAddress;
 import org.jboss.as.controller.PathElement;
 import org.jboss.as.controller.ReloadRequiredWriteAttributeHandler;
 import org.jboss.as.controller.ResourceDefinition;
@@ -39,16 +41,13 @@ import org.jboss.as.controller.SimpleResourceDefinition;
 import org.jboss.as.controller.descriptions.DefaultResourceAddDescriptionProvider;
 import org.jboss.as.controller.descriptions.DescriptionProvider;
 import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
-import org.jboss.as.controller.descriptions.ResourceDescriptionResolver;
 import org.jboss.as.controller.descriptions.common.CommonDescriptions;
-import org.jboss.as.controller.operations.common.SocketBindingGroupIncludeAddHandler;
-import org.jboss.as.controller.operations.common.SocketBindingGroupIncludeRemoveHandler;
-import org.jboss.as.controller.operations.global.WriteAttributeHandlers;
 import org.jboss.as.controller.operations.validation.IntRangeValidator;
 import org.jboss.as.controller.operations.validation.StringLengthValidator;
 import org.jboss.as.controller.registry.AttributeAccess;
 import org.jboss.as.controller.registry.ManagementResourceRegistration;
 import org.jboss.as.controller.registry.OperationEntry;
+import org.jboss.as.controller.registry.Resource;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.ModelType;
 
@@ -92,10 +91,16 @@ public class SocketBindingGroupResourceDefinition extends SimpleResourceDefiniti
         super.registerAttributes(resourceRegistration);
 
         resourceRegistration.registerReadOnlyAttribute(NAME, null);
-        resourceRegistration.registerReadWriteAttribute(DEFAULT_INTERFACE, null, new ReloadRequiredWriteAttributeHandler(DEFAULT_INTERFACE));
+        resourceRegistration.registerReadWriteAttribute(DEFAULT_INTERFACE, null, new ReloadRequiredWriteAttributeHandler(DEFAULT_INTERFACE) {
+            protected void validateUpdatedModel(final OperationContext context, final Resource model) throws OperationFailedException {
+                validateDefaultInterfaceReference(context, model.getModel());
+            }
+        });
 
         if (forDomainModel) {
+            /* This will be reintroduced for 7.2.0, leave commented out
             resourceRegistration.registerReadWriteAttribute(INCLUDES, null, new WriteAttributeHandlers.AttributeDefinitionValidatingHandler(INCLUDES));
+            */
         } else {
             resourceRegistration.registerReadWriteAttribute(PORT_OFFSET, null, new ReloadRequiredWriteAttributeHandler(PORT_OFFSET));
         }
@@ -104,10 +109,12 @@ public class SocketBindingGroupResourceDefinition extends SimpleResourceDefiniti
     @Override
     public void registerOperations(ManagementResourceRegistration resourceRegistration) {
         super.registerOperations(resourceRegistration);
+        /* This will be reintroduced for 7.2.0, leave commented out
         if (forDomainModel) {
             resourceRegistration.registerOperationHandler(SocketBindingGroupIncludeAddHandler.OPERATION_NAME, SocketBindingGroupIncludeAddHandler.INSTANCE, SocketBindingGroupIncludeAddHandler.INSTANCE);
             resourceRegistration.registerOperationHandler(SocketBindingGroupIncludeRemoveHandler.OPERATION_NAME, SocketBindingGroupIncludeRemoveHandler.INSTANCE, SocketBindingGroupIncludeRemoveHandler.INSTANCE);
         }
+        */
     }
 
     protected void registerAddOperation(final ManagementResourceRegistration registration, final OperationStepHandler handler,
@@ -124,6 +131,21 @@ public class SocketBindingGroupResourceDefinition extends SimpleResourceDefiniti
             }
         };
         registration.registerOperationHandler(ModelDescriptionConstants.ADD, handler, provider, getFlagsSet(flags));
+    }
+
+    public static void validateDefaultInterfaceReference(final OperationContext context, final ModelNode bindingGroup) throws OperationFailedException {
+
+        ModelNode defaultInterfaceNode = bindingGroup.get(DEFAULT_INTERFACE.getName());
+        if (defaultInterfaceNode.getType() == ModelType.STRING) { // ignore UNDEFINED and EXPRESSION
+            String defaultInterface = defaultInterfaceNode.asString();
+            PathAddress interfaceAddress = PathAddress.pathAddress(PathElement.pathElement(INTERFACE, defaultInterface));
+            try {
+                context.readResourceFromRoot(interfaceAddress, false);
+            } catch (RuntimeException e) {
+                throw ControllerMessages.MESSAGES.nonexistentInterface(defaultInterface, DEFAULT_INTERFACE.getName());
+            }
+        }
+
     }
 
 }

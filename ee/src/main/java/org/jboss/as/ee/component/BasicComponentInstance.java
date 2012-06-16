@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.jboss.as.ee.component.interceptors.InvocationType;
 import org.jboss.as.naming.ManagedReference;
 import org.jboss.invocation.Interceptor;
 import org.jboss.invocation.InterceptorContext;
@@ -56,7 +57,7 @@ public class BasicComponentInstance implements ComponentInstance {
 
     private static final AtomicIntegerFieldUpdater<BasicComponentInstance> doneUpdater = AtomicIntegerFieldUpdater.newUpdater(BasicComponentInstance.class, "done");
 
-    private final Map<Method, Interceptor> methodMap;
+    private transient Map<Method, Interceptor> methodMap;
 
     /**
      * Construct a new instance.
@@ -107,12 +108,14 @@ public class BasicComponentInstance implements ComponentInstance {
     /**
      * {@inheritDoc}
      */
-    public void destroy() {
+    public final void destroy() {
         if (doneUpdater.compareAndSet(this, 0, 1)) try {
+            preDestroy();
             final ManagedReference reference = instanceReference.get();
             if (reference != null) {
                 final InterceptorContext interceptorContext = prepareInterceptorContext();
                 interceptorContext.setTarget(reference.getInstance());
+                interceptorContext.putPrivateData(InvocationType.class, InvocationType.PRE_DESTROY);
                 preDestroy.processInvocation(interceptorContext);
             }
         } catch (Exception e) {
@@ -120,6 +123,14 @@ public class BasicComponentInstance implements ComponentInstance {
         } finally {
             component.finishDestroy();
         }
+    }
+
+    /**
+     * Method that sub classes can use to override destroy logic.
+     *
+     */
+    protected void preDestroy() {
+
     }
 
     protected InterceptorContext prepareInterceptorContext() {
@@ -130,7 +141,7 @@ public class BasicComponentInstance implements ComponentInstance {
         return interceptorContext;
     }
 
-    protected void finalize() {
-        destroy();
+    protected AtomicReference<ManagedReference> getInstanceReference() {
+        return instanceReference;
     }
 }

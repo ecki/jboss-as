@@ -3,11 +3,11 @@
  */
 package org.jboss.as.controller.interfaces;
 
+import static org.jboss.as.controller.ControllerMessages.MESSAGES;
+
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
-
-import static org.jboss.as.controller.ControllerMessages.MESSAGES;
 
 /**
  * {@link InterfaceCriteria} that tests whether a given name matches the
@@ -15,7 +15,7 @@ import static org.jboss.as.controller.ControllerMessages.MESSAGES;
  *
  * @author Brian Stansberry
  */
-public class NicInterfaceCriteria implements InterfaceCriteria {
+public class NicInterfaceCriteria extends AbstractInterfaceCriteria {
 
     private static final long serialVersionUID = 6905500001319165842L;
 
@@ -46,13 +46,22 @@ public class NicInterfaceCriteria implements InterfaceCriteria {
      *          equals <code>networkInterface</code>'s {@link NetworkInterface#getName() name}.
      */
     @Override
-    public InetAddress isAcceptable(NetworkInterface networkInterface, InetAddress address) throws SocketException {
+    protected InetAddress isAcceptable(NetworkInterface networkInterface, InetAddress address) throws SocketException {
 
         if( name.equals(networkInterface.getName()) )
             return address;
         return null;
     }
 
+    @Override
+    public int hashCode() {
+        return name.hashCode();
+    }
 
+    @Override
+    public boolean equals(Object o) {
+        return (o instanceof NicInterfaceCriteria)
+                && name.equals(((NicInterfaceCriteria)o).name);
+    }
 
 }

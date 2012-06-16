@@ -21,6 +21,9 @@
  */
 package org.jboss.as.server.deployment.module;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.jboss.as.server.deployment.Attachments;
 import org.jboss.as.server.deployment.DeploymentPhaseContext;
 import org.jboss.as.server.deployment.DeploymentUnit;
@@ -29,9 +32,6 @@ import org.jboss.as.server.deployment.DeploymentUnitProcessor;
 import org.jboss.modules.ModuleIdentifier;
 import org.jboss.modules.ModuleLoader;
 import org.jboss.modules.filter.PathFilters;
-
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * Processor that set up a module dependency on the parent module
@@ -56,7 +56,7 @@ public class SubDeploymentDependencyProcessor implements DeploymentUnitProcessor
             final ModuleIdentifier parentModule = parent.getAttachment(Attachments.MODULE_IDENTIFIER);
             if (parentModule != null) {
                 // access to ear classes
-                ModuleDependency moduleDependency = new ModuleDependency(moduleLoader, parentModule, false, false, true);
+                ModuleDependency moduleDependency = new ModuleDependency(moduleLoader, parentModule, false, false, true, false);
                 moduleDependency.addImportFilter(PathFilters.acceptAll(), true);
                 moduleSpec.addLocalDependency(moduleDependency);
             }
@@ -70,14 +70,14 @@ public class SubDeploymentDependencyProcessor implements DeploymentUnitProcessor
                 final ModuleSpecification subModule = subDeployment.getAttachment(Attachments.MODULE_SPECIFICATION);
                 if (!subModule.isPrivateModule()) {
                     ModuleIdentifier identifier = subDeployment.getAttachment(Attachments.MODULE_IDENTIFIER);
-                    ModuleDependency dependency = new ModuleDependency(moduleLoader, identifier, false, false, true);
+                    ModuleDependency dependency = new ModuleDependency(moduleLoader, identifier, false, false, true, false);
                     dependency.addImportFilter(PathFilters.acceptAll(), true);
                     accessibleModules.add(dependency);
                 }
             }
             for (ModuleDependency identifier : accessibleModules) {
                 if (!identifier.equals(moduleIdentifier)) {
-                    moduleSpec.addLocalDependencies(accessibleModules);
+                    moduleSpec.addLocalDependency(identifier);
                 }
             }
         }

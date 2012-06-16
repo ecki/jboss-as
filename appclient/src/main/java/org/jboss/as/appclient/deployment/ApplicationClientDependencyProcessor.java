@@ -41,7 +41,7 @@ import org.jboss.modules.ModuleLoader;
  * DUP that handles app client dependencies.
  *
  * This DUP is quite unusual, as it will also remove dependencies if they refer to
- * dependencies that are not accisible to the application client. This allows a server
+ * dependencies that are not accessible to the application client. This allows a server
  * side deployment to reference another module, while still allowing the app client to
  * function when that additional deployment is not present.
  *
@@ -50,6 +50,7 @@ import org.jboss.modules.ModuleLoader;
 public class ApplicationClientDependencyProcessor implements DeploymentUnitProcessor {
 
     public static ModuleIdentifier CORBA_ID = ModuleIdentifier.create("org.omg.api");
+    public static ModuleIdentifier XNIO = ModuleIdentifier.create("org.jboss.xnio");
 
 
     public ApplicationClientDependencyProcessor() {
@@ -63,7 +64,8 @@ public class ApplicationClientDependencyProcessor implements DeploymentUnitProce
         final ModuleSpecification moduleSpecification = deploymentUnit.getAttachment(Attachments.MODULE_SPECIFICATION);
         final ModuleLoader loader = deploymentUnit.getAttachment(Attachments.SERVICE_MODULE_LOADER);
 
-        moduleSpecification.addSystemDependency(new ModuleDependency(loader, CORBA_ID, false, true, true));
+        moduleSpecification.addSystemDependency(new ModuleDependency(loader, CORBA_ID, false, true, true, false));
+        moduleSpecification.addSystemDependency(new ModuleDependency(loader, XNIO, false, true, true, false));
 
         final Set<ModuleIdentifier> moduleIdentifiers = new HashSet<ModuleIdentifier>();
         final DeploymentUnit top = deploymentUnit.getParent() == null ? deploymentUnit : deploymentUnit.getParent();

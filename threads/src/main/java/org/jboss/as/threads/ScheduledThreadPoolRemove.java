@@ -21,14 +21,9 @@
  */
 package org.jboss.as.threads;
 
-import java.util.Locale;
 import org.jboss.as.controller.AbstractRemoveStepHandler;
 import org.jboss.as.controller.OperationContext;
-import org.jboss.as.controller.PathAddress;
-import org.jboss.as.controller.descriptions.DescriptionProvider;
-
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
-
+import org.jboss.as.controller.OperationFailedException;
 import org.jboss.dmr.ModelNode;
 
 /**
@@ -37,22 +32,25 @@ import org.jboss.dmr.ModelNode;
  * @author <a href="mailto:david.lloyd@redhat.com">David M. Lloyd</a>
  * @author <a href="kabir.khan@jboss.com">Kabir Khan</a>
  */
-public class ScheduledThreadPoolRemove extends AbstractRemoveStepHandler implements DescriptionProvider {
+public class ScheduledThreadPoolRemove extends AbstractRemoveStepHandler {
 
-    static final ScheduledThreadPoolRemove INSTANCE = new ScheduledThreadPoolRemove();
+    private final ScheduledThreadPoolAdd addHandler;
 
-    protected void performRuntime(OperationContext context, ModelNode operation, ModelNode model) {
-        final PathAddress address = PathAddress.pathAddress(operation.require(OP_ADDR));
-        final String name = address.getLastElement().getValue();
-        context.removeService(ThreadsServices.threadFactoryName(name));
+    public ScheduledThreadPoolRemove(ScheduledThreadPoolAdd addHandler) {
+        this.addHandler = addHandler;
     }
 
-    protected void recoverServices(OperationContext context, ModelNode operation, ModelNode model) {
-        // TODO:  RE-ADD SERVICES
+
+    protected void performRuntime(OperationContext context, ModelNode operation, ModelNode model) throws OperationFailedException {
+
+        final ThreadPoolManagementUtils.BaseThreadPoolParameters params =
+                ThreadPoolManagementUtils.parseScheduledThreadPoolParameters(context, operation, model);
+        ThreadPoolManagementUtils.removeThreadPoolService(params.getName(), addHandler.getServiceNameBase(),
+                params.getThreadFactory(), addHandler.getThreadFactoryResolver(),
+                context);
     }
 
-    @Override
-    public ModelNode getModelDescription(Locale locale) {
-        return ThreadsSubsystemProviders.REMOVE_SCHEDULED_THREAD_POOL_DESC.getModelDescription(locale);
+    protected void recoverServices(OperationContext context, ModelNode operation, ModelNode model) throws OperationFailedException {
+        addHandler.performRuntime(context, operation, model, null, null);
     }
 }

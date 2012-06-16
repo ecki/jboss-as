@@ -45,7 +45,6 @@ public class WeldDependencyProcessor implements DeploymentUnitProcessor {
     private static ModuleIdentifier JAVAX_PERSISTENCE_API_ID = ModuleIdentifier.create("javax.persistence.api");
     private static ModuleIdentifier JAVAEE_API_ID = ModuleIdentifier.create("javaee.api");
     private static final ModuleIdentifier JAVASSIST_ID = ModuleIdentifier.create("org.javassist");
-    private static ModuleIdentifier JBOSS_INTERCEPTOR_ID = ModuleIdentifier.create("org.jboss.interceptor");
     private static ModuleIdentifier JBOSS_AS_WELD_ID = ModuleIdentifier.create("org.jboss.as.weld");
     private static ModuleIdentifier WELD_CORE_ID = ModuleIdentifier.create("org.jboss.weld.core");
     private static ModuleIdentifier WELD_API_ID = ModuleIdentifier.create("org.jboss.weld.api");
@@ -66,14 +65,13 @@ public class WeldDependencyProcessor implements DeploymentUnitProcessor {
         final ModuleLoader moduleLoader = Module.getBootModuleLoader();
         addDependency(moduleSpecification, moduleLoader, JAVAX_PERSISTENCE_API_ID);
         addDependency(moduleSpecification, moduleLoader, JAVAEE_API_ID);
-        addDependency(moduleSpecification, moduleLoader, JBOSS_INTERCEPTOR_ID);
         addDependency(moduleSpecification, moduleLoader, JAVASSIST_ID);
         addDependency(moduleSpecification, moduleLoader, WELD_CORE_ID);
         addDependency(moduleSpecification, moduleLoader, WELD_API_ID);
         addDependency(moduleSpecification, moduleLoader, WELD_SPI_ID);
 
 
-        ModuleDependency dep = new ModuleDependency(moduleLoader, JBOSS_AS_WELD_ID, false, false, false);
+        ModuleDependency dep = new ModuleDependency(moduleLoader, JBOSS_AS_WELD_ID, false, false, false, false);
         dep.addImportFilter(PathFilters.getMetaInfFilter(), true);
         dep.addExportFilter(PathFilters.getMetaInfFilter(), true);
         moduleSpecification.addSystemDependency(dep);
@@ -82,7 +80,7 @@ public class WeldDependencyProcessor implements DeploymentUnitProcessor {
 
     private void addDependency(ModuleSpecification moduleSpecification, ModuleLoader moduleLoader,
                                ModuleIdentifier moduleIdentifier) {
-        moduleSpecification.addSystemDependency(new ModuleDependency(moduleLoader, moduleIdentifier, false, false, false));
+        moduleSpecification.addSystemDependency(new ModuleDependency(moduleLoader, moduleIdentifier, false, false, false, false));
     }
 
     @Override

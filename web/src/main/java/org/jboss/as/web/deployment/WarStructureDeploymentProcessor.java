@@ -22,6 +22,8 @@
 
 package org.jboss.as.web.deployment;
 
+import static org.jboss.as.web.WebMessages.MESSAGES;
+
 import org.jboss.as.ee.structure.DeploymentType;
 import org.jboss.as.ee.structure.DeploymentTypeMarker;
 import org.jboss.as.server.deployment.Attachments;
@@ -89,7 +91,7 @@ public class WarStructureDeploymentProcessor implements DeploymentUnitProcessor 
             return;
         }
 
-        // set the child first behavoiur
+        // set the child first behaviour
         final ModuleSpecification moduleSpecification = deploymentUnit.getAttachment(Attachments.MODULE_SPECIFICATION);
         if (moduleSpecification == null) {
             return;
@@ -170,7 +172,7 @@ public class WarStructureDeploymentProcessor implements DeploymentUnitProcessor 
                     ModuleRootMarker.mark(webInfArchiveRoot);
                     entries.add(webInfArchiveRoot);
                 } catch (IOException e) {
-                    throw new DeploymentUnitProcessingException("failed to process " + archive, e);
+                    throw new DeploymentUnitProcessingException(MESSAGES.failToProcessWebInfLib(archive), e);
                 }
             }
         }

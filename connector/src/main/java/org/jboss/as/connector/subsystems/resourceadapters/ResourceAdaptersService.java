@@ -34,14 +34,14 @@ import org.jboss.msc.service.StartContext;
 import org.jboss.msc.service.StartException;
 import org.jboss.msc.service.StopContext;
 
-import static org.jboss.as.connector.ConnectorLogger.SUBSYSTEM_RA_LOGGER;
+import static org.jboss.as.connector.logging.ConnectorLogger.SUBSYSTEM_RA_LOGGER;
 
 /**
  * A ResourceAdaptersService.
  * @author <a href="mailto:stefano.maestri@redhat.comdhat.com">Stefano
  *         Maestri</a>
  */
-final class ResourceAdaptersService implements Service<ResourceAdaptersService.ModifiableResourceAdaptors> {
+public final class ResourceAdaptersService implements Service<ResourceAdaptersService.ModifiableResourceAdaptors> {
 
     private final ModifiableResourceAdaptors value = new ModifiableResourceAdaptors();
 
@@ -67,11 +67,12 @@ final class ResourceAdaptersService implements Service<ResourceAdaptersService.M
 
         /**
          * Get the resourceAdapters.
+         *
          * @return the resourceAdapters.
          */
         @Override
         public List<ResourceAdapter> getResourceAdapters() {
-            return Collections.unmodifiableList(resourceAdapters);
+            return (List<ResourceAdapter>) Collections.unmodifiableList(resourceAdapters);
         }
 
         public boolean addResourceAdapter(ResourceAdapter ra) {

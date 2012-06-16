@@ -1,22 +1,6 @@
 package org.jboss.as.server.deployment.module.descriptor;
 
-import java.io.Closeable;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.EnumSet;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
-import javax.xml.namespace.QName;
-import javax.xml.stream.Location;
-import javax.xml.stream.XMLStreamConstants;
-import javax.xml.stream.XMLStreamException;
-import javax.xml.stream.XMLStreamReader;
-
+import org.jboss.as.server.ServerMessages;
 import org.jboss.as.server.deployment.Attachments;
 import org.jboss.as.server.deployment.DeploymentUnit;
 import org.jboss.as.server.deployment.module.FilterSpecification;
@@ -35,8 +19,23 @@ import org.jboss.staxmapper.XMLExtendedStreamReader;
 import org.jboss.vfs.VFS;
 import org.jboss.vfs.VirtualFile;
 
-import static javax.xml.stream.XMLStreamConstants.END_ELEMENT;
-import static javax.xml.stream.XMLStreamConstants.START_ELEMENT;
+import javax.xml.namespace.QName;
+import javax.xml.stream.Location;
+import javax.xml.stream.XMLStreamConstants;
+import javax.xml.stream.XMLStreamException;
+import javax.xml.stream.XMLStreamReader;
+import java.io.Closeable;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import static javax.xml.stream.XMLStreamConstants.*;
 
 /**
  * @author Stuart Douglas
@@ -100,6 +99,8 @@ public class JBossDeploymentStructureParser11 implements XMLElementReader<ParseR
             elementsMap.put(new QName(NAMESPACE_1_1, "transformer"), Element.TRANSFORMER);
             elementsMap.put(new QName(NAMESPACE_1_1, "local-last"), Element.LOCAL_LAST);
             elementsMap.put(new QName(NAMESPACE_1_1, "module-alias"), Element.MODULE_ALIAS);
+            elementsMap.put(new QName(NAMESPACE_1_1, "system"), Element.SYSTEM);
+            elementsMap.put(new QName(NAMESPACE_1_1, "paths"), Element.PATHS);
             elements = elementsMap;
         }
 
@@ -116,7 +117,7 @@ public class JBossDeploymentStructureParser11 implements XMLElementReader<ParseR
     }
 
     enum Attribute {
-        NAME, SLOT, EXPORT, SERVICES, PATH, OPTIONAL, CLASS, VALUE, USE_PHYSICAL_CODE_SOURCE,
+        NAME, SLOT, EXPORT, SERVICES, PATH, OPTIONAL, CLASS, VALUE, USE_PHYSICAL_CODE_SOURCE, ANNOTATIONS, META_INF,
 
         // default unknown attribute
         UNKNOWN;
@@ -134,6 +135,8 @@ public class JBossDeploymentStructureParser11 implements XMLElementReader<ParseR
             attributesMap.put(new QName("class"), CLASS);
             attributesMap.put(new QName("value"), VALUE);
             attributesMap.put(new QName("use-physical-code-source"), USE_PHYSICAL_CODE_SOURCE);
+            attributesMap.put(new QName("annotations"), ANNOTATIONS);
+            attributesMap.put(new QName("meta-inf"), META_INF);
             attributes = attributesMap;
         }
 
@@ -251,7 +254,7 @@ public class JBossDeploymentStructureParser11 implements XMLElementReader<ParseR
             throw missingAttributes(reader.getLocation(), required);
         }
         if (result.getSubDeploymentSpecifications().containsKey(name)) {
-            throw new XMLStreamException("Sub deployment " + name + " is listed twice in jboss-structure.xml");
+            throw ServerMessages.MESSAGES.duplicateSubdeploymentListing(name);
         }
         final ModuleStructureSpec moduleSpecification = new ModuleStructureSpec();
         result.getSubDeploymentSpecifications().put(name, moduleSpecification);
@@ -282,8 +285,7 @@ public class JBossDeploymentStructureParser11 implements XMLElementReader<ParseR
         }
         // FIXME: change this
         if (!name.startsWith("deployment.")) {
-            throw new XMLStreamException("Additional module name " + name
-                    + " is not valid. Names must start with 'deployment.'");
+            throw ServerMessages.MESSAGES.invalidModuleName(name);
         }
         final ModuleStructureSpec moduleSpecification = new ModuleStructureSpec();
         moduleSpecification.setModuleIdentifier(ModuleIdentifier.create(name, slot));
@@ -550,7 +552,9 @@ public class JBossDeploymentStructureParser11 implements XMLElementReader<ParseR
         String slot = null;
         boolean export = false;
         boolean optional = false;
+        boolean annotations = false;
         Disposition services = Disposition.NONE;
+        Disposition metaInf = Disposition.NONE;
         final Set<Attribute> required = EnumSet.of(Attribute.NAME);
         final int count = reader.getAttributeCount();
         for (int i = 0; i < count; i++) {
@@ -572,6 +576,12 @@ public class JBossDeploymentStructureParser11 implements XMLElementReader<ParseR
                 case OPTIONAL:
                     optional = Boolean.parseBoolean(reader.getAttributeValue(i));
                     break;
+                case ANNOTATIONS:
+                    annotations = Boolean.parseBoolean(reader.getAttributeValue(i));
+                    break;
+                case META_INF:
+                    metaInf = Disposition.of(reader.getAttributeValue(i));
+                    break;
                 default:
                     throw unexpectedContent(reader);
             }
@@ -579,8 +589,24 @@ public class JBossDeploymentStructureParser11 implements XMLElementReader<ParseR
         if (!required.isEmpty()) {
             throw missingAttributes(reader.getLocation(), required);
         }
-        ModuleDependency dependency = new ModuleDependency(moduleLoader, ModuleIdentifier.create(name, slot), optional, export,
-                services == Disposition.IMPORT);
+        final ModuleIdentifier identifier = ModuleIdentifier.create(name, slot);
+        final ModuleDependency dependency = new ModuleDependency(moduleLoader, identifier, optional, export,
+                services == Disposition.IMPORT, true);
+        if(annotations) {
+            specBuilder.addAnnotationModule(identifier);
+        }
+        switch (metaInf) {
+            case EXPORT: {
+                dependency.addImportFilter(PathFilters.getMetaInfSubdirectoriesFilter(), true);
+                dependency.addExportFilter(PathFilters.getMetaInfSubdirectoriesFilter(), true);
+                break;
+            }
+            case IMPORT: {
+                dependency.addImportFilter(PathFilters.getMetaInfSubdirectoriesFilter(), true);
+                break;
+            }
+        }
+
         specBuilder.addModuleDependency(dependency);
         while (reader.hasNext()) {
             switch (reader.nextTag()) {
@@ -1062,25 +1088,20 @@ public class JBossDeploymentStructureParser11 implements XMLElementReader<ParseR
                 kind = "unknown";
                 break;
         }
-        final StringBuilder b = new StringBuilder("Unexpected content of type '").append(kind).append('\'');
-        if (reader.hasName()) {
-            b.append(" named '").append(reader.getName()).append('\'');
-        }
-        if (reader.hasText()) {
-            b.append(", text is: '").append(reader.getText()).append('\'');
-        }
-        return new XMLStreamException(b.toString(), reader.getLocation());
+
+        return ServerMessages.MESSAGES.unexpectedContent(kind, (reader.hasName() ? reader.getName() : null),
+                (reader.hasText() ? reader.getText() : null), reader.getLocation());
     }
 
     private static XMLStreamException endOfDocument(final Location location) {
-        return new XMLStreamException("Unexpected end of document", location);
+        return ServerMessages.MESSAGES.unexpectedEndOfDocument(location);
     }
 
     private static XMLStreamException missingAttributes(final Location location, final Set<Attribute> required) {
-        final StringBuilder b = new StringBuilder("Missing one or more required attributes:");
+        final StringBuilder b = new StringBuilder();
         for (Attribute attribute : required) {
             b.append(' ').append(attribute);
         }
-        return new XMLStreamException(b.toString(), location);
+        return ServerMessages.MESSAGES.missingRequiredAttributes(b.toString(), location);
     }
 }

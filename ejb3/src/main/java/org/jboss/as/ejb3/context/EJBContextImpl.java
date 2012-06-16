@@ -21,6 +21,7 @@
  */
 package org.jboss.as.ejb3.context;
 
+import java.io.Serializable;
 import java.security.Identity;
 import java.security.Principal;
 import java.util.Map;
@@ -33,12 +34,14 @@ import javax.transaction.UserTransaction;
 
 import org.jboss.as.ejb3.component.EJBComponent;
 import org.jboss.as.ejb3.component.EjbComponentInstance;
+import org.jboss.as.ejb3.component.allowedmethods.AllowedMethodsInformation;
+import org.jboss.as.ejb3.component.allowedmethods.MethodType;
 import org.jboss.invocation.InterceptorContext;
 import static org.jboss.as.ejb3.EjbMessages.MESSAGES;
 /**
  * @author <a href="cdewolf@redhat.com">Carlo de Wolf</a>
  */
-public abstract class EJBContextImpl implements javax.ejb.EJBContext {
+public abstract class EJBContextImpl implements javax.ejb.EJBContext, Serializable {
     private final EjbComponentInstance instance;
 
     public EJBContextImpl(final EjbComponentInstance instance) {
@@ -51,6 +54,7 @@ public abstract class EJBContextImpl implements javax.ejb.EJBContext {
     }
 
     public Principal getCallerPrincipal() {
+        AllowedMethodsInformation.checkAllowed(MethodType.GET_CALLER_PRINCIPLE);
         // per invocation
         return instance.getComponent().getCallerPrincipal();
     }
@@ -90,6 +94,7 @@ public abstract class EJBContextImpl implements javax.ejb.EJBContext {
     }
 
     public TimerService getTimerService() throws IllegalStateException {
+        AllowedMethodsInformation.checkAllowed(MethodType.GET_TIMER_SERVICE);
         return  instance.getComponent().getTimerService();
     }
 
@@ -104,6 +109,7 @@ public abstract class EJBContextImpl implements javax.ejb.EJBContext {
     }
 
     public boolean isCallerInRole(String roleName) {
+        AllowedMethodsInformation.checkAllowed(MethodType.IS_CALLER_IN_ROLE);
         return instance.getComponent().isCallerInRole(roleName);
     }
 

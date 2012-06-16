@@ -21,29 +21,32 @@
  */
 package org.jboss.as.jdr;
 
-import org.jboss.as.controller.OperationFailedException;
-import org.jboss.as.controller.client.ModelControllerClient;
-import org.jboss.dmr.ModelNode;
-import org.python.core.PyObject;
-import org.python.util.PythonInterpreter;
+import static org.jboss.as.jdr.JdrLogger.ROOT_LOGGER;
+import static org.jboss.as.jdr.JdrMessages.MESSAGES;
 
+import java.io.UnsupportedEncodingException;
 import java.net.URL;
 import java.net.URLDecoder;
 import java.util.Date;
 
-import static org.jboss.as.jdr.JdrLogger.ROOT_LOGGER;
-import static org.jboss.as.jdr.JdrMessages.MESSAGES;
+import org.jboss.as.controller.OperationFailedException;
+import org.jboss.as.controller.client.ModelControllerClient;
+import org.jboss.dmr.ModelNode;
+import org.python.util.PythonInterpreter;
 
 /**
  * Wraps up the access to the jython interpreter to encapsulate its use
  * for running sosreport.
  *
  * @author Mike M. Clark
+ * @author Jesse Jaggars
  */
 public class SosInterpreter {
 
     private String jbossHomeDir = null;
     private String reportLocationDir = System.getProperty("user.dir");
+    private String hostControllerName = null;
+    private String serverName = null;
     private ModelControllerClient controllerClient = null;
 
     public SosInterpreter() {
@@ -55,48 +58,51 @@ public class SosInterpreter {
     }
 
     public JdrReport collect() throws OperationFailedException {
+        return collect(null, null, null, null);
+    }
+
+    public JdrReport collect(String username, String password, String host, String port) throws OperationFailedException {
         ROOT_LOGGER.startingCollection();
         Date startTime = new Date();
 
         String homeDir = getJbossHomeDir();
         if (homeDir == null) {
             ROOT_LOGGER.jbossHomeNotSet();
-            throw new OperationFailedException(MESSAGES.jbossHomeNotSet(), new ModelNode().set(MESSAGES.jbossHomeNotSet()));
+            throw new OperationFailedException(MESSAGES.jbossHomeNotSet(),
+                    new ModelNode().set(MESSAGES.jbossHomeNotSet()));
         }
 
-        PythonInterpreter interpreter = new PythonInterpreter();
-        interpreter.exec("import sys");
-        interpreter.exec("import shlex");
-
         String pyLocation = getPythonScriptLocation();
-        ROOT_LOGGER.debug("Location of JDR scripts: " + pyLocation);
+        ROOT_LOGGER.debug("Location of standard JDR scripts: " + pyLocation);
 
         String locationDir = getReportLocationDir();
 
         ROOT_LOGGER.debug("locationDir = " + locationDir);
-        ROOT_LOGGER.debug("homeDir = " + SosInterpreter.cleanPath(homeDir));
+        ROOT_LOGGER.debug("homeDir = " + homeDir);
 
-        PyObject report = null;
+        String pathToReport = "";
+        PythonInterpreter interpreter = new PythonInterpreter();
+
         try {
-            interpreter.exec("sys.path.append(\"" + pyLocation + "\")");
-
-            // If we have a controller client, use it to
-            // get runtime information.
+            SoSReport reporter = new SoSReport(interpreter, pyLocation, homeDir);
+            reporter.setUsername(username);
+            reporter.setPassword(password);
+            reporter.setHostname(host);
+            reporter.setPort(port);
             if (controllerClient != null) {
-                interpreter.exec("import sos");
-                interpreter.set("controller_client_proxy",
-                        new ModelControllerClientProxy(controllerClient));
-                interpreter.exec("sos.controllerClient = controller_client_proxy");
+                reporter.setControllerClient(controllerClient);
             }
+            reporter.setHostControllerName(hostControllerName);
+            reporter.setServerName(serverName);
+            reporter.setHome(homeDir);
+            reporter.setTmpDir(locationDir);
+            reporter.setCompressionType(CompressionType.ZIP);
+            pathToReport = reporter.execute();
 
-            interpreter.exec("from sos.sosreport import main");
-            interpreter.exec("args = shlex.split('-k eap6.home=\"" + homeDir + "\" --tmp-dir=\"" + locationDir + "\" -o eap6 --batch --report --compression-type=zip --silent')");
-            interpreter.exec("reportLocation = main(args)");
-            report = interpreter.get("reportLocation");
-            interpreter.cleanup();
         } catch (Throwable t) {
-            interpreter.cleanup();
             ROOT_LOGGER.pythonExceptionEncountered(t);
+        } finally {
+            interpreter.cleanup();
         }
 
         Date endTime = new Date();
@@ -105,7 +111,7 @@ public class SosInterpreter {
         JdrReport result = new JdrReport();
         result.setStartTime(startTime);
         result.setEndTime(endTime);
-        result.setLocation(report.asString());
+        result.setLocation(pathToReport);
         return result;
     }
 
@@ -126,11 +132,19 @@ public class SosInterpreter {
      * @return location for the archive
      */
     public String getReportLocationDir() {
-        return SosInterpreter.cleanPath(reportLocationDir);
+        return cleanPath(reportLocationDir);
     }
 
     public void setControllerClient(ModelControllerClient controllerClient) {
-       this.controllerClient = controllerClient;
+        this.controllerClient = controllerClient;
+    }
+
+    public void setHostControllerName(String hostControllerName) {
+        this.hostControllerName = hostControllerName;
+    }
+
+    public void setServerName(String serverName) {
+        this.serverName = serverName;
     }
 
     /**
@@ -144,7 +158,7 @@ public class SosInterpreter {
         if (jbossHomeDir == null) {
             jbossHomeDir = System.getenv("JBOSS_HOME");
         }
-        return SosInterpreter.cleanPath(jbossHomeDir);
+        return cleanPath(jbossHomeDir);
     }
 
 
@@ -170,18 +184,26 @@ public class SosInterpreter {
         return path.split(":", 2)[1].split("!")[0];
     }
 
+    /**
+     * Decodes a UTF-8 directory path obtained via a URL and "fixes" '\' characters
+     * for proper quoting. This is to fix up windows paths. If an the path's encoding
+     * is unsupported, a warning will be issued and separator replacement will proceed.
+     *
+     * @param path to be decoded
+     * @return "cleaned" path
+     */
     public static String cleanPath(String path) {
         try {
             path = URLDecoder.decode(path, "utf-8");
-        } catch (Exception e) {
-            ROOT_LOGGER.debug(e);
+        } catch (UnsupportedEncodingException e) {
+            ROOT_LOGGER.urlDecodeExceptionEncountered(e);
         }
         return path.replace("\\", "\\\\");
     }
 
     private String getPythonScriptLocation() {
         URL pyURL = this.getClass().getClassLoader().getResource("sos");
-        String decodedPath = SosInterpreter.cleanPath(pyURL.getPath());
-        return SosInterpreter.getPath(decodedPath);
+        String decodedPath = cleanPath(pyURL.getPath());
+        return getPath(decodedPath);
     }
 }

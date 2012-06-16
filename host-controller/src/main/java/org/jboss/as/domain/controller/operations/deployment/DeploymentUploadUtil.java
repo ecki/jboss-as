@@ -3,10 +3,11 @@
  */
 package org.jboss.as.domain.controller.operations.deployment;
 
-import org.jboss.as.controller.OperationFailedException;
-import org.jboss.as.controller.client.OperationAttachments;
-import org.jboss.as.server.deployment.repository.api.ContentRepository;
-import org.jboss.dmr.ModelNode;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.BYTES;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.CONTENT;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.INPUT_STREAM_INDEX;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.URL;
+import static org.jboss.as.domain.controller.DomainControllerMessages.MESSAGES;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -14,9 +15,10 @@ import java.io.InputStream;
 import java.net.MalformedURLException;
 import java.net.URL;
 
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.BYTES;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.INPUT_STREAM_INDEX;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.URL;
+import org.jboss.as.controller.OperationContext;
+import org.jboss.as.controller.OperationFailedException;
+import org.jboss.as.repository.ContentRepository;
+import org.jboss.dmr.ModelNode;
 
 /**
  * Utility method for storing deployment content.
@@ -28,29 +30,36 @@ public class DeploymentUploadUtil {
     private DeploymentUploadUtil() {
     }
 
-    public static byte[] storeDeploymentContent(OperationAttachments context, ModelNode operation, ContentRepository contentRepository) throws IOException, OperationFailedException {
+    public static byte[] storeDeploymentContent(OperationContext context, ModelNode operation, ContentRepository contentRepository) throws IOException, OperationFailedException {
         InputStream in = getContents(context, operation);
         return contentRepository.addContent(in);
     }
 
-    private static InputStream getContents(OperationAttachments context, ModelNode operation) throws OperationFailedException {
+    private static InputStream getContents(OperationContext context, ModelNode operation) throws OperationFailedException {
+        if(! operation.hasDefined(CONTENT)) {
+            createFailureException(MESSAGES.invalidContentDeclaration());
+        }
+        return getInputStream(context, operation.require(CONTENT).get(0));
+    }
+
+    private static InputStream getInputStream(OperationContext context, ModelNode content) throws OperationFailedException {
         InputStream in = null;
         String message = "";
-        if (operation.hasDefined(INPUT_STREAM_INDEX)) {
-            int streamIndex = operation.get(INPUT_STREAM_INDEX).asInt();
-            if (streamIndex > context.getInputStreams().size() - 1) {
-                IllegalArgumentException e = new IllegalArgumentException("Invalid " + INPUT_STREAM_INDEX + "=" + streamIndex + ", the maximum index is " + (context.getInputStreams().size() - 1));
-                throw createFailureException(e, message);
+        if (content.hasDefined(INPUT_STREAM_INDEX)) {
+            int streamIndex = content.get(INPUT_STREAM_INDEX).asInt();
+            if (streamIndex > context.getAttachmentStreamCount() - 1) {
+                message = MESSAGES.invalidValue(INPUT_STREAM_INDEX, streamIndex, (context.getAttachmentStreamCount() - 1));
+                throw createFailureException(message);
             }
-            message = "Null stream at index " + streamIndex;
-            in = context.getInputStreams().get(streamIndex);
-        } else if (operation.hasDefined(BYTES)) {
-            in = new ByteArrayInputStream(operation.get(BYTES).asBytes());
-            message = "Invalid byte stream.";
-        } else if (operation.hasDefined(URL)) {
-            final String urlSpec = operation.get(URL).asString();
+            message = MESSAGES.nullStream(streamIndex);
+            in = context.getAttachmentStream(streamIndex);
+        } else if (content.hasDefined(BYTES)) {
+            in = new ByteArrayInputStream(content.get(BYTES).asBytes());
+            message = MESSAGES.invalidByteStream();
+        } else if (content.hasDefined(URL)) {
+            final String urlSpec = content.get(URL).asString();
             try {
-                message = "Invalid url stream.";
+                message = MESSAGES.invalidUrlStream();
                 in = new URL(urlSpec).openStream();
             } catch (MalformedURLException e) {
                 throw createFailureException(message);
@@ -66,9 +75,5 @@ public class DeploymentUploadUtil {
 
     private static OperationFailedException createFailureException(String msg) {
         return new OperationFailedException(new ModelNode().set(msg));
-    }
-
-    private static OperationFailedException createFailureException(Throwable cause, String msg) {
-        return new OperationFailedException(cause, new ModelNode().set(msg));
     }
 }

@@ -23,10 +23,12 @@ package org.jboss.as.cmp.jdbc.metadata;
 
 import java.lang.reflect.Method;
 import java.util.Map;
+import org.jboss.as.cmp.CmpMessages;
+import static org.jboss.as.cmp.CmpMessages.MESSAGES;
 
 
 /**
- * Imutable class contains information about a declated query.
+ * Immutable class contains information about a declared query.
  *
  * @author <a href="mailto:dain@daingroup.com">Dain Sundstrom</a>
  * @version $Revision: 81030 $
@@ -79,7 +81,7 @@ public final class JDBCDeclaredQueryMetaData implements JDBCQueryMetaData {
     private final String fieldName;
 
     /**
-     * The aliase that is used for the main select table.
+     * The alias that is used for the main select table.
      */
     private final String alias;
     /**
@@ -158,16 +160,10 @@ public final class JDBCDeclaredQueryMetaData implements JDBCQueryMetaData {
             } else {
                 // the ejb-name and field-name elements are not allowed for finders
                 if (props.get("ejb-name") != null) {
-                    throw new RuntimeException(
-                            "The ejb-name element of declared-sql select is only " +
-                                    "allowed for ejbSelect queries."
-                    );
+                    throw MESSAGES.declaredSqlElementNotAllowed("ejb-name");
                 }
                 if (props.get("field-name") != null) {
-                    throw new RuntimeException(
-                            "The field-name element of declared-sql select is only " +
-                                    "allowed for ejbSelect queries."
-                    );
+                    throw MESSAGES.declaredSqlElementNotAllowed("field-name");
                 }
                 ejbName = null;
                 fieldName = null;
@@ -176,10 +172,7 @@ public final class JDBCDeclaredQueryMetaData implements JDBCQueryMetaData {
             additionalColumns = props.get("additional-columns");
         } else {
             if (method.getName().startsWith("ejbSelect")) {
-                throw new RuntimeException(
-                        "The select element of " +
-                                "declared-sql is required for ejbSelect queries."
-                );
+                throw MESSAGES.declaredSqlElementNotAllowed("select");
             }
             distinct = false;
             ejbName = null;
@@ -241,7 +234,7 @@ public final class JDBCDeclaredQueryMetaData implements JDBCQueryMetaData {
 
     /**
      * Gets other sql code which is appended to the end of the query.
-     * This is userful for supplying hints to the query engine.
+     * This is useful for supplying hints to the query engine.
      *
      * @return a String which contains additional sql code which is
      *         appended to the end of the query

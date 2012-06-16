@@ -25,6 +25,7 @@ import java.sql.CallableStatement;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import org.jboss.as.cmp.CmpMessages;
 import org.jboss.as.cmp.context.CmpEntityBeanContext;
 import org.jboss.as.cmp.jdbc.JDBCIdentityColumnCreateCommand;
 import org.jboss.as.cmp.jdbc.JDBCStoreManager;
@@ -33,7 +34,7 @@ import org.jboss.as.cmp.jdbc.SQLUtil;
 import org.jboss.as.cmp.jdbc.metadata.JDBCEntityCommandMetaData;
 
 /**
- * Create command for use with Oracle that uses a sequence in conjuction with
+ * Create command for use with Oracle that uses a sequence in conjunction with
  * a RETURNING clause to generate keys in a single statement
  * <p/>
  * The sequence is called by the parameter attribute "sequence_name".
@@ -56,7 +57,7 @@ public class JDBCOracleSequenceCreateCommand extends JDBCIdentityColumnCreateCom
         super.initEntityCommand(entityCommand);
         sequence_name = entityCommand.getAttribute("sequence_name");
         if (sequence_name == null) {
-            throw new RuntimeException("sequence_name attribute must be specified inside <entity-command>");
+            throw CmpMessages.MESSAGES.sequenceNameRequired();
         }
     }
 

@@ -30,6 +30,7 @@ import org.jboss.as.ee.component.EEModuleDescription;
 import org.jboss.as.ee.component.interceptors.InterceptorClassDescription;
 import org.jboss.as.ejb3.component.EJBComponentDescription;
 import org.jboss.as.ejb3.component.messagedriven.MessageDrivenComponentDescription;
+import org.jboss.as.ejb3.component.session.SessionBeanComponentDescription;
 import org.jboss.as.ejb3.component.stateless.StatelessComponentDescription;
 import org.jboss.as.server.deployment.DeploymentPhaseContext;
 import org.jboss.as.server.deployment.DeploymentUnit;
@@ -51,7 +52,7 @@ import org.jboss.metadata.javaee.spec.LifecycleCallbacksMetaData;
 import static org.jboss.as.ejb3.EjbMessages.MESSAGES;
 
 /**
- * Deployment descriptor that resolves interceptor methods definined in ejb-jar.xml that could not be resolved at
+ * Deployment descriptor that resolves interceptor methods defined in ejb-jar.xml that could not be resolved at
  * DD parse time.
  *
  * @author Stuart Douglas
@@ -69,7 +70,8 @@ public class DeploymentDescriptorMethodProcessor implements DeploymentUnitProces
             for (final ComponentDescription component : eeModuleDescription.getComponentDescriptions()) {
                 if (component instanceof EJBComponentDescription) {
                     try {
-                        handleSessionBean((EJBComponentDescription) component, classIndex, reflectionIndex);
+                        if (component instanceof SessionBeanComponentDescription || component instanceof MessageDrivenComponentDescription)
+                            handleSessionBean((EJBComponentDescription) component, classIndex, reflectionIndex);
                         if (component instanceof StatelessComponentDescription || component instanceof MessageDrivenComponentDescription) {
                             handleStatelessSessionBean((EJBComponentDescription) component, classIndex, reflectionIndex);
                         }
@@ -170,6 +172,43 @@ public class DeploymentDescriptorMethodProcessor implements DeploymentUnitProces
                     component.addInterceptorMethodOverride(className, builder.build());
                 } else {
                     component.addInterceptorMethodOverride(preDestroy.getClassName(), builder.build());
+                }
+            }
+        }
+
+        if (component.isStateful()) {
+
+            final SessionBeanMetaData sessionBeanMetadata = (SessionBeanMetaData) metaData;
+            // pre-passivate(s) of the interceptor configured (if any) in the deployment descriptor
+            final LifecycleCallbacksMetaData prePassivates = sessionBeanMetadata.getPrePassivates();
+            if (prePassivates != null) {
+                for (final LifecycleCallbackMetaData prePassivate : prePassivates) {
+                    final InterceptorClassDescription.Builder builder = InterceptorClassDescription.builder();
+                    final String methodName = prePassivate.getMethodName();
+                    final MethodIdentifier methodIdentifier = MethodIdentifier.getIdentifier(void.class, methodName);
+                    builder.setPrePassivate(methodIdentifier);
+                    if (prePassivate.getClassName() == null || prePassivate.getClassName().isEmpty()) {
+                        final String className = ClassReflectionIndexUtil.findRequiredMethod(reflectionIndex, componentClass.getModuleClass(), methodIdentifier).getDeclaringClass().getName();
+                        component.addInterceptorMethodOverride(className, builder.build());
+                    } else {
+                        component.addInterceptorMethodOverride(prePassivate.getClassName(), builder.build());
+                    }
+                }
+            }
+
+            final LifecycleCallbacksMetaData postActivates = sessionBeanMetadata.getPostActivates();
+            if (postActivates != null) {
+                for (final LifecycleCallbackMetaData postActivate : postActivates) {
+                    final InterceptorClassDescription.Builder builder = InterceptorClassDescription.builder();
+                    final String methodName = postActivate.getMethodName();
+                    final MethodIdentifier methodIdentifier = MethodIdentifier.getIdentifier(void.class, methodName);
+                    builder.setPostActivate(methodIdentifier);
+                    if (postActivate.getClassName() == null || postActivate.getClassName().isEmpty()) {
+                        final String className = ClassReflectionIndexUtil.findRequiredMethod(reflectionIndex, componentClass.getModuleClass(), methodIdentifier).getDeclaringClass().getName();
+                        component.addInterceptorMethodOverride(className, builder.build());
+                    } else {
+                        component.addInterceptorMethodOverride(postActivate.getClassName(), builder.build());
+                    }
                 }
             }
         }

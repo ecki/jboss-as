@@ -21,16 +21,18 @@
  */
 package org.jboss.as.weld.services;
 
-import org.jboss.modules.ModuleClassLoader;
-import org.jboss.weld.bootstrap.api.Singleton;
-import org.jboss.weld.bootstrap.api.SingletonProvider;
-
 import java.security.AccessController;
 import java.security.PrivilegedAction;
-import java.util.Hashtable;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+
+import org.jboss.as.weld.WeldMessages;
+import org.jboss.modules.ModuleClassLoader;
+import org.jboss.weld.bootstrap.api.Singleton;
+import org.jboss.weld.bootstrap.api.SingletonProvider;
 
 /**
  * Singleton Provider that uses the TCCL to figure out the current application.
@@ -64,18 +66,19 @@ public class ModuleGroupSingletonProvider extends SingletonProvider {
     }
 
     private static class TCCLSingleton<T> implements Singleton<T> {
-        // use Hashtable for concurrent access
-        private final Map<ClassLoader, T> store = new Hashtable<ClassLoader, T>();
+
+        private volatile Map<ClassLoader, T> store = Collections.emptyMap();
 
         public T get() {
             T instance = store.get(findParentModuleCl(getClassLoader()));
             if (instance == null) {
-                throw new IllegalStateException("Singleton not set for " + getClassLoader());
+                throw WeldMessages.MESSAGES.singletonNotSet(getClassLoader());
             }
             return instance;
         }
 
-        public void set(T object) {
+        public synchronized void set(T object) {
+            final Map<ClassLoader, T> store = new IdentityHashMap<ClassLoader, T>(this.store);
             ClassLoader classLoader = getClassLoader();
             store.put(classLoader, object);
             if (deploymentClassLoaders.containsKey(classLoader)) {
@@ -83,16 +86,19 @@ public class ModuleGroupSingletonProvider extends SingletonProvider {
                     store.put(cl, object);
                 }
             }
+            this.store = store;
         }
 
-        public void clear() {
+        public synchronized void clear() {
             ClassLoader classLoader = getClassLoader();
+            final Map<ClassLoader, T> store = new IdentityHashMap<ClassLoader, T>(this.store);
             store.remove(classLoader);
             if (deploymentClassLoaders.containsKey(classLoader)) {
                 for (ClassLoader cl : deploymentClassLoaders.get(classLoader)) {
                     store.remove(cl);
                 }
             }
+            this.store = store;
         }
 
         public boolean isSet() {

@@ -33,7 +33,8 @@ import org.jboss.remoting3.Endpoint;
 import org.jboss.remoting3.Remoting;
 import org.jboss.remoting3.remote.RemoteConnectionProviderFactory;
 import org.xnio.OptionMap;
-import org.xnio.Options;
+
+import static org.jboss.as.remoting.RemotingMessages.MESSAGES;
 
 /**
  * An MSC service for Remoting endpoints.
@@ -69,7 +70,8 @@ public final class EndpointService implements Service<Endpoint> {
             boolean ok = false;
             endpoint = Remoting.createEndpoint(endpointName, optionMap);
             try {
-                endpoint.addConnectionProvider("remote", new RemoteConnectionProviderFactory(), OptionMap.create(Options.SSL_ENABLED, Boolean.FALSE));
+                // Reuse the options for the remote connection factory for now
+                endpoint.addConnectionProvider("remote", new RemoteConnectionProviderFactory(), optionMap);
                 ok = true;
             } finally {
                 if (! ok) {
@@ -77,7 +79,7 @@ public final class EndpointService implements Service<Endpoint> {
                 }
             }
         } catch (IOException e) {
-            throw new StartException("Failed to start service", e);
+            throw MESSAGES.couldNotStart(e);
         }
         this.endpoint = endpoint;
     }
@@ -99,12 +101,12 @@ public final class EndpointService implements Service<Endpoint> {
     /** {@inheritDoc} */
     public synchronized Endpoint getValue() throws IllegalStateException {
         final Endpoint endpoint = this.endpoint;
-        if (endpoint == null) throw new IllegalStateException();
+        if (endpoint == null) throw MESSAGES.endpointEmpty();
         return endpoint;
     }
 
     public enum EndpointType {
         MANAGEMENT,
-        SUBSYSTEM;
+        SUBSYSTEM
     }
 }

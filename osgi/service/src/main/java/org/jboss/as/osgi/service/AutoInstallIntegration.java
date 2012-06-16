@@ -22,31 +22,37 @@
 
 package org.jboss.as.osgi.service;
 
+import static org.jboss.as.osgi.OSGiLogger.LOGGER;
+import static org.jboss.as.osgi.OSGiMessages.MESSAGES;
+
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FilenameFilter;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URL;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Observable;
-import java.util.Observer;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Iterator;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.jar.JarFile;
+import java.util.jar.Manifest;
 
 import org.jboss.as.osgi.parser.SubsystemState;
-import org.jboss.as.osgi.parser.SubsystemState.ChangeEvent;
-import org.jboss.as.osgi.parser.SubsystemState.ChangeType;
 import org.jboss.as.osgi.parser.SubsystemState.OSGiCapability;
 import org.jboss.as.server.ServerEnvironment;
 import org.jboss.as.server.ServerEnvironmentService;
 import org.jboss.modules.Module;
 import org.jboss.modules.ModuleIdentifier;
+import org.jboss.modules.ModuleLoadException;
 import org.jboss.modules.ModuleLoader;
 import org.jboss.msc.service.AbstractService;
 import org.jboss.msc.service.ServiceBuilder;
 import org.jboss.msc.service.ServiceContainer;
 import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceController.Mode;
+import org.jboss.msc.service.ServiceListener;
 import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.service.ServiceTarget;
 import org.jboss.msc.service.StartContext;
@@ -54,20 +60,35 @@ import org.jboss.msc.service.StartException;
 import org.jboss.msc.value.InjectedValue;
 import org.jboss.osgi.deployment.deployer.Deployment;
 import org.jboss.osgi.deployment.deployer.DeploymentFactory;
-import org.jboss.osgi.framework.AutoInstallProvider;
-import org.jboss.osgi.framework.BundleManagerService;
+import org.jboss.osgi.framework.AutoInstallComplete;
+import org.jboss.osgi.framework.AutoInstallHandler;
+import org.jboss.osgi.framework.BundleManager;
+import org.jboss.osgi.framework.Constants;
+import org.jboss.osgi.framework.IntegrationServices;
 import org.jboss.osgi.framework.Services;
+import org.jboss.osgi.framework.StorageState;
+import org.jboss.osgi.framework.StorageStateProvider;
 import org.jboss.osgi.metadata.OSGiMetaData;
 import org.jboss.osgi.metadata.OSGiMetaDataBuilder;
-import org.jboss.osgi.spi.util.BundleInfo;
+import org.jboss.osgi.repository.XRepository;
+import org.jboss.osgi.repository.XRequirementBuilder;
+import org.jboss.osgi.resolver.MavenCoordinates;
+import org.jboss.osgi.resolver.XCapability;
+import org.jboss.osgi.resolver.XEnvironment;
+import org.jboss.osgi.resolver.XResource;
+import org.jboss.osgi.resolver.XResourceBuilder;
+import org.jboss.osgi.resolver.XResourceBuilderFactory;
+import org.jboss.osgi.spi.BundleInfo;
+import org.jboss.osgi.spi.OSGiManifestBuilder;
 import org.jboss.osgi.vfs.AbstractVFS;
-import org.jboss.osgi.vfs.VirtualFile;
 import org.osgi.framework.Bundle;
-import org.osgi.framework.BundleException;
+import org.osgi.framework.BundleContext;
+import org.osgi.framework.ServiceReference;
+import org.osgi.resource.Capability;
+import org.osgi.resource.Requirement;
+import org.osgi.service.packageadmin.PackageAdmin;
+import org.osgi.service.repository.ContentNamespace;
 import org.osgi.service.startlevel.StartLevel;
-
-import static org.jboss.as.osgi.OSGiLogger.ROOT_LOGGER;
-import static org.jboss.as.osgi.OSGiMessages.MESSAGES;
 
 /**
  * Integration point to auto install bundles at framework startup.
@@ -75,29 +96,30 @@ import static org.jboss.as.osgi.OSGiMessages.MESSAGES;
  * @author Thomas.Diesler@jboss.com
  * @since 11-Sep-2010
  */
-class AutoInstallIntegration extends AbstractService<AutoInstallProvider> implements AutoInstallProvider, Observer {
+class AutoInstallIntegration extends AbstractService<AutoInstallHandler> implements AutoInstallHandler {
 
-    final InjectedValue<BundleManagerService> injectedBundleManager = new InjectedValue<BundleManagerService>();
-    final InjectedValue<ServerEnvironment> injectedEnvironment = new InjectedValue<ServerEnvironment>();
-    final InjectedValue<Bundle> injectedSystemBundle = new InjectedValue<Bundle>();
-    final InjectedValue<StartLevel> injectedStartLevel = new InjectedValue<StartLevel>();
-    final InjectedValue<SubsystemState> injectedSubsystemState = new InjectedValue<SubsystemState>();
-    ServiceController<?> serviceController;
-
-    private File modulesDir;
+    private final InjectedValue<BundleManager> injectedBundleManager = new InjectedValue<BundleManager>();
+    private final InjectedValue<StorageStateProvider> injectedStorageProvider = new InjectedValue<StorageStateProvider>();
+    private final InjectedValue<ServerEnvironment> injectedServerEnvironment = new InjectedValue<ServerEnvironment>();
+    private final InjectedValue<BundleContext> injectedSystemContext = new InjectedValue<BundleContext>();
+    private final InjectedValue<PackageAdmin> injectedPackageAdmin = new InjectedValue<PackageAdmin>();
+    private final InjectedValue<StartLevel> injectedStartLevel = new InjectedValue<StartLevel>();
+    private final InjectedValue<SubsystemState> injectedSubsystemState = new InjectedValue<SubsystemState>();
+    private final InjectedValue<XEnvironment> injectedEnvironment = new InjectedValue<XEnvironment>();
     private File bundlesDir;
-    private ServiceTarget serviceTarget;
-    private final AtomicLong updateServiceIdCounter = new AtomicLong();
 
     static ServiceController<?> addService(final ServiceTarget target) {
         AutoInstallIntegration service = new AutoInstallIntegration();
-        ServiceBuilder<?> builder = target.addService(Services.AUTOINSTALL_PROVIDER, service);
-        builder.addDependency(ServerEnvironmentService.SERVICE_NAME, ServerEnvironment.class, service.injectedEnvironment);
+        ServiceBuilder<?> builder = target.addService(IntegrationServices.AUTOINSTALL_HANDLER, service);
+        builder.addDependency(ServerEnvironmentService.SERVICE_NAME, ServerEnvironment.class, service.injectedServerEnvironment);
         builder.addDependency(SubsystemState.SERVICE_NAME, SubsystemState.class, service.injectedSubsystemState);
-        builder.addDependency(Services.BUNDLE_MANAGER, BundleManagerService.class, service.injectedBundleManager);
-        builder.addDependency(Services.SYSTEM_BUNDLE, Bundle.class, service.injectedSystemBundle);
+        builder.addDependency(Services.BUNDLE_MANAGER, BundleManager.class, service.injectedBundleManager);
+        builder.addDependency(Services.PACKAGE_ADMIN, PackageAdmin.class, service.injectedPackageAdmin);
+        builder.addDependency(Services.STORAGE_STATE_PROVIDER, StorageStateProvider.class, service.injectedStorageProvider);
+        builder.addDependency(Services.SYSTEM_CONTEXT, BundleContext.class, service.injectedSystemContext);
         builder.addDependency(Services.START_LEVEL, StartLevel.class, service.injectedStartLevel);
-        builder.addDependency(Services.FRAMEWORK_INIT);
+        builder.addDependency(Services.ENVIRONMENT, XEnvironment.class, service.injectedEnvironment);
+        builder.addDependency(Services.FRAMEWORK_CREATE);
         builder.setInitialMode(Mode.ON_DEMAND);
         return builder.install();
     }
@@ -107,107 +129,176 @@ class AutoInstallIntegration extends AbstractService<AutoInstallProvider> implem
 
     @Override
     public synchronized void start(StartContext context) throws StartException {
-        serviceController = context.getController();
-        ROOT_LOGGER.debugf("Starting: %s in mode %s", serviceController.getName(), serviceController.getMode());
+        ServiceController<?> serviceController = context.getController();
+        LOGGER.tracef("Starting: %s in mode %s", serviceController.getName(), serviceController.getMode());
 
-        final Map<ServiceName, OSGiCapability> pendingServices = new LinkedHashMap<ServiceName, OSGiCapability>();
+        final BundleContext syscontext = injectedSystemContext.getValue();
+        final String startLevelProp = syscontext.getProperty(Constants.FRAMEWORK_BEGINNING_STARTLEVEL);
+        final int beginningStartLevel = startLevelProp != null ? Integer.parseInt(startLevelProp) : 1;
+
         try {
-            final BundleManagerService bundleManager = injectedBundleManager.getValue();
-            final ServiceContainer serviceContainer = serviceController.getServiceContainer();
-            serviceTarget = context.getChildTarget();
-
-            modulesDir = injectedEnvironment.getValue().getModulesDir();
-            bundlesDir = new File(modulesDir.getPath() + "/../bundles").getCanonicalFile();
-
+            ServerEnvironment serverEnvironment = injectedServerEnvironment.getValue();
+            bundlesDir = serverEnvironment.getBundlesDir();
             if (bundlesDir.isDirectory() == false)
-                throw MESSAGES.cannotFindBundleDir(bundlesDir);
+                throw MESSAGES.illegalStateCannotFindBundleDir(bundlesDir);
 
-            injectedSubsystemState.getValue().addObserver(this);
-
-            for (OSGiCapability moduleMetaData : injectedSubsystemState.getValue().getCapabilities()) {
-                ServiceName serviceName = installModule(bundleManager, moduleMetaData);
-                pendingServices.put(serviceName, moduleMetaData);
+            final List<OSGiCapability> configcaps = new ArrayList<OSGiCapability>();
+            configcaps.add(new OSGiCapability("org.osgi.enterprise", null));
+            configcaps.addAll(injectedSubsystemState.getValue().getCapabilities());
+            Iterator<OSGiCapability> iterator = configcaps.iterator();
+            while (iterator.hasNext()) {
+                OSGiCapability configcap = iterator.next();
+                if (installInitialModuleCapability(configcap))
+                    iterator.remove();
             }
 
-            // Install a service that has a dependency on all pending bundle INSTALLED services
-            ServiceName servicesInstalled = Services.AUTOINSTALL_PROVIDER.append("INSTALLED");
-            ServiceBuilder<Void> builder = serviceTarget.addService(servicesInstalled, new AbstractService<Void>() {
-                public void start(StartContext context) throws StartException {
-                    ROOT_LOGGER.debugf("Auto bundles installed");
-                }
-            });
-            builder.addDependencies(pendingServices.keySet());
-            builder.install();
+            final Set<ServiceName> resolvableServices = new LinkedHashSet<ServiceName>();
+            AutoInstallComplete installComplete = new AutoInstallComplete() {
 
-            // Install a service that starts the bundles
-            builder = serviceTarget.addService(Services.AUTOINSTALL_PROVIDER_COMPLETE, new AbstractService<Void>() {
+                @Override
+                protected boolean allServicesAdded(Set<ServiceName> trackedServices) {
+                    return configcaps.size() == trackedServices.size();
+                }
+
+                @Override
                 public void start(StartContext context) throws StartException {
-                    for (ServiceName serviceName : pendingServices.keySet()) {
-                        OSGiCapability moduleMetaData = pendingServices.get(serviceName);
-                        startBundle(serviceContainer, serviceName, moduleMetaData);
+                    // Resolve all bundles up until and including the Framework beginning start level
+                    Set<Bundle> resolvableBundles = new LinkedHashSet<Bundle>();
+                    ServiceContainer serviceContainer = context.getController().getServiceContainer();
+                    for (ServiceName serviceName : resolvableServices) {
+                        ServiceController<?> requiredService = serviceContainer.getRequiredService(serviceName);
+                        resolvableBundles.add((Bundle) requiredService.getValue());
                     }
-                    ROOT_LOGGER.debugf("Auto bundles bundles started");
+                    Bundle[] bundleArr = resolvableBundles.toArray(new Bundle[resolvableBundles.size()]);
+                    PackageAdmin packageAdmin = injectedPackageAdmin.getValue();
+                    packageAdmin.resolveBundles(bundleArr);
+                    super.start(context);
                 }
-            });
-            builder.addDependencies(servicesInstalled);
-            builder.install();
+            };
+            installComplete.install(context.getChildTarget());
+            ServiceListener<Bundle> listener = installComplete.getListener();
 
+            for (OSGiCapability configcap : configcaps) {
+                ServiceName serviceName = installInitialCapability(syscontext, configcap, listener);
+                int startLevel = configcap.getStartLevel() != null ? configcap.getStartLevel() : 1;
+                if (serviceName != null && startLevel <= beginningStartLevel) {
+                    resolvableServices.add(serviceName);
+                }
+            }
         } catch (Exception ex) {
-            throw new StartException(MESSAGES.failedToCreateAutoInstallList(), ex);
+            throw MESSAGES.startFailedToProcessInitialCapabilites(ex);
         }
     }
 
-    ServiceName installModule(BundleManagerService bundleManager, OSGiCapability moduleMetaData) throws Exception {
-        ModuleIdentifier identifier = moduleMetaData.getIdentifier();
-        Integer startLevel = moduleMetaData.getStartLevel();
+    private boolean installInitialModuleCapability(OSGiCapability osgicap) throws Exception {
+        String identifier = osgicap.getIdentifier();
+        if (isValidModuleIdentifier(identifier)) {
+            ModuleIdentifier moduleId = ModuleIdentifier.fromString(identifier);
 
-        // Attempt to install bundle from the bundles hirarchy
-        File modulesFile = getRepositoryEntry(bundlesDir, identifier);
-        if (modulesFile != null) {
-            URL url = modulesFile.toURI().toURL();
-            return installBundleFromURL(bundleManager, url, startLevel);
+            // Find the module in the bundles hierarchy
+            File bundleFile = ModuleIdentityRepository.getRepositoryEntry(bundlesDir, moduleId);
+            if (bundleFile == null) {
+                LOGGER.tracef("Installing initial module capability: %s", identifier);
+
+                // Attempt to load the module from the modules hierarchy
+                Module module = null;
+                try {
+                    ModuleLoader moduleLoader = Module.getBootModuleLoader();
+                    module = moduleLoader.loadModule(moduleId);
+                } catch (ModuleLoadException ex) {
+                    throw MESSAGES.startFailedCannotResolveInitialCapability(ex, identifier);
+                }
+                if (module != null) {
+                    OSGiMetaData metadata = getModuleMetadata(module);
+                    XResourceBuilder builder = XResourceBuilderFactory.create();
+                    if (metadata != null) {
+                        builder.loadFrom(metadata);
+                    } else {
+                        builder.loadFrom(module);
+                    }
+                    XResource res = builder.getResource();
+                    res.addAttachment(Module.class, module);
+                    injectedEnvironment.getValue().installResources(res);
+                    return true;
+                }
+            }
         }
+        return false;
+    }
 
-        // Attempt to install bundle from the modules hirarchy
-        modulesFile = getRepositoryEntry(modulesDir, identifier);
-        if (modulesFile != null) {
-            URL url = modulesFile.toURI().toURL();
-            VirtualFile virtualFile = AbstractVFS.toVirtualFile(url);
-            if (BundleInfo.isValidBundle(virtualFile)) {
-                ROOT_LOGGER.foundOsgiBundle(modulesFile);
-                return installBundleFromURL(bundleManager, url, startLevel);
+    private ServiceName installInitialCapability(BundleContext context, OSGiCapability osgicap, ServiceListener<Bundle> listener) throws Exception {
+        String identifier = osgicap.getIdentifier();
+        Integer level = osgicap.getStartLevel();
+
+        ServiceName result = null;
+
+        // Try the identifier as ModuleIdentifier
+        if (isValidModuleIdentifier(identifier)) {
+            ModuleIdentifier moduleId = ModuleIdentifier.fromString(identifier);
+
+            // Attempt to install the bundle from the bundles hierarchy
+            File bundleFile = ModuleIdentityRepository.getRepositoryEntry(bundlesDir, moduleId);
+            if (bundleFile != null) {
+                LOGGER.tracef("Installing initial bundle capability: %s", identifier);
+                URL bundleURL = bundleFile.toURI().toURL();
+                result = installBundleFromURL(bundleURL, identifier, level, listener);
             }
         }
 
-        // Register module with the OSGi layer
-        ModuleLoader moduleLoader = Module.getBootModuleLoader();
-        Module module = moduleLoader.loadModule(identifier);
-        OSGiMetaData metadata = getModuleMetadata(module);
-        return bundleManager.registerModule(serviceTarget, module, metadata);
+        // Try the identifier as MavenCoordinates
+        else if (isValidMavenIdentifier(identifier)) {
+            LOGGER.tracef("Installing initial maven capability: %s", identifier);
+            ServiceReference sref = context.getServiceReference(XRepository.class.getName());
+            XRepository repository = (XRepository) context.getService(sref);
+            MavenCoordinates mavenId = MavenCoordinates.parse(identifier);
+            Requirement req = XRequirementBuilder.create(mavenId).getRequirement();
+            Collection<Capability> caps = repository.findProviders(req);
+            if (caps.isEmpty() == false) {
+                XResource resource = (XResource) caps.iterator().next().getResource();
+                XCapability ccap = (XCapability) resource.getCapabilities(ContentNamespace.CONTENT_NAMESPACE).get(0);
+                URL bundleURL = new URL((String) ccap.getAttribute(ContentNamespace.CAPABILITY_URL_ATTRIBUTE));
+                result = installBundleFromURL(bundleURL, identifier, level, listener);
+            }
+        }
+
+        if (result == null)
+            throw MESSAGES.startFailedCannotResolveInitialCapability(null, identifier);
+
+        return result;
     }
 
-    private ServiceName installBundleFromURL(BundleManagerService bundleManager, URL moduleURL, Integer startLevel) throws Exception {
-        BundleInfo info = BundleInfo.createBundleInfo(moduleURL);
+    private boolean isValidModuleIdentifier(String identifier) {
+        try {
+            ModuleIdentifier.fromString(identifier);
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    private boolean isValidMavenIdentifier(String identifier) {
+        try {
+            MavenCoordinates.parse(identifier);
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    private ServiceName installBundleFromURL(URL bundleURL, String location, Integer level, ServiceListener<Bundle> listener) throws Exception {
+        BundleManager bundleManager = injectedBundleManager.getValue();
+        BundleInfo info = BundleInfo.createBundleInfo(AbstractVFS.toVirtualFile(bundleURL), location);
         Deployment dep = DeploymentFactory.createDeployment(info);
-        if (startLevel != null) {
-            dep.setStartLevel(startLevel.intValue());
+        if (level != null) {
+            dep.setStartLevel(level.intValue());
+            dep.setAutoStart(true);
         }
-        return bundleManager.installBundle(serviceTarget, dep);
-    }
-
-    void startBundle(final ServiceContainer serviceContainer, ServiceName serviceName, OSGiCapability moduleMetaData) {
-        if (moduleMetaData.getStartLevel() != null) {
-            @SuppressWarnings("unchecked")
-            ServiceController<Bundle> controller = (ServiceController<Bundle>) serviceContainer.getRequiredService(serviceName);
-            Bundle bundle = controller.getValue();
-            StartLevel startLevel = injectedStartLevel.getValue();
-            startLevel.setBundleStartLevel(bundle, moduleMetaData.getStartLevel());
-            try {
-                bundle.start();
-            } catch (BundleException ex) {
-                ROOT_LOGGER.cannotStart(ex, bundle);
-            }
+        StorageStateProvider storageProvider = injectedStorageProvider.getValue();
+        StorageState storageState = storageProvider.getByLocation(dep.getLocation());
+        if (storageState != null) {
+            dep.addAttachment(StorageState.class, storageState);
         }
+        return bundleManager.installBundle(dep, listener);
     }
 
     @Override
@@ -215,99 +306,34 @@ class AutoInstallIntegration extends AbstractService<AutoInstallProvider> implem
         return this;
     }
 
-    /**
-     * Get file for the singe jar that corresponds to the given identifier
-     */
-    private File getRepositoryEntry(File rootDir, ModuleIdentifier identifier) throws IOException {
-
-        String identifierPath = identifier.getName().replace('.', '/') + "/" + identifier.getSlot();
-        File entryDir = new File(rootDir + "/" + identifierPath);
-        if (entryDir.isDirectory() == false) {
-            ROOT_LOGGER.debugf("Cannot obtain directory: %s", entryDir);
-            return null;
-        }
-
-        String[] files = entryDir.list(new FilenameFilter() {
-            public boolean accept(File dir, String name) {
-                return name.endsWith(".jar");
-            }
-        });
-        if (files.length == 0) {
-            ROOT_LOGGER.debugf("Cannot find jar in: %s", entryDir);
-            return null;
-        }
-        if (files.length > 1) {
-            ROOT_LOGGER.debugf("Multiple jars in: %s", entryDir);
-            return null;
-        }
-
-        File entryFile = new File(entryDir + "/" + files[0]);
-        if (entryFile.exists() == false) {
-            ROOT_LOGGER.debugf("File does not exist: %s", entryFile);
-            return null;
-        }
-
-        return entryFile;
-    }
-
     private OSGiMetaData getModuleMetadata(Module module) throws IOException {
-        final File modulesDir = injectedEnvironment.getValue().getModulesDir();
+
+        URL manifestURL = module.getClassLoader().getResource(JarFile.MANIFEST_NAME);
+        if (manifestURL != null) {
+            InputStream input = manifestURL.openStream();
+            try {
+                Manifest manifest = new Manifest(input);
+                if (OSGiManifestBuilder.isValidBundleManifest(manifest)) {
+                    return OSGiMetaDataBuilder.load(manifest);
+                }
+            } finally {
+                input.close();
+            }
+        }
+        File homeDir = injectedServerEnvironment.getValue().getHomeDir();
+        final File modulesDir = new File(homeDir + File.separator + "modules");
         final ModuleIdentifier identifier = module.getIdentifier();
 
-        String identifierPath = identifier.getName().replace('.', '/') + "/" + identifier.getSlot();
-        File entryFile = new File(modulesDir + "/" + identifierPath + "/jbosgi-xservice.properties");
-        if (entryFile.exists() == false) {
-            ROOT_LOGGER.debugf("Cannot obtain OSGi metadata file: %s", entryFile);
-            return null;
-        }
-
-        FileInputStream input = new FileInputStream(entryFile);
-        try {
-            return OSGiMetaDataBuilder.load(input);
-        } finally {
-            input.close();
-        }
-    }
-
-    // Called when the SubsystemState changes.
-    @Override
-    public void update(Observable o, Object arg) {
-        if (arg instanceof SubsystemState.ChangeEvent == false)
-            return;
-
-        SubsystemState.ChangeEvent event = (ChangeEvent) arg;
-        if (event.getType() != ChangeType.CAPABILITY)
-            return;
-
-        if (!event.isRemoved()) {
+        String identifierPath = identifier.getName().replace('.', File.separatorChar) + File.separator + identifier.getSlot();
+        File entryFile = new File(modulesDir + File.separator + identifierPath + File.separator + "jbosgi-xservice.properties");
+        if (entryFile.exists()) {
+            FileInputStream input = new FileInputStream(entryFile);
             try {
-                for (final OSGiCapability module : injectedSubsystemState.getValue().getCapabilities()) {
-                    if (module.getIdentifier().toString().equals(event.getId())) {
-                        final ServiceName serviceName = installModule(injectedBundleManager.getValue(), module);
-
-                        ServiceBuilder<Void> builder = serviceController.getServiceContainer().addService(
-                                ServiceName.of(Services.AUTOINSTALL_PROVIDER, "ModuleUpdater", "" + updateServiceIdCounter.incrementAndGet()),
-                                new AbstractService<Void>() {
-                                    @Override
-                                    public void start(StartContext context) throws StartException {
-                                        try {
-                                            startBundle(serviceController.getServiceContainer(), serviceName, module);
-                                        } finally {
-                                            // Remove this temporary service
-                                            context.getController().setMode(Mode.REMOVE);
-                                        }
-                                    }
-                                });
-                        builder.addDependency(serviceName);
-                        builder.install();
-                        return;
-                    }
-                }
-            } catch (Exception e) {
-                ROOT_LOGGER.errorAddingModule(e, event.getId());
-                return;
+                return OSGiMetaDataBuilder.load(input);
+            } finally {
+                input.close();
             }
-            ROOT_LOGGER.moduleNotFound(event.getId());
         }
+        return null;
     }
 }

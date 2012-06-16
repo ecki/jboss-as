@@ -30,30 +30,35 @@ import static org.jboss.as.server.mgmt.HttpManagementResourceDefinition.SECURITY
 import static org.jboss.as.server.mgmt.HttpManagementResourceDefinition.SOCKET_BINDING;
 
 import java.security.AccessController;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Executors;
 
 import org.jboss.as.controller.AbstractAddStepHandler;
 import org.jboss.as.controller.AttributeDefinition;
+import org.jboss.as.controller.ControlledProcessStateService;
 import org.jboss.as.controller.ModelController;
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
+import org.jboss.as.controller.RunningMode;
 import org.jboss.as.controller.ServiceVerificationHandler;
 import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
+import org.jboss.as.domain.http.server.ConsoleMode;
 import org.jboss.as.domain.management.security.SecurityRealmService;
 import org.jboss.as.network.NetworkInterfaceBinding;
 import org.jboss.as.network.SocketBinding;
 import org.jboss.as.network.SocketBindingManager;
 import org.jboss.as.network.SocketBindingManagerImpl;
 import org.jboss.as.server.ServerEnvironment;
+import org.jboss.as.server.ServerEnvironmentService;
+import org.jboss.as.server.ServerLogger;
+import org.jboss.as.server.ServerMessages;
 import org.jboss.as.server.Services;
 import org.jboss.as.server.mgmt.HttpManagementResourceDefinition;
 import org.jboss.as.server.mgmt.HttpManagementService;
 import org.jboss.as.server.mgmt.domain.HttpManagement;
 import org.jboss.as.server.services.net.NetworkInterfaceService;
-import org.jboss.as.server.services.path.AbstractPathService;
 import org.jboss.dmr.ModelNode;
-import org.jboss.logging.Logger;
 import org.jboss.msc.service.ServiceBuilder;
 import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceName;
@@ -71,6 +76,7 @@ public class HttpManagementAddHandler extends AbstractAddStepHandler {
     public static final HttpManagementAddHandler INSTANCE = new HttpManagementAddHandler();
     public static final String OPERATION_NAME = ModelDescriptionConstants.ADD;
 
+    @Override
     protected void populateModel(ModelNode operation, ModelNode model) throws OperationFailedException {
 
         for (AttributeDefinition definition : HttpManagementResourceDefinition.ATTRIBUTE_DEFINITIONS) {
@@ -78,6 +84,12 @@ public class HttpManagementAddHandler extends AbstractAddStepHandler {
         }
     }
 
+    @Override
+    protected boolean requiresRuntime(OperationContext context) {
+        return true;
+    }
+
+    @Override
     protected void performRuntime(final OperationContext context, final ModelNode operation, final ModelNode model,
                                   final ServiceVerificationHandler verificationHandler, final List<ServiceController<?>> newControllers)
             throws OperationFailedException {
@@ -89,11 +101,11 @@ public class HttpManagementAddHandler extends AbstractAddStepHandler {
         final String attributeName = definition.getName();
         final boolean has = operation.has(attributeName);
         if(! has && definition.isRequired(operation)) {
-            throw new OperationFailedException(new ModelNode().set(attributeName + " is required"));
+            throw ServerMessages.MESSAGES.attributeIsRequired(attributeName);
         }
         if(has) {
             if(! definition.isAllowed(operation)) {
-                throw new OperationFailedException(new ModelNode().set(attributeName + " is invalid"));
+                throw ServerMessages.MESSAGES.attributeIsInvalid(attributeName);
             }
             definition.validateAndSet(operation, subModel);
         } else {
@@ -108,13 +120,13 @@ public class HttpManagementAddHandler extends AbstractAddStepHandler {
         final String attributeName = definition.getName();
         final boolean has = subModel.has(attributeName);
         if(! has && definition.isRequired(subModel)) {
-            throw new OperationFailedException(new ModelNode().set(String.format("%s is required", attributeName)));
+            throw ServerMessages.MESSAGES.attributeIsRequired(attributeName);
         }
         ModelNode result;
         if(has) {
             if(! definition.isAllowed(subModel)) {
                 if (subModel.hasDefined(attributeName)) {
-                    throw new OperationFailedException(new ModelNode().set(String.format("%s is not allowed when [%s] are present", attributeName, definition.getAlternatives())));
+                    throw ServerMessages.MESSAGES.attributeNotAllowedWhenAlternativeIsPresent(attributeName, Arrays.asList(definition.getAlternatives()));
                 } else {
                     // create the undefined node
                     result = new ModelNode();
@@ -150,15 +162,16 @@ public class HttpManagementAddHandler extends AbstractAddStepHandler {
             final ModelNode securePortNode = HTTPS_PORT.resolveModelAttribute(context, model);
             securePort = securePortNode.isDefined() ? securePortNode.asInt() : -1;
 
-            StringBuilder sb = new StringBuilder();
-            sb.append("Creating http management service using network interface (").append(interfaceName).append(")");
-            if (port > -1) {
-                sb.append(" port (").append(port).append(")");
-            }
+            // Log the config
             if (securePort > -1) {
-                sb.append(" securePort (").append(securePort).append(")");
+                if (port > -1) {
+                    ServerLogger.ROOT_LOGGER.creatingHttpManagementServiceOnPortAndSecurePort(interfaceName, port, securePort);
+                } else {
+                    ServerLogger.ROOT_LOGGER.creatingHttpManagementServiceOnSecurePort(interfaceName, securePort);
+                }
+            } else if (port > -1) {
+                ServerLogger.ROOT_LOGGER.creatingHttpManagementServiceOnPort(interfaceName, port);
             }
-            Logger.getLogger("org.jboss.as").info(sb.toString());
         } else {
             // Socket-binding reference based config
             final ModelNode socketBindingNode = SOCKET_BINDING.resolveModelAttribute(context, model);
@@ -172,15 +185,17 @@ public class HttpManagementAddHandler extends AbstractAddStepHandler {
                 secureSocketBindingServiceName = SocketBinding.JBOSS_BINDING_NAME.append(bindingName);
             }
 
-            StringBuilder sb = new StringBuilder();
-            sb.append("Creating http management service using ");
+            // Log the config
             if (socketBindingServiceName != null) {
-                sb.append(" socket-binding (").append(socketBindingServiceName.getSimpleName()).append(")");
+                if (secureSocketBindingServiceName != null) {
+                    ServerLogger.ROOT_LOGGER.creatingHttpManagementServiceOnSocketAndSecureSocket(socketBindingServiceName.getSimpleName(),
+                            secureSocketBindingServiceName.getSimpleName());
+                } else {
+                    ServerLogger.ROOT_LOGGER.creatingHttpManagementServiceOnSocket(socketBindingServiceName.getSimpleName());
+                }
+            } else if (secureSocketBindingServiceName != null) {
+                ServerLogger.ROOT_LOGGER.creatingHttpManagementServiceOnSecureSocket(secureSocketBindingServiceName.getSimpleName());
             }
-            if (secureSocketBindingServiceName != null) {
-                sb.append(" secure-socket-binding (").append(secureSocketBindingServiceName.getSimpleName()).append(")");
-            }
-            Logger.getLogger("org.jboss.as").info(sb.toString());
         }
 
         ServiceName realmSvcName = null;
@@ -188,13 +203,22 @@ public class HttpManagementAddHandler extends AbstractAddStepHandler {
         if (realmNode.isDefined()) {
             realmSvcName = SecurityRealmService.BASE_SERVICE_NAME.append(realmNode.asString());
         } else {
-            Logger.getLogger("org.jboss.as").warn("No security realm has been defined for the http management service; all access will be unrestricted.");
+            ServerLogger.ROOT_LOGGER.httpManagementInterfaceIsUnsecured();
+        }
+        boolean consoleEnabled = model.get(ModelDescriptionConstants.CONSOLE_ENABLED).asBoolean(true);
+        ConsoleMode consoleMode;
+        if (consoleEnabled){
+            consoleMode = context.getRunningMode() == RunningMode.ADMIN_ONLY ? ConsoleMode.ADMIN_ONLY : ConsoleMode.CONSOLE;
+        }else{
+            consoleMode = ConsoleMode.NO_CONSOLE;
         }
 
-        final HttpManagementService service = new HttpManagementService();
+        ServerEnvironment environment = (ServerEnvironment) context.getServiceRegistry(false).getRequiredService(ServerEnvironmentService.SERVICE_NAME).getValue();
+        final HttpManagementService service = new HttpManagementService(consoleMode, environment.getProductConfig().getConsoleSlot());
         ServiceBuilder<HttpManagement> builder = serviceTarget.addService(HttpManagementService.SERVICE_NAME, service)
                 .addDependency(Services.JBOSS_SERVER_CONTROLLER, ModelController.class, service.getModelControllerInjector())
                 .addDependency(SocketBindingManagerImpl.SOCKET_BINDING_MANAGER, SocketBindingManager.class, service.getSocketBindingManagerInjector())
+                .addDependency(ControlledProcessStateService.SERVICE_NAME, ControlledProcessStateService.class, service.getControlledProcessStateServiceInjector())
                 .addInjection(service.getExecutorServiceInjector(), Executors.newCachedThreadPool(new JBossThreadFactory(new ThreadGroup("HttpManagementService-threads"), Boolean.FALSE, null, "%G - %t", null, null, AccessController.getContext())));
 
         if (interfaceSvcName != null) {

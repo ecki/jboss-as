@@ -23,8 +23,8 @@
 package org.jboss.as.ejb3.component.singleton;
 
 import java.lang.reflect.Method;
-import java.util.Collections;
-import java.util.HashMap;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -35,17 +35,15 @@ import org.jboss.as.ee.component.BasicComponentInstance;
 import org.jboss.as.ee.component.Component;
 import org.jboss.as.ejb3.component.DefaultAccessTimeoutService;
 import org.jboss.as.ejb3.component.EJBBusinessMethod;
+import org.jboss.as.ejb3.component.allowedmethods.AllowedMethodsInformation;
 import org.jboss.as.ejb3.component.session.SessionBeanComponent;
 import org.jboss.as.ejb3.concurrency.AccessTimeoutDetails;
 import org.jboss.as.ejb3.concurrency.LockableComponent;
-import org.jboss.as.ejb3.timerservice.SingletonTimedObjectInvokerImpl;
-import org.jboss.as.ejb3.timerservice.spi.TimedObjectInvoker;
 import org.jboss.as.naming.ManagedReference;
 import org.jboss.as.server.CurrentServiceContainer;
 import org.jboss.invocation.Interceptor;
-import org.jboss.invocation.InterceptorFactory;
 import org.jboss.invocation.InterceptorFactoryContext;
-import org.jboss.logging.Logger;
+import org.jboss.msc.service.ServiceContainer;
 import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.service.StopContext;
@@ -71,10 +69,13 @@ public class SingletonComponent extends SessionBeanComponent implements Lockable
 
     private final List<ServiceName> dependsOn;
 
-
     private final DefaultAccessTimeoutService defaultAccessTimeoutProvider;
 
-    private final TimedObjectInvoker timedObjectInvoker;
+    /**
+     * We can't lock on <code>this</code> because the {@link org.jboss.as.ee.component.BasicComponent#waitForComponentStart()}
+     * also synchronizes on it, and calls {@link #wait()}.
+     */
+    private final Object creationLock = new Object();
 
     /**
      * Construct a new instance.
@@ -92,50 +93,31 @@ public class SingletonComponent extends SessionBeanComponent implements Lockable
         this.methodLockTypes = singletonComponentCreateService.getMethodApplicableLockTypes();
         this.methodAccessTimeouts = singletonComponentCreateService.getMethodApplicableAccessTimeouts();
         this.defaultAccessTimeoutProvider = singletonComponentCreateService.getDefaultAccessTimeoutService();
-        final String deploymentName;
-        if (singletonComponentCreateService.getDistinctName() == null || singletonComponentCreateService.getDistinctName().length() == 0) {
-            deploymentName = singletonComponentCreateService.getApplicationName() + "." + singletonComponentCreateService.getModuleName();
-        } else {
-            deploymentName = singletonComponentCreateService.getApplicationName() + "." + singletonComponentCreateService.getModuleName() + "." + singletonComponentCreateService.getDistinctName();
-        }
-        this.timedObjectInvoker = new SingletonTimedObjectInvokerImpl(this, deploymentName);
     }
 
     @Override
     protected BasicComponentInstance instantiateComponentInstance(AtomicReference<ManagedReference> instanceReference, Interceptor preDestroyInterceptor, Map<Method, Interceptor> methodInterceptors, final InterceptorFactoryContext interceptorContext) {
         // synchronized from getComponentInstance
-        assert Thread.holdsLock(this);
-        // the race is on right through createInstance where everybody will wait until the component is started
-        if (this.singletonComponentInstance != null) {
-            return this.singletonComponentInstance;
-        }
+        assert Thread.holdsLock(creationLock);
+
         if (dependsOn != null) {
             for (ServiceName serviceName : dependsOn) {
-                final ServiceController<Component> service = (ServiceController<Component>) CurrentServiceContainer.getServiceContainer().getRequiredService(serviceName);
+                final ServiceController<Component> service = (ServiceController<Component>) currentServiceContainer().getRequiredService(serviceName);
                 final Component component = service.getValue();
                 if (component instanceof SingletonComponent) {
                     ((SingletonComponent) component).getComponentInstance();
                 }
             }
         }
-        final Map<Method, Interceptor> timeouts;
-        if (timeoutInterceptors != null) {
-            timeouts = new HashMap<Method, Interceptor>();
-            for (Map.Entry<Method, InterceptorFactory> entry : timeoutInterceptors.entrySet()) {
-                timeouts.put(entry.getKey(), entry.getValue().create(interceptorContext));
-            }
-        } else {
-            timeouts = Collections.emptyMap();
-        }
-
-        return new SingletonComponentInstance(this, instanceReference, preDestroyInterceptor, methodInterceptors, timeouts);
+        return new SingletonComponentInstance(this, instanceReference, preDestroyInterceptor, methodInterceptors);
     }
 
     public SingletonComponentInstance getComponentInstance() {
         if (this.singletonComponentInstance == null) {
-            synchronized (this) {
-                // no need to check here, createInstance has a wait (on start)
-                this.singletonComponentInstance = (SingletonComponentInstance) this.createInstance();
+            synchronized (creationLock) {
+                if (this.singletonComponentInstance == null) {
+                    this.singletonComponentInstance = (SingletonComponentInstance) this.createInstance();
+                }
             }
         }
         return this.singletonComponentInstance;
@@ -143,6 +125,7 @@ public class SingletonComponent extends SessionBeanComponent implements Lockable
 
     @Override
     public void start() {
+        getShutDownInterceptorFactory().start();
         super.start();
         if (this.initOnStartup) {
             // Do not call createInstance() because we can't ever assume that the singleton instance
@@ -154,6 +137,7 @@ public class SingletonComponent extends SessionBeanComponent implements Lockable
 
     @Override
     public void stop(final StopContext stopContext) {
+        getShutDownInterceptorFactory().shutdown();
         this.destroySingletonInstance();
         super.stop(stopContext);
     }
@@ -194,15 +178,27 @@ public class SingletonComponent extends SessionBeanComponent implements Lockable
         return defaultAccessTimeoutProvider.getDefaultAccessTimeout();
     }
 
-    private synchronized void destroySingletonInstance() {
-        if (this.singletonComponentInstance != null) {
-            singletonComponentInstance.destroy();
-            this.singletonComponentInstance = null;
+    private void destroySingletonInstance() {
+        synchronized (creationLock) {
+            if (this.singletonComponentInstance != null) {
+                singletonComponentInstance.destroy();
+                this.singletonComponentInstance = null;
+            }
         }
     }
 
     @Override
-    public TimedObjectInvoker getTimedObjectInvoker() {
-        return timedObjectInvoker;
+    public AllowedMethodsInformation getAllowedMethodsInformation() {
+        return SingletonAllowedMethodsInformation.INSTANCE;
+    }
+
+
+    private static ServiceContainer currentServiceContainer() {
+        return AccessController.doPrivileged(new PrivilegedAction<ServiceContainer>() {
+            @Override
+            public ServiceContainer run() {
+                return CurrentServiceContainer.getServiceContainer();
+            }
+        });
     }
 }

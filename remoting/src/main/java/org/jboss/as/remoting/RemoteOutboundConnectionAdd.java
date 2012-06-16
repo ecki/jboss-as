@@ -23,14 +23,15 @@
 package org.jboss.as.remoting;
 
 import java.util.List;
-import java.util.Map;
 
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.PathAddress;
-import org.jboss.as.controller.PathElement;
 import org.jboss.as.controller.ServiceVerificationHandler;
 import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
+import org.jboss.as.controller.registry.Resource;
+import org.jboss.as.domain.management.SecurityRealm;
+import org.jboss.as.domain.management.security.SecurityRealmService;
 import org.jboss.as.network.OutboundSocketBinding;
 import org.jboss.dmr.ModelNode;
 import org.jboss.msc.service.ServiceBuilder;
@@ -46,36 +47,6 @@ class RemoteOutboundConnectionAdd extends AbstractOutboundConnectionAddHandler {
 
     static final RemoteOutboundConnectionAdd INSTANCE = new RemoteOutboundConnectionAdd();
 
-    static ModelNode getAddOperation(final String connectionName, final String outboundSocketBindingRef, final Map<String, String> connectionCreationOptions) {
-        if (connectionName == null || connectionName.trim().isEmpty()) {
-            throw new IllegalArgumentException("Connection name cannot be null or empty");
-        }
-        if (outboundSocketBindingRef == null || outboundSocketBindingRef.trim().isEmpty()) {
-            throw new IllegalArgumentException("Outbound socket binding reference cannot be null or empty for connection named " + connectionName);
-        }
-        final ModelNode addOperation = new ModelNode();
-        addOperation.get(ModelDescriptionConstants.OP).set(ModelDescriptionConstants.ADD);
-        // /subsystem=remoting/remote-outbound-connection=<connection-name>
-        final PathAddress address = PathAddress.pathAddress(PathElement.pathElement(ModelDescriptionConstants.SUBSYSTEM, RemotingExtension.SUBSYSTEM_NAME),
-                PathElement.pathElement(CommonAttributes.REMOTE_OUTBOUND_CONNECTION, connectionName));
-        addOperation.get(ModelDescriptionConstants.OP_ADDR).set(address.toModelNode());
-
-        // set the other params
-        addOperation.get(CommonAttributes.OUTBOUND_SOCKET_BINDING_REF).set(outboundSocketBindingRef);
-        // optional connection creation options
-        if (connectionCreationOptions != null) {
-            for (final Map.Entry<String, String> entry : connectionCreationOptions.entrySet()) {
-                if (entry.getKey() == null) {
-                    // skip
-                    continue;
-                }
-                addOperation.get(CommonAttributes.CONNECTION_CREATION_OPTIONS).set(entry.getKey(), entry.getValue());
-            }
-        }
-
-        return addOperation;
-    }
-
     private RemoteOutboundConnectionAdd() {
 
     }
@@ -84,32 +55,44 @@ class RemoteOutboundConnectionAdd extends AbstractOutboundConnectionAddHandler {
     protected void populateModel(ModelNode operation, ModelNode model) throws OperationFailedException {
         super.populateModel(operation, model);
 
-        RemoteOutboundConnnectionResourceDefinition.OUTBOUND_SOCKET_BINDING_REF.validateAndSet(operation, model);
+        RemoteOutboundConnectionResourceDefinition.OUTBOUND_SOCKET_BINDING_REF.validateAndSet(operation, model);
+        RemoteOutboundConnectionResourceDefinition.USERNAME.validateAndSet(operation, model);
+        RemoteOutboundConnectionResourceDefinition.SECURITY_REALM.validateAndSet(operation, model);
     }
 
     @Override
     protected void performRuntime(OperationContext context, ModelNode operation, ModelNode model, ServiceVerificationHandler verificationHandler, List<ServiceController<?>> newControllers) throws OperationFailedException {
-        final String name = PathAddress.pathAddress(operation.require(ModelDescriptionConstants.OP_ADDR)).getLastElement().getValue();
-        final ServiceController serviceController = installRuntimeService(context, name, model, verificationHandler);
+        final ModelNode fullModel = Resource.Tools.readModel(context.readResource(PathAddress.EMPTY_ADDRESS));
+        final ServiceController serviceController = installRuntimeService(context, operation, fullModel, verificationHandler);
         newControllers.add(serviceController);
     }
 
-    ServiceController installRuntimeService(OperationContext context, String connectionName, ModelNode remoteOutboundConnection,
+    ServiceController installRuntimeService(final OperationContext context, final ModelNode operation, final ModelNode fullModel,
                                             ServiceVerificationHandler verificationHandler) throws OperationFailedException {
+        final PathAddress address = PathAddress.pathAddress(operation.require(ModelDescriptionConstants.OP_ADDR));
+        final String connectionName = address.getLastElement().getValue();
 
-        final String outboundSocketBindingRef = RemoteOutboundConnnectionResourceDefinition.OUTBOUND_SOCKET_BINDING_REF.resolveModelAttribute(context, remoteOutboundConnection).asString();
+        final String outboundSocketBindingRef = RemoteOutboundConnectionResourceDefinition.OUTBOUND_SOCKET_BINDING_REF.resolveModelAttribute(context, operation).asString();
         final ServiceName outboundSocketBindingDependency = OutboundSocketBinding.OUTBOUND_SOCKET_BINDING_BASE_SERVICE_NAME.append(outboundSocketBindingRef);
         // fetch the connection creation options from the model
-        final OptionMap connectionCreationOptions = getConnectionCreationOptions(remoteOutboundConnection);
+        final OptionMap connectionCreationOptions = ConnectorResource.getOptions(fullModel.get(CommonAttributes.PROPERTY));
+        final String username = fullModel.hasDefined(CommonAttributes.USERNAME) ? fullModel.require(CommonAttributes.USERNAME).asString() : null;
+        final String securityRealm = fullModel.hasDefined(CommonAttributes.SECURITY_REALM) ? fullModel.require(CommonAttributes.SECURITY_REALM).asString() : null;
+
         // create the service
-        final RemoteOutboundConnectionService outboundConnectionService = new RemoteOutboundConnectionService(connectionName, connectionCreationOptions);
+        final RemoteOutboundConnectionService outboundConnectionService = new RemoteOutboundConnectionService(connectionName, connectionCreationOptions, username);
         final ServiceName serviceName = AbstractOutboundConnectionService.OUTBOUND_CONNECTION_BASE_SERVICE_NAME.append(connectionName);
         // also add a alias service name to easily distinguish between a generic, remote and local type of connection services
         final ServiceName aliasServiceName = RemoteOutboundConnectionService.REMOTE_OUTBOUND_CONNECTION_BASE_SERVICE_NAME.append(connectionName);
         final ServiceBuilder<RemoteOutboundConnectionService> svcBuilder = context.getServiceTarget().addService(serviceName, outboundConnectionService)
                 .addAliases(aliasServiceName)
-                .addDependency(RemotingServices.SUBSYSTEM_ENDPOINT, Endpoint.class, outboundConnectionService.getEnpointInjector())
+                .addDependency(RemotingServices.SUBSYSTEM_ENDPOINT, Endpoint.class, outboundConnectionService.getEndpointInjector())
                 .addDependency(outboundSocketBindingDependency, OutboundSocketBinding.class, outboundConnectionService.getDestinationOutboundSocketBindingInjector());
+
+        if (securityRealm != null) {
+            final ServiceName secuirtyRealmName = SecurityRealmService.BASE_SERVICE_NAME.append(securityRealm);
+            svcBuilder.addDependency(secuirtyRealmName, SecurityRealm.class, outboundConnectionService.getSecurityRealmInjector());
+        }
 
         if (verificationHandler != null) {
             svcBuilder.addListener(verificationHandler);

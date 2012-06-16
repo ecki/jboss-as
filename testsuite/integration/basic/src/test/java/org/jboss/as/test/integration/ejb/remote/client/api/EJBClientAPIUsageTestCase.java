@@ -22,21 +22,29 @@
 
 package org.jboss.as.test.integration.ejb.remote.client.api;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+
 import javax.ejb.EJBException;
 import javax.ejb.NoSuchEJBException;
-import java.util.concurrent.Future;
 
 import org.jboss.arquillian.container.test.api.Deployment;
 import org.jboss.arquillian.container.test.api.RunAsClient;
 import org.jboss.arquillian.junit.Arquillian;
+import org.jboss.ejb.client.Affinity;
 import org.jboss.ejb.client.EJBClient;
 import org.jboss.ejb.client.EJBClientTransactionContext;
-import org.jboss.ejb.client.SessionID;
 import org.jboss.ejb.client.StatefulEJBLocator;
 import org.jboss.ejb.client.StatelessEJBLocator;
 import org.jboss.logging.Logger;
 import org.jboss.shrinkwrap.api.Archive;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
+import org.jboss.shrinkwrap.api.asset.EmptyAsset;
 import org.jboss.shrinkwrap.api.spec.EnterpriseArchive;
 import org.jboss.shrinkwrap.api.spec.JavaArchive;
 import org.junit.Assert;
@@ -71,7 +79,7 @@ public class EJBClientAPIUsageTestCase {
 
         final JavaArchive jar = ShrinkWrap.create(JavaArchive.class, MODULE_NAME + ".jar");
         jar.addPackage(EJBClientAPIUsageTestCase.class.getPackage());
-
+        jar.addAsManifestResource(EmptyAsset.INSTANCE, "beans.xml");
         ear.addAsModule(jar);
 
         return ear;
@@ -105,6 +113,22 @@ public class EJBClientAPIUsageTestCase {
         final String echo = proxy.echo(message);
         Assert.assertEquals("Unexpected echo message", message, echo);
     }
+
+    /**
+     * Test bean returning a value object with a transient field.  Will test that the transient field is set to null (just like java serialization would do)
+     * instead of a non-null value (non-null came ValueWrapper class initializer if this fails).
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testValueObjectWithTransientField() throws Exception {
+        final StatelessEJBLocator<EchoRemote> locator = new StatelessEJBLocator(EchoRemote.class, APP_NAME, MODULE_NAME, EchoBean.class.getSimpleName(), "");
+        final EchoRemote proxy = EJBClient.createProxy(locator);
+        String shouldBeNil = proxy.getValue().getShouldBeNilAfterUnmarshalling();
+        Assert.assertNull("transient field should be serialized as null but was '" + shouldBeNil + "'",
+                shouldBeNil);
+    }
+
 
     /**
      * Test a invocation on the remote view of a stateless bean which is configured for user interceptors
@@ -157,9 +181,7 @@ public class EJBClientAPIUsageTestCase {
      */
     @Test
     public void testSFSBInvocation() throws Exception {
-        // open a session for the SFSB
-        final SessionID sessionID = EJBClient.createSession(APP_NAME, MODULE_NAME, CounterBean.class.getSimpleName(), "");
-        final StatefulEJBLocator<Counter> locator = new StatefulEJBLocator<Counter>(Counter.class, APP_NAME, MODULE_NAME, CounterBean.class.getSimpleName(), "", sessionID);
+        final StatefulEJBLocator<Counter> locator = EJBClient.createSession(Counter.class, APP_NAME, MODULE_NAME, CounterBean.class.getSimpleName(), "");
         final Counter counter = EJBClient.createProxy(locator);
         Assert.assertNotNull("Received a null proxy", counter);
         // invoke the bean
@@ -188,7 +210,7 @@ public class EJBClientAPIUsageTestCase {
             "Need to think if there's a different way to test this. Else just remove this test")
     public void testSFSBAccessFailureWithoutSession() throws Exception {
         // create a locator without a session
-        final StatefulEJBLocator<Counter> locator = new StatefulEJBLocator<Counter>(Counter.class, APP_NAME, MODULE_NAME, CounterBean.class.getSimpleName(), "", null);
+        final StatefulEJBLocator<Counter> locator = new StatefulEJBLocator<Counter>(Counter.class, APP_NAME, MODULE_NAME, CounterBean.class.getSimpleName(), "", null, Affinity.NONE);
         final Counter counter = EJBClient.createProxy(locator);
         Assert.assertNotNull("Received a null proxy", counter);
         // invoke the bean without creating a session
@@ -203,7 +225,8 @@ public class EJBClientAPIUsageTestCase {
     }
 
     /**
-     * Tests that invoking a non-existent EJB leads to a {@link NoSuchEJBException}
+     * Tests that invoking a non-existent EJB leads to a {@link IllegalStateException} as a result of
+     * no EJB receivers able to handle the invocation
      *
      * @throws Exception
      */
@@ -215,10 +238,10 @@ public class EJBClientAPIUsageTestCase {
         // invoke on the (non-existent) bean
         try {
             nonExistentBean.echo("Hello world to a non-existent bean");
-            Assert.fail("Expected a NoSuchEJBException");
-        } catch (NoSuchEJBException nsee) {
+            Assert.fail("Expected a IllegalStateException");
+        } catch (IllegalStateException ise) {
             // expected
-            logger.info("Received the expected exception", nsee);
+            logger.info("Received the expected exception", ise);
         }
     }
 
@@ -235,8 +258,8 @@ public class EJBClientAPIUsageTestCase {
         // invoke on the (non-existent) view of a bean
         try {
             nonExistentBean.echo("Hello world to a non-existent view of a bean");
-            Assert.fail("Expected a NoSuchEJBException");
-        } catch (NoSuchEJBException nsee) {
+            Assert.fail("Expected a IllegalStateException");
+        } catch (IllegalStateException nsee) {
             // expected
             logger.info("Received the expected exception", nsee);
         }
@@ -330,5 +353,60 @@ public class EJBClientAPIUsageTestCase {
         final String message = "Hello world from a really remote client";
         final String echo = getBusinessObjectProxy.echo(message);
         Assert.assertEquals("Unexpected echo message", message, echo);
+    }
+
+    /**
+     * AS7-3129
+     * <p/>
+     * Make sure that the CDI request scope is activated for remote EJB invocations
+     */
+    @Test
+    public void testCdiRequestScopeActive() {
+        final StatelessEJBLocator<EchoRemote> locator = new StatelessEJBLocator(EchoRemote.class, APP_NAME, MODULE_NAME, EchoBean.class.getSimpleName(), "");
+        final EchoRemote proxy = EJBClient.createProxy(locator);
+        Assert.assertTrue(proxy.testRequestScopeActive());
+    }
+
+    /**
+     * AS7-3402
+     *
+     * Tests that a NonSerializableException does not break the channel
+     *
+     */
+    @Test
+    public void testNonSerializableResponse() throws InterruptedException, ExecutionException {
+        final StatelessEJBLocator<NonSerialiazableResponseRemote> locator = new StatelessEJBLocator(NonSerialiazableResponseRemote.class, APP_NAME, MODULE_NAME, NonSerializableResponseEjb.class.getSimpleName(), "");
+        final NonSerialiazableResponseRemote proxy = EJBClient.createProxy(locator);
+
+
+        Callable<Object> task = new Callable<Object>() {
+
+            @Override
+            public Object call() throws Exception {
+                try {
+                    proxy.nonSerializable();
+                    Assert.fail();
+                } catch (Exception e) {
+                    logger.info("expected " + e);
+                }
+                Thread.sleep(1000);
+                Assert.assertEquals("hello", proxy.serializable());
+                return null;
+            }
+        };
+        final ExecutorService executor = Executors.newFixedThreadPool(10);
+        try {
+            final List<Future> tasks = new ArrayList<Future>();
+            for (int i = 0; i < 100; ++i) {
+                tasks.add(executor.submit(task));
+            }
+
+            for (Future result : tasks) {
+                result.get();
+            }
+        } finally {
+            executor.shutdown();
+        }
+
     }
 }

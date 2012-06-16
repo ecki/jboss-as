@@ -39,13 +39,28 @@ public enum EJB3SubsystemXMLElement {
     BEAN_INSTANCE_POOLS("bean-instance-pools"),
     BEAN_INSTANCE_POOL_REF("bean-instance-pool-ref"),
 
+    ENTITY_BEAN("entity-bean"),
+
     DATA_STORE("data-store"),
+    DEFAULT_DISTINCT_NAME("default-distinct-name"),
 
     IIOP("iiop"),
+    IN_VM_REMOTE_INTERFACE_INVOCATION("in-vm-remote-interface-invocation"),
 
     MDB("mdb"),
 
     POOLS("pools"),
+
+    CACHE("cache"),
+    CACHES("caches"),
+    CHANNEL_CREATION_OPTIONS("channel-creation-options"),
+
+    OPTIMISTIC_LOCKING("optimistic-locking"),
+    OPTION("option"),
+
+    PASSIVATION_STORES("passivation-stores"),
+    CLUSTER_PASSIVATION_STORE("cluster-passivation-store"),
+    FILE_PASSIVATION_STORE("file-passivation-store"),
 
     REMOTE("remote"),
     RESOURCE_ADAPTER_NAME("resource-adapter-name"),
@@ -55,6 +70,7 @@ public enum EJB3SubsystemXMLElement {
     SINGLETON("singleton"),
     STATEFUL("stateful"),
     STATELESS("stateless"),
+    STATISTICS("statistics"),
     STRICT_MAX_POOL("strict-max-pool"),
 
     THREAD_POOL("thread-pool"),

@@ -26,17 +26,21 @@ import java.lang.reflect.Method;
 import java.rmi.RemoteException;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+
 import javax.ejb.EJBException;
-import javax.ejb.EJBLocalObject;
 import javax.ejb.EntityBean;
+
+import org.jboss.as.cmp.CmpMessages;
 import org.jboss.as.cmp.context.CmpEntityBeanContext;
 import org.jboss.as.cmp.jdbc.JDBCEntityPersistenceStore;
 import org.jboss.as.cmp.jdbc.bridge.CMRMessage;
 import org.jboss.as.ee.component.BasicComponent;
 import org.jboss.as.ee.component.Component;
 import org.jboss.as.ee.component.ComponentInstance;
+import org.jboss.as.ee.component.interceptors.InvocationType;
 import org.jboss.as.ejb3.component.entity.EntityBeanComponentInstance;
 import org.jboss.as.ejb3.component.entity.WrappedRemoteException;
+import org.jboss.as.ejb3.component.entity.interceptors.InternalInvocationMarker;
 import org.jboss.as.naming.ManagedReference;
 import org.jboss.invocation.Interceptor;
 import org.jboss.invocation.InterceptorContext;
@@ -47,8 +51,8 @@ import org.jboss.invocation.InterceptorContext;
 public class CmpEntityBeanComponentInstance extends EntityBeanComponentInstance {
     private final Interceptor relationshipInterceptor;
 
-    CmpEntityBeanComponentInstance(final BasicComponent component, final AtomicReference<ManagedReference> instanceReference, final Interceptor preDestroyInterceptor, Map<Method, Interceptor> methodInterceptors, Map<Method, Interceptor> timeoutInterceptors, final Interceptor relationshipInterceptor) {
-        super(component, instanceReference, preDestroyInterceptor, methodInterceptors, timeoutInterceptors);
+    CmpEntityBeanComponentInstance(final BasicComponent component, final AtomicReference<ManagedReference> instanceReference, final Interceptor preDestroyInterceptor, Map<Method, Interceptor> methodInterceptors, final Interceptor relationshipInterceptor) {
+        super(component, instanceReference, preDestroyInterceptor, methodInterceptors);
         this.relationshipInterceptor = relationshipInterceptor;
     }
 
@@ -60,14 +64,21 @@ public class CmpEntityBeanComponentInstance extends EntityBeanComponentInstance 
         return (CmpEntityBeanContext) super.getEjbContext();
     }
 
-    public void setupContext() {
+    @Override
+    public void setupContext(final InterceptorContext interceptorContext) {
+        final InvocationType invocationType = interceptorContext.getPrivateData(InvocationType.class);
         try {
+            interceptorContext.putPrivateData(InvocationType.class, InvocationType.SET_ENTITY_CONTEXT);
             final CmpEntityBeanContext context = new CmpEntityBeanContext(this);
             setEjbContext(context);
             getInstance().setEntityContext(context);
             getComponent().getStoreManager().activateEntity(context);
         } catch (RemoteException e) {
             throw new WrappedRemoteException(e);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        } finally {
+            interceptorContext.putPrivateData(InvocationType.class, invocationType);
         }
     }
 
@@ -80,10 +91,11 @@ public class CmpEntityBeanComponentInstance extends EntityBeanComponentInstance 
     }
 
     public synchronized void store() {
-        EntityBean instance = getInstance();
         try {
             if (!isRemoved()) {
-                instance.ejbStore();
+
+                invokeEjbStore();
+
                 final CmpEntityBeanContext context = getEjbContext();
                 final JDBCEntityPersistenceStore store = getComponent().getStoreManager();
                 if (context.getPrimaryKey() != null && store.isStoreRequired(context)) {
@@ -101,15 +113,13 @@ public class CmpEntityBeanComponentInstance extends EntityBeanComponentInstance 
         final JDBCEntityPersistenceStore store = getComponent().getStoreManager();
         try {
             store.passivateEntity(this.getEjbContext());
+            clearPrimaryKey();
+            setRemoved(false);
         } catch (RemoteException e) {
             throw new WrappedRemoteException(e);
         } catch (Exception e) {
             throw new EJBException(e);
         }
-    }
-
-    public EJBLocalObject getEjbLocalObject() {
-        return getComponent().getEjbLocalObject(getPrimaryKey());
     }
 
     Object invoke(final CMRMessage message, final Object... params) {
@@ -118,13 +128,14 @@ public class CmpEntityBeanComponentInstance extends EntityBeanComponentInstance 
         interceptorContext.putPrivateData(Component.class, getComponent());
         interceptorContext.putPrivateData(ComponentInstance.class, this);
         interceptorContext.putPrivateData(CMRMessage.class, message);
+        interceptorContext.putPrivateData(InternalInvocationMarker.class, InternalInvocationMarker.INSTANCE);
 
         try {
             return relationshipInterceptor.processInvocation(interceptorContext);
         } catch (EJBException e) {
             throw e;
         } catch (Exception e) {
-            throw new EJBException("Failed to invoke relationship request");
+            throw CmpMessages.MESSAGES.failedToInvokeRelationshipRequest(e);
         }
     }
 }

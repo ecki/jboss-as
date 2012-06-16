@@ -21,40 +21,41 @@
  */
 package org.jboss.as.test.integration.management.api.web;
 
-import org.junit.After;
-import org.apache.commons.io.FileUtils;
 import java.io.File;
 import java.io.IOException;
 import java.net.URL;
 import java.util.concurrent.TimeUnit;
+
+import org.apache.commons.io.FileUtils;
 import org.jboss.arquillian.container.test.api.Deployment;
 import org.jboss.arquillian.container.test.api.RunAsClient;
 import org.jboss.arquillian.junit.Arquillian;
 import org.jboss.arquillian.test.api.ArquillianResource;
 import org.jboss.as.test.integration.common.HttpRequest;
-import org.jboss.as.test.integration.management.api.AbstractMgmtTestBase;
-import org.jboss.as.test.integration.management.cli.GlobalOpsTestCase;
+import org.jboss.as.test.integration.management.base.ContainerResourceMgmtTestBase;
 import org.jboss.as.test.integration.management.util.SimpleServlet;
+import org.jboss.as.test.integration.management.util.WebUtil;
 import org.jboss.dmr.ModelNode;
 import org.jboss.shrinkwrap.api.Archive;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
 import org.jboss.shrinkwrap.api.spec.JavaArchive;
 import org.jboss.shrinkwrap.api.spec.WebArchive;
 import org.jboss.shrinkwrap.impl.base.exporter.zip.ZipExporterImpl;
-import org.junit.AfterClass;
+import org.junit.After;
 import org.junit.Before;
-import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import static org.junit.Assert.*;
+
+import static org.jboss.as.test.integration.management.util.ModelUtil.createOpNode;
+import static org.junit.Assert.assertTrue;
+
 
 /**
- *
  * @author Dominik Pospisil <dpospisi@redhat.com>
  */
 @RunWith(Arquillian.class)
 @RunAsClient
-public class DeploymentScannerTestCase extends AbstractMgmtTestBase {
+public class DeploymentScannerTestCase extends ContainerResourceMgmtTestBase {
 
     private static final String tempDir = System.getProperty("java.io.tmpdir");
     private static WebArchive war;
@@ -62,23 +63,13 @@ public class DeploymentScannerTestCase extends AbstractMgmtTestBase {
     private static File deployDir;
 
     @ArquillianResource
-    URL url;
+    private URL url;
 
     @Deployment
     public static Archive<?> getDeployment() {
         JavaArchive ja = ShrinkWrap.create(JavaArchive.class, "dummy.jar");
         ja.addClass(DeploymentScannerTestCase.class);
         return ja;
-    }
-
-    @Before
-    public void beforeClass() throws IOException {
-        initModelControllerClient(url.getHost(), MGMT_PORT);
-    }
-
-    @AfterClass
-    public static void afterClass() throws IOException {
-        closeModelControllerClient();
     }
 
     @Before
@@ -161,8 +152,8 @@ public class DeploymentScannerTestCase extends AbstractMgmtTestBase {
         File marker = new File(deployDir.getAbsolutePath() + File.separator + "SimpleServlet.war.deployed");
         assertTrue(marker.exists());
 
-        String response = HttpRequest.get(getBaseURL(url) + "SimpleServlet/SimpleServlet", 10, TimeUnit.SECONDS);
-        assertTrue("Invalid response: " + response, response.indexOf("SimpleServlet") >=0);
+        String response = HttpRequest.get(WebUtil.getBaseURL(url) + "SimpleServlet/SimpleServlet", 10, TimeUnit.SECONDS);
+        assertTrue("Invalid response: " + response, response.indexOf("SimpleServlet") >= 0);
 
     }
 
@@ -178,8 +169,8 @@ public class DeploymentScannerTestCase extends AbstractMgmtTestBase {
         Thread.sleep(2000);
 
         // check that the deployment is still live
-        String response = HttpRequest.get(getBaseURL(url) + "SimpleServlet/SimpleServlet", 10, TimeUnit.SECONDS);
-        assertTrue("Invalid response: " + response, response.indexOf("SimpleServlet") >=0);
+        String response = HttpRequest.get(WebUtil.getBaseURL(url) + "SimpleServlet/SimpleServlet", 10, TimeUnit.SECONDS);
+        assertTrue("Invalid response: " + response, response.indexOf("SimpleServlet") >= 0);
 
         // undeploy
         ModelNode op = createOpNode("deployment=SimpleServlet.war", "remove");
@@ -188,7 +179,7 @@ public class DeploymentScannerTestCase extends AbstractMgmtTestBase {
     }
 
     private ModelNode getAddDSOp() {
-        String path =  deployDir.getAbsolutePath();
+        String path = deployDir.getAbsolutePath();
         path = path.replaceAll("\\\\", "/");
 
         ModelNode op = createOpNode("subsystem=deployment-scanner/scanner=testScanner", "add");

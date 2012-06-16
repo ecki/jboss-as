@@ -23,13 +23,16 @@
 package org.jboss.as.cmp.component.interceptors;
 
 import java.lang.reflect.Method;
+
 import javax.ejb.NoSuchEJBException;
+
+import org.jboss.as.cmp.CmpMessages;
 import org.jboss.as.cmp.component.CmpEntityBeanComponent;
 import org.jboss.as.cmp.component.CmpEntityBeanComponentInstance;
 import org.jboss.as.ee.component.ComponentInstance;
-import org.jboss.as.ejb3.component.interceptors.AbstractEJBInterceptor;
 import org.jboss.as.ejb3.component.entity.EntityBeanComponent;
-import org.jboss.as.ejb3.component.entity.interceptors.EntityBeanAssociatingInterceptorFactory;
+import org.jboss.as.ejb3.component.entity.interceptors.EntityBeanAssociatingInterceptor;
+import org.jboss.as.ejb3.component.interceptors.AbstractEJBInterceptor;
 import org.jboss.invocation.Interceptor;
 import org.jboss.invocation.InterceptorContext;
 import org.jboss.invocation.InterceptorFactory;
@@ -43,25 +46,21 @@ import org.jboss.logging.Logger;
  */
 public class CmpEntityBeanRemoveInterceptorFactory implements InterceptorFactory {
 
-    private final Logger log = Logger.getLogger(EntityBeanAssociatingInterceptorFactory.class);
+    private final Logger log = Logger.getLogger(EntityBeanAssociatingInterceptor.class);
 
-    private final Method ejbRemove;
+    private final Interceptor interceptor;
 
     public CmpEntityBeanRemoveInterceptorFactory(final Method ejbRemove) {
-        this.ejbRemove = ejbRemove;
-    }
-
-    public Interceptor create(final InterceptorFactoryContext context) {
-        return new AbstractEJBInterceptor() {
+        this.interceptor = new AbstractEJBInterceptor() {
             public Object processInvocation(final InterceptorContext context) throws Exception {
                 final CmpEntityBeanComponent component = getComponent(context, CmpEntityBeanComponent.class);
 
                 final Object primaryKey = context.getPrivateData(EntityBeanComponent.PRIMARY_KEY_CONTEXT_KEY);
                 if (primaryKey == null) {
-                    throw new NoSuchEJBException("Invocation was not associated with an instance, primary key was null, instance may have been removed");
+                    throw CmpMessages.MESSAGES.primaryKeyNotAssociatedWithInvocation();
                 }
 
-                final CmpEntityBeanComponentInstance instance = (CmpEntityBeanComponentInstance) component.getCache().get(primaryKey);
+                final CmpEntityBeanComponentInstance instance = (CmpEntityBeanComponentInstance) context.getPrivateData(ComponentInstance.class);
                 //Call the ejbRemove method
                 Method oldMethod = context.getMethod();
                 try {
@@ -78,8 +77,13 @@ public class CmpEntityBeanRemoveInterceptorFactory implements InterceptorFactory
                 // Invoke CMP remove
                 component.getStoreManager().removeEntity(instance.getEjbContext());
                 instance.setRemoved(true);
+                instance.removeAllTimers();
                 return null;
             }
         };
+    }
+
+    public Interceptor create(final InterceptorFactoryContext context) {
+        return interceptor;
     }
 }

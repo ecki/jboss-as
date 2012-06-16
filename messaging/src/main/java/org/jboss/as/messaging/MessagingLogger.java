@@ -22,10 +22,6 @@
 
 package org.jboss.as.messaging;
 
-import static org.jboss.logging.Logger.Level.ERROR;
-import static org.jboss.logging.Logger.Level.INFO;
-import static org.jboss.logging.Logger.Level.WARN;
-
 import org.jboss.as.controller.PathAddress;
 import org.jboss.logging.BasicLogger;
 import org.jboss.logging.Cause;
@@ -33,6 +29,10 @@ import org.jboss.logging.LogMessage;
 import org.jboss.logging.Logger;
 import org.jboss.logging.Message;
 import org.jboss.logging.MessageLogger;
+
+import static org.jboss.logging.Logger.Level.ERROR;
+import static org.jboss.logging.Logger.Level.INFO;
+import static org.jboss.logging.Logger.Level.WARN;
 
 /**
  * Date: 10.06.2011
@@ -99,7 +99,7 @@ public interface MessagingLogger extends BasicLogger {
 
     /**
      * Logs an error message indicating the class, represented by the {@code className} parameter, caught an exception
-     * attempting to revert the operation, represented by the {@code operation} parameter, at the address, respresented
+     * attempting to revert the operation, represented by the {@code operation} parameter, at the address, represented
      * by the {@code address} parameter.
      *
      * @param cause     the cause of the error.
@@ -120,4 +120,43 @@ public interface MessagingLogger extends BasicLogger {
     @LogMessage(level = INFO)
     @Message(id = 11605, value = "Unbound messaging object to jndi name %s")
     void unboundJndiName(String jndiName);
+
+    /**
+     */
+    @LogMessage(level = ERROR)
+    @Message(id = 11606, value = "Could not close file %s")
+    void couldNotCloseFile(String file, @Cause Throwable cause);
+
+    /**
+     * Logs a warning message indicating the messaging object bound to the JNDI name represented by
+     * the {@code jndiName) has not be unbound in a timely fashion.
+     *
+     * @param jndiName the name the messaging object was bound to.
+     * @param timeout  the timeout value
+     * @param timeUnit the timeout time unit
+     */
+    @LogMessage(level = WARN)
+    @Message(id = 11607, value = "Failed to unbind messaging object bound to jndi name %s in %d %s")
+    void failedToUnbindJndiName(String jndiName, long timeout, String timeUnit);
+
+    /**
+     * Logs a warning message indicating the XML element with the given {@code name}
+     * is deprecated and will not be used anymore.
+     *
+     * @param name the name of the deprecated XML element
+     */
+    @LogMessage(level = WARN)
+    @Message(id = 11608, value = "Element %s is deprecated and will not be taken into account")
+    void deprecatedXMLElement(String name);
+
+    /**
+     * Logs a warning message indicating the XML attribute with the given {@code name}
+     * is deprecated and will not be used anymore.
+     *
+     * @param name the name of the deprecated XML attribute
+     */
+    @LogMessage(level = WARN)
+    @Message(id = 11609, value = "Attribute %s is deprecated and will not be taken into account")
+    void deprecatedXMLAttribute(String name);
+
 }

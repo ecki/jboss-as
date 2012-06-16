@@ -21,15 +21,15 @@
 */
 package org.jboss.as.modcluster.test;
 
-import java.io.IOException;
-
-import org.jboss.as.controller.OperationContext;
 import org.jboss.as.modcluster.ModClusterExtension;
 import org.jboss.as.subsystem.test.AbstractSubsystemBaseTest;
 import org.jboss.as.subsystem.test.AdditionalInitialization;
+import org.jboss.dmr.ModelNode;
+import org.junit.Test;
+
+import java.io.IOException;
 
 /**
- *
  * @author <a href="kabir.khan@jboss.com">Kabir Khan</a>
  * @author Jean-Frederic Clere.
  */
@@ -39,25 +39,36 @@ public class ModClusterSubsystemTestCase extends AbstractSubsystemBaseTest {
         super(ModClusterExtension.SUBSYSTEM_NAME, new ModClusterExtension());
     }
 
+    @Test
+    public void testXsd10() throws Exception {
+        standardSubsystemTest("subsystem_1_0.xml");
+    }
+
+
     @Override
     protected String getSubsystemXml() throws IOException {
         return readResource("subsystem.xml");
-
     }
+
     @Override
     protected String getSubsystemXml(String configId) throws IOException {
         return readResource(configId);
     }
 
+
     @Override
     protected AdditionalInitialization createAdditionalInitialization() {
-        return new AdditionalInitialization(){
-            @Override
-            protected OperationContext.Type getType() {
-                return OperationContext.Type.MANAGEMENT;
-            }
-
-        };
+        return AdditionalInitialization.MANAGEMENT;
     }
+
+    @Override
+    protected void compareXml(String configId, String original, String marshalled) throws Exception {
+        if (configId != null && configId.equals("subsystem_1_0.xml")) {
+            return;
+        }
+
+        super.compareXml(configId, original, marshalled, true);
+    }
+
 
 }

@@ -22,13 +22,17 @@
 
 package org.jboss.as.host.controller;
 
+import static org.jboss.as.host.controller.HostControllerMessages.MESSAGES;
+
 import javax.net.SocketFactory;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.security.AccessController;
 import java.util.Map;
-import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import org.jboss.as.process.ProcessControllerClient;
 import org.jboss.as.process.ProcessInfo;
@@ -43,6 +47,8 @@ import org.jboss.msc.service.StopContext;
 import org.jboss.threads.JBossThreadFactory;
 
 /**
+ * Provides a client for interacting with the process controller.
+ *
  * @author Emanuel Muckenhuber
  */
 class ProcessControllerConnectionService implements Service<ProcessControllerConnectionService> {
@@ -54,13 +60,13 @@ class ProcessControllerConnectionService implements Service<ProcessControllerCon
     private volatile ProcessControllerClient client;
     private volatile ServerInventory serverInventory;
 
+    private static final int WORK_QUEUE_SIZE = 256;
+    private static final int THREAD_POOL_CORE_SIZE = 1;
+    private static final int THREAD_POOL_MAX_SIZE = 4;
+
     ProcessControllerConnectionService(final HostControllerEnvironment environment, final byte[] authCode) {
         this.environment = environment;
         this.authCode = authCode;
-    }
-
-    ServerInventory getServerInventory() {
-        return serverInventory;
     }
 
     void setServerInventory(ServerInventory serverInventory) {
@@ -72,53 +78,96 @@ class ProcessControllerConnectionService implements Service<ProcessControllerCon
     public synchronized void start(StartContext context) throws StartException {
         final ProcessControllerClient client;
         try {
+            final ThreadFactory threadFactory = new JBossThreadFactory(new ThreadGroup("ProcessControllerConnection-thread"), Boolean.FALSE, null, "%G - %t", null, null, AccessController.getContext());
+            final ThreadPoolExecutor executorService = new ThreadPoolExecutor(THREAD_POOL_CORE_SIZE, THREAD_POOL_MAX_SIZE, 30L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<Runnable>(WORK_QUEUE_SIZE), threadFactory);
+
             final ProtocolClient.Configuration configuration = new ProtocolClient.Configuration();
-            configuration.setReadExecutor(Executors.newCachedThreadPool());
+            configuration.setReadExecutor(executorService);
             configuration.setServerAddress(new InetSocketAddress(environment.getProcessControllerAddress(), environment.getProcessControllerPort().intValue()));
             configuration.setBindAddress(new InetSocketAddress(environment.getHostControllerAddress(), environment.getHostControllerPort()));
-            final ThreadFactory threadFactory = new JBossThreadFactory(new ThreadGroup("ProcessControllerConnection-threads"), Boolean.FALSE, null, "%G - %t", null, null, AccessController.getContext());
             configuration.setThreadFactory(threadFactory);
             configuration.setSocketFactory(SocketFactory.getDefault());
             client = ProcessControllerClient.connect(configuration, authCode, new ProcessMessageHandler() {
                 @Override
                 public void handleProcessAdded(final ProcessControllerClient client, final String processName) {
+                    if (serverInventory == null){
+                        throw MESSAGES.noServerInventory();
+                    }
+                    if(ManagedServer.isServerProcess(processName)) {
+                        serverInventory.serverProcessAdded(processName);
+                    }
                 }
 
                 @Override
                 public void handleProcessStarted(final ProcessControllerClient client, final String processName) {
                     if (serverInventory == null){
-                        throw new IllegalStateException("No server inventory");
+                        throw MESSAGES.noServerInventory();
+                    }
+                    if(ManagedServer.isServerProcess(processName)) {
+                        serverInventory.serverProcessStarted(processName);
                     }
                 }
 
                 @Override
                 public void handleProcessStopped(final ProcessControllerClient client, final String processName, final long uptimeMillis) {
                     if (serverInventory == null){
-                        throw new IllegalStateException("No server inventory");
+                        throw MESSAGES.noServerInventory();
                     }
-                    serverInventory.serverStopped(processName);
+                    if(ManagedServer.isServerProcess(processName)) {
+                        serverInventory.serverProcessStopped(processName);
+                    }
                 }
 
                 @Override
                 public void handleProcessRemoved(final ProcessControllerClient client, final String processName) {
+                    if (serverInventory == null){
+                        throw MESSAGES.noServerInventory();
+                    }
+                    if(ManagedServer.isServerProcess(processName)) {
+                        serverInventory.serverProcessRemoved(processName);
+                    }
                 }
 
                 @Override
                 public void handleProcessInventory(final ProcessControllerClient client, final Map<String, ProcessInfo> inventory) {
-                    // TODO: reconcile our server list against the process controller inventory
+                    if (serverInventory == null){
+                        throw MESSAGES.noServerInventory();
+                    }
                     serverInventory.processInventory(inventory);
                 }
 
                 @Override
                 public void handleConnectionShutdown(final ProcessControllerClient client) {
+                    if(serverInventory == null) {
+                        return;
+                    }
+                    serverInventory.connectionFinished();
                 }
 
                 @Override
                 public void handleConnectionFailure(final ProcessControllerClient client, final IOException cause) {
+                    if(serverInventory == null) {
+                        return;
+                    }
+                    serverInventory.connectionFinished();
                 }
 
                 @Override
                 public void handleConnectionFinished(final ProcessControllerClient client) {
+                    if(serverInventory == null) {
+                        return;
+                    }
+                    serverInventory.connectionFinished();
+                }
+
+                @Override
+                public void handleOperationFailed(ProcessControllerClient client, OperationType operation, String processName) {
+                    if (serverInventory == null){
+                        throw MESSAGES.noServerInventory();
+                    }
+                    if(ManagedServer.isServerProcess(processName)) {
+                        serverInventory.operationFailed(processName, operation);
+                    }
                 }
             });
         } catch(IOException e) {

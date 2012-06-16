@@ -21,13 +21,15 @@
  */
 package org.jboss.as.test.integration.ee.appclient.basic;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import java.net.URL;
 
 import org.jboss.arquillian.container.test.api.Deployment;
 import org.jboss.arquillian.container.test.api.RunAsClient;
 import org.jboss.arquillian.junit.Arquillian;
+import org.jboss.arquillian.test.api.ArquillianResource;
+import org.jboss.as.arquillian.container.ManagementClient;
 import org.jboss.as.test.integration.ee.appclient.util.AppClientWrapper;
+import org.jboss.as.test.shared.integration.ejb.security.CallbackHandler;
 import org.jboss.ejb.client.EJBClient;
 import org.jboss.ejb.client.StatelessEJBLocator;
 import org.jboss.shrinkwrap.api.Archive;
@@ -35,9 +37,11 @@ import org.jboss.shrinkwrap.api.ShrinkWrap;
 import org.jboss.shrinkwrap.api.asset.StringAsset;
 import org.jboss.shrinkwrap.api.spec.EnterpriseArchive;
 import org.jboss.shrinkwrap.api.spec.JavaArchive;
-import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Tests that an application client can launch and conntect to a remote EJB
@@ -56,12 +60,15 @@ public class SimpleApplicationClientTestCase {
 
     private static final String MODULE_NAME = "ejb";
 
+    @ArquillianResource
+    private ManagementClient managementClient;
+
     @Deployment(testable = false)
     public static Archive<?> deploy() {
         final EnterpriseArchive ear = ShrinkWrap.create(EnterpriseArchive.class, APP_NAME + ".ear");
 
         final JavaArchive lib = ShrinkWrap.create(JavaArchive.class, "lib.jar");
-        lib.addClasses(AppClientSingletonRemote.class, AppClientWrapper.class);
+        lib.addClasses(AppClientSingletonRemote.class, AppClientWrapper.class, CallbackHandler.class);
         ear.addAsLibrary(lib);
 
         final JavaArchive ejb = ShrinkWrap.create(JavaArchive.class, MODULE_NAME + ".jar");
@@ -100,7 +107,7 @@ public class SimpleApplicationClientTestCase {
         final StatelessEJBLocator<AppClientSingletonRemote> locator = new StatelessEJBLocator(AppClientSingletonRemote.class, APP_NAME, MODULE_NAME, AppClientStateSingleton.class.getSimpleName(), "");
         final AppClientSingletonRemote remote = EJBClient.createProxy(locator);
         remote.reset();
-        final AppClientWrapper wrapper = new AppClientWrapper(archive, "client-annotation.jar", "cmdLineParam");
+        final AppClientWrapper wrapper = new AppClientWrapper(archive, "--host=" + managementClient.getRemoteEjbURL(), "client-annotation.jar", "cmdLineParam");
         try {
             final String result = remote.awaitAppClientCall();
             assertTrue("App client call failed. App client output: " + wrapper.readAllUnformated(1000), result != null);
@@ -112,6 +119,7 @@ public class SimpleApplicationClientTestCase {
 
     /**
      * Tests an app client with a deployment descriptor, that injects an env-entry and an EJB.
+     *
      * @throws Exception
      */
     @Test
@@ -119,7 +127,7 @@ public class SimpleApplicationClientTestCase {
         final StatelessEJBLocator<AppClientSingletonRemote> locator = new StatelessEJBLocator(AppClientSingletonRemote.class, APP_NAME, MODULE_NAME, AppClientStateSingleton.class.getSimpleName(), "");
         final AppClientSingletonRemote remote = EJBClient.createProxy(locator);
         remote.reset();
-        final AppClientWrapper wrapper = new AppClientWrapper(archive, "client-dd.jar", "");
+        final AppClientWrapper wrapper = new AppClientWrapper(archive, "--host=" + managementClient.getRemoteEjbURL(), "client-dd.jar", "");
         try {
             final String result = remote.awaitAppClientCall();
             assertTrue("App client call failed. App client output: " + wrapper.readAllUnformated(1000), result != null);
@@ -128,17 +136,19 @@ public class SimpleApplicationClientTestCase {
             wrapper.quit();
         }
     }
+
     /**
      * Tests an app client with a deployment descriptor, that injects an env-entry and an EJB.
+     *
      * @throws Exception
      */
     @Test
-    @Ignore("This needs jboss-client.xml parsing")
     public void testAppClientJBossDescriptor() throws Exception {
         final StatelessEJBLocator<AppClientSingletonRemote> locator = new StatelessEJBLocator(AppClientSingletonRemote.class, APP_NAME, MODULE_NAME, AppClientStateSingleton.class.getSimpleName(), "");
         final AppClientSingletonRemote remote = EJBClient.createProxy(locator);
         remote.reset();
-        final AppClientWrapper wrapper = new AppClientWrapper(archive, "client-override.jar", "");
+        URL props = getClass().getClassLoader().getResource("jboss-ejb-client.properties");
+        final AppClientWrapper wrapper = new AppClientWrapper(archive, " -Dnode0=" + managementClient.getMgmtAddress() + " --ejb-client-properties=" + props, "client-override.jar", "");
         try {
             final String result = remote.awaitAppClientCall();
             assertTrue("App client call failed. App client output: " + wrapper.readAllUnformated(1000), result != null);

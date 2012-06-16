@@ -23,11 +23,14 @@
 package org.jboss.as.controller;
 
 
+import org.jboss.as.controller.services.path.PathManager;
+
 /**
  * The context for registering a new extension.
  *
  * @author <a href="mailto:david.lloyd@redhat.com">David M. Lloyd</a>
  * @author David Bosschaert
+ * @author Brian Stansberry (c) 2011 Red Hat Inc.
  */
 public interface ExtensionContext {
 
@@ -38,47 +41,62 @@ public interface ExtensionContext {
      * extension registration is complete, the subsystem registration will be ignored, and an
      * error message will be logged.
      * <p>
-     * The new subsystem registration <em>should</em> register a handler and description for the
-     * {@code add} operation at its root address.  The new subsystem registration <em>may</em> register a
-     * {@code remove} operation at its root address.  If either of these operations are not registered, a
-     * simple generic version of the missing operation will be produced.
+     * The new subsystem registration <em>must</em> register a handler and description for the
+     * {@code add} operation at its root address.  The new subsystem registration <em>must</em> register a
+     * {@code remove} operation at its root address.
      *
      * @param name the name of the subsystem
-     * @throws IllegalArgumentException if the subsystem name has already been registered
+     * @param majorVersion the major version of the subsystem's management interface
+     * @param minorVersion the minor version of the subsystem's management interface
+     *
+     * @return the {@link SubsystemRegistration}
+     *
+     * @throws IllegalStateException if the subsystem name has already been registered
      */
-    SubsystemRegistration registerSubsystem(String name) throws IllegalArgumentException;
+    SubsystemRegistration registerSubsystem(String name, int majorVersion, int minorVersion);
 
     /**
-     * Provide the current Process Type.
-     * @return The current Process Type.
+     * Gets the type of the current process.
+     * @return the current process type. Will not be {@code null}
      */
     ProcessType getProcessType();
 
     /**
-     * Holds the possible process types. This is used to identify what type of server we are running in.
-     * Extensions can use this information to decide whether certain resources, operations or attributes
-     * need to be present.
+     * Gets the current running mode of the process.
+     * @return the current running mode. Will not be {@code null}
      */
-    public enum ProcessType {
-        DOMAIN_SERVER,
-        EMBEDDED,
-        STANDALONE_SERVER,
-        MASTER_HOST_CONTROLLER,
-        SLAVE_HOST_CONTROLLER;
+    RunningMode getRunningMode();
 
-        /**
-         * Returns true if the process is one of the 3 server variants.
-         *
-         * @return Returns <tt>true</tt> if the process is a server. Returns <tt>false</tt> otherwise.
-         */
-        public boolean isServer() {
-            switch (this) {
-            case DOMAIN_SERVER:
-            case EMBEDDED:
-            case STANDALONE_SERVER:
-                return true;
-            }
-            return false;
-        }
-    }
+    /**
+     * Gets whether it is valid for the extension to register resources, attributes or operations that do not
+     * involve the persistent configuration, but rather only involve runtime services. Extensions should use this
+     * method before registering such "runtime only" resources, attributes or operations. The specific uses case this
+     * method is intended to support is avoiding registering resources, attributes or operations:
+     *
+     * <ul>
+     *     <li>on a Host Controller (which is only concerned with subsystem configuration) and typically doesn't
+     *     install runtime services associated with a subsystem</li>
+     *     <li>on a server whose running mode is {@link RunningMode#ADMIN_ONLY ADMIN_ONLY}, where again the
+     *     runtime services associated with a subsystem typically would not be installed</li>
+     * </ul>
+     * <p>
+     * This method is a shorthand for:
+     * <pre>
+     *     boolean valid = context.getProcessType().isServer() && context.getRunningMode() != RunningMode.ADMIN_ONLY;
+     * </pre>
+     * </p>
+     *
+     * @return whether the current process type is a server and the server running mode is not ADMIN_ONLY
+     */
+    boolean isRuntimeOnlyRegistrationValid();
+
+    /**
+     * Gets the process' {@link PathManager} if the process is a {@link ProcessType#isServer() server}; throws
+     * an {@link IllegalStateException} if not.
+     *
+     * @return the path manager. Will not return {@code null}
+     *
+     * @throws IllegalStateException if the process is not a {@link ProcessType#isServer() server}
+     */
+    PathManager getPathManager();
 }

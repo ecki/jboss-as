@@ -25,16 +25,17 @@
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
+
     <parent>
       <groupId>org.jboss</groupId>
       <artifactId>jboss-parent</artifactId>
-      <version>7</version>
+      <version>9</version>
     </parent>
 
     <groupId>org.jboss.as</groupId>
     <artifactId>jboss-as-build-config</artifactId>
     <name>JBoss Application Server: Build Configuration</name>
-    <version>7.1.0.CR1-SNAPSHOT</version>
+    <version>7.2.0.Alpha1-SNAPSHOT</version>
 
     <licenses>
         <license>
@@ -44,7 +45,18 @@
         </license>
     </licenses>
 
-    <build>    
+    <build>
+        <plugins>
+            <plugin>
+              <groupId>org.zanata</groupId>
+              <artifactId>zanata-maven-plugin</artifactId>
+              <version>1.5.0</version>
+              <configuration>
+                 <skip>true</skip>
+              </configuration>
+            </plugin>
+        </plugins>
+
         <extensions>
             <extension>
                 <groupId>org.apache.maven.wagon</groupId>

@@ -22,12 +22,8 @@ import static org.jboss.as.test.smoke.stilts.bundle.SimpleStomplet.DESTINATION_Q
 import java.util.Dictionary;
 import java.util.Hashtable;
 
-import org.jboss.logging.Logger;
 import org.osgi.framework.BundleActivator;
 import org.osgi.framework.BundleContext;
-import org.osgi.framework.ServiceReference;
-import org.osgi.framework.ServiceRegistration;
-import org.osgi.service.startlevel.StartLevel;
 import org.projectodd.stilts.stomplet.Stomplet;
 
 
@@ -39,28 +35,14 @@ import org.projectodd.stilts.stomplet.Stomplet;
  */
 public class SimpleStompletActivator implements BundleActivator {
 
-    static Logger log = Logger.getLogger(SimpleStompletActivator.class);
-
-    private ServiceRegistration registration;
-
     @Override
     public void start(BundleContext context) throws Exception {
-        log.infof("start: %s", context);
-
-        // Set the framework start level such that the stomplet server bundle is activated
-        ServiceReference sref = context.getServiceReference(StartLevel.class.getName());
-        StartLevel startLevel = (StartLevel) context.getService(sref);
-        startLevel.setStartLevel(2);
-
         Dictionary<String, String> props = new Hashtable<String, String>();
         props.put("destinationPattern", DESTINATION_QUEUE_ONE);
-        registration = context.registerService(Stomplet.class.getName(), new SimpleStomplet(), props);
+        context.registerService(Stomplet.class.getName(), new SimpleStomplet(), props);
     }
 
     @Override
     public void stop(BundleContext context) throws Exception {
-        log.infof("stop: %s", context);
-        if (registration != null)
-            registration.unregister();
     }
 }

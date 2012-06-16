@@ -23,13 +23,16 @@
 package org.jboss.as.security.service;
 
 import org.jboss.as.security.SecurityExtension;
+import org.jboss.as.security.SecurityLogger;
 import org.jboss.as.security.plugins.JNDIBasedSecurityManagement;
-import org.jboss.logging.Logger;
+import org.jboss.as.server.moduleservice.ServiceModuleLoader;
+import org.jboss.msc.inject.Injector;
 import org.jboss.msc.service.Service;
 import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.service.StartContext;
 import org.jboss.msc.service.StartException;
 import org.jboss.msc.service.StopContext;
+import org.jboss.msc.value.InjectedValue;
 import org.jboss.security.ISecurityManagement;
 
 /**
@@ -41,7 +44,7 @@ public class SecurityManagementService implements Service<ISecurityManagement> {
 
     public static final ServiceName SERVICE_NAME = SecurityExtension.JBOSS_SECURITY.append("security-management");
 
-    private static final Logger log = Logger.getLogger("org.jboss.as.security");
+    private static final SecurityLogger log = SecurityLogger.ROOT_LOGGER;
 
     private final String authenticationManagerClassName;
 
@@ -58,6 +61,8 @@ public class SecurityManagementService implements Service<ISecurityManagement> {
     private final String mappingManagerClassName;
 
     private volatile ISecurityManagement securityManagement;
+
+    private final InjectedValue<ServiceModuleLoader> serviceModuleLoaderValue = new InjectedValue<ServiceModuleLoader>();
 
     public SecurityManagementService(String authenticationManagerClassName, boolean deepCopySubjectMode,
             String callbackHandlerClassName, String authorizationManagerClassName, String auditManagerClassName,
@@ -76,7 +81,7 @@ public class SecurityManagementService implements Service<ISecurityManagement> {
     public void start(StartContext context) throws StartException {
         log.debugf("Starting SecurityManagementService");
         // set properties of JNDIBasedSecurityManagement
-        JNDIBasedSecurityManagement securityManagement = new JNDIBasedSecurityManagement();
+        JNDIBasedSecurityManagement securityManagement = new JNDIBasedSecurityManagement(serviceModuleLoaderValue.getValue());
         securityManagement.setAuthenticationManagerClassName(authenticationManagerClassName);
         securityManagement.setDeepCopySubjectMode(deepCopySubjectMode);
         securityManagement.setCallbackHandlerClassName(callbackHandlerClassName);
@@ -99,4 +104,7 @@ public class SecurityManagementService implements Service<ISecurityManagement> {
         return securityManagement;
     }
 
+    public Injector<ServiceModuleLoader> getServiceModuleLoaderInjectedValue() {
+        return serviceModuleLoaderValue;
+    }
 }

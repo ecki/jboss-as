@@ -24,37 +24,40 @@ package org.jboss.as.web;
 
 
 import static org.jboss.as.web.Constants.MIME_MAPPING;
-
-import java.util.Locale;
+import static org.jboss.as.web.WebMessages.MESSAGES;
 
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.PathAddress;
-import org.jboss.as.controller.descriptions.DescriptionProvider;
 import org.jboss.dmr.ModelNode;
 
 // implements ModelQueryOperationHandler, DescriptionProvider
-public class MimeMappingRemove implements OperationStepHandler, DescriptionProvider{
+public class MimeMappingRemove implements OperationStepHandler{
 
     static final MimeMappingRemove INSTANCE = new MimeMappingRemove();
 
-    @Override
-    public ModelNode getModelDescription(Locale locale) {
-        return WebSubsystemDescriptions.getMimeMappingRemoveDescription(locale);
-    }
+
 
     @Override
     public void execute(OperationContext context, ModelNode operation)
             throws OperationFailedException {
-        if (context.getType() == OperationContext.Type.SERVER || context.getType() == OperationContext.Type.HOST) {
-            final ModelNode mimetypes = context.readResourceForUpdate(PathAddress.EMPTY_ADDRESS).getModel().get(MIME_MAPPING);
-            if (operation.hasDefined("name")) {
-                mimetypes.remove(operation.get("name").asString());
-            } else
-                throw new OperationFailedException(new ModelNode().set("name is needed for remove-mime"));
+
+        final ModelNode mimetypes = context.readResourceForUpdate(PathAddress.EMPTY_ADDRESS).getModel().get(MIME_MAPPING);
+        if (operation.hasDefined("name")) {
+            mimetypes.remove(operation.get("name").asString());
+        } else {
+            throw new OperationFailedException(new ModelNode().set(MESSAGES.nameRequiredForRemoveMimeMapping()));
         }
 
-        context.completeStep();
+        // TODO deal with runtime https://issues.jboss.org/browse/AS7-3854
+
+        context.reloadRequired();
+        context.completeStep(new OperationContext.RollbackHandler() {
+            @Override
+            public void handleRollback(OperationContext context, ModelNode operation) {
+                context.revertReloadRequired();
+            }
+        });
     }
 }

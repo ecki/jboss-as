@@ -32,6 +32,7 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.RUN
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SERVER_GROUP;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.URL;
 import static org.jboss.as.controller.operations.validation.ChainedParameterValidator.chain;
+import static org.jboss.as.domain.controller.DomainControllerMessages.MESSAGES;
 import static org.jboss.as.domain.controller.operations.deployment.AbstractDeploymentHandler.CONTENT_ADDITION_PARAMETERS;
 import static org.jboss.as.domain.controller.operations.deployment.AbstractDeploymentHandler.createFailureException;
 import static org.jboss.as.domain.controller.operations.deployment.AbstractDeploymentHandler.getInputStream;
@@ -40,10 +41,12 @@ import static org.jboss.as.domain.controller.operations.deployment.AbstractDeplo
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Arrays;
 import java.util.Locale;
 
 import org.jboss.as.controller.HashUtil;
 import org.jboss.as.controller.OperationContext;
+import org.jboss.as.controller.OperationContext.ResultAction;
 import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.PathAddress;
@@ -57,9 +60,9 @@ import org.jboss.as.controller.operations.validation.ParametersOfValidator;
 import org.jboss.as.controller.operations.validation.ParametersValidator;
 import org.jboss.as.controller.operations.validation.StringLengthValidator;
 import org.jboss.as.controller.registry.Resource;
-import org.jboss.as.domain.controller.FileRepository;
 import org.jboss.as.protocol.StreamUtils;
-import org.jboss.as.server.deployment.repository.api.ContentRepository;
+import org.jboss.as.repository.ContentRepository;
+import org.jboss.as.repository.HostFileRepository;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.ModelType;
 
@@ -73,19 +76,21 @@ public class DeploymentFullReplaceHandler implements OperationStepHandler, Descr
     public static final String OPERATION_NAME = FULL_REPLACE_DEPLOYMENT;
 
     private final ContentRepository contentRepository;
-    private final FileRepository fileRepository;
+    private final HostFileRepository fileRepository;
 
     private final ParametersValidator validator = new ParametersValidator();
     private final ParametersValidator unmanagedContentValidator = new ParametersValidator();
     private final ParametersValidator managedContentValidator = new ParametersValidator();
 
+    /** Constructor for a master Host Controller */
     public DeploymentFullReplaceHandler(final ContentRepository contentRepository) {
         this.contentRepository = contentRepository;
         this.fileRepository = null;
         init();
     }
 
-    public DeploymentFullReplaceHandler(final FileRepository fileRepository) {
+    /** Constructor for a slave Host Controller */
+    public DeploymentFullReplaceHandler(final HostFileRepository fileRepository) {
         this.contentRepository = null;
         this.fileRepository = fileRepository;
         init();
@@ -140,7 +145,7 @@ public class DeploymentFullReplaceHandler implements OperationStepHandler, Descr
             if (contentRepository != null) {
                 // We are the master DC. Validate that we actually have this content.
                 if (!contentRepository.hasContent(hash)) {
-                    throw createFailureException("No deployment content with hash %s is available in the deployment content repository.", HashUtil.bytesToHexString(hash));
+                    throw createFailureException(MESSAGES.noDeploymentContentWithHash(HashUtil.bytesToHexString(hash)));
                 }
             } else {
                 // We are a slave controller
@@ -150,7 +155,7 @@ public class DeploymentFullReplaceHandler implements OperationStepHandler, Descr
         } else if (hasValidContentAdditionParameterDefined(contentItemNode)) {
             if (contentRepository == null) {
                 // This is a slave DC. We can't handle this operation; it should have been fixed up on the master DC
-                throw createFailureException("A slave domain controller cannot accept deployment content uploads");
+                throw createFailureException(MESSAGES.slaveCannotAcceptUploads());
             }
 
             InputStream in = getInputStream(context, contentItemNode);
@@ -176,11 +181,12 @@ public class DeploymentFullReplaceHandler implements OperationStepHandler, Descr
         final PathElement deploymentPath = PathElement.pathElement(DEPLOYMENT, name);
         final Resource replaceNode = root.getChild(deploymentPath);
         if (replaceNode == null) {
-            throw createFailureException("No deployment with name %s found", name);
+            throw createFailureException(MESSAGES.noDeploymentContentWithName(name));
         }
 
         final Resource deployment = context.readResourceForUpdate(PathAddress.EMPTY_ADDRESS.append(PathElement.pathElement(DEPLOYMENT, name)));
         ModelNode deployNode = deployment.getModel();
+        byte[] originalHash = deployNode.get(CONTENT).get(0).hasDefined(HASH) ? deployNode.get(CONTENT).get(0).get(HASH).asBytes() : null;
         deployNode.get(NAME).set(name);
         deployNode.get(RUNTIME_NAME).set(runtimeName);
         deployNode.get(CONTENT).set(content);
@@ -196,7 +202,22 @@ public class DeploymentFullReplaceHandler implements OperationStepHandler, Descr
         // the content repo will already have these, note that content should not be empty
         removeContentAdditions(replaceNode.getModel().require(CONTENT));
 
-        context.completeStep();
+        if (context.completeStep() == ResultAction.KEEP) {
+            if (originalHash != null) {
+                if (deployNode.get(CONTENT).get(0).hasDefined(HASH)) {
+                    byte[] newHash = deployNode.get(CONTENT).get(0).get(HASH).asBytes();
+                    if (!Arrays.equals(originalHash, newHash)) {
+                        contentRepository.removeContent(originalHash);
+                    }
+                }
+            }
+        } else {
+            if (operation.get(CONTENT).get(0).hasDefined(HASH)) {
+                byte[] newHash = operation.get(CONTENT).get(0).get(HASH).asBytes();
+                contentRepository.removeContent(newHash);
+            }
+        }
+
     }
 
     private static void removeAttributes(final ModelNode node, final Iterable<String> attributeNames) {

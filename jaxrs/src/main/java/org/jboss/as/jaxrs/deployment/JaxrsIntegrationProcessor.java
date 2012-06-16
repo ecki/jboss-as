@@ -1,11 +1,11 @@
 package org.jboss.as.jaxrs.deployment;
 
-import static org.jboss.as.jaxrs.JaxrsLogger.JAXRS_LOGGER;
-
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import javax.ws.rs.ApplicationPath;
 
@@ -25,10 +25,12 @@ import org.jboss.metadata.web.jboss.JBossServletsMetaData;
 import org.jboss.metadata.web.jboss.JBossWebMetaData;
 import org.jboss.metadata.web.spec.FilterMetaData;
 import org.jboss.metadata.web.spec.ServletMappingMetaData;
-import org.jboss.modules.Module;
 import org.jboss.modules.ModuleIdentifier;
 import org.jboss.resteasy.plugins.server.servlet.HttpServlet30Dispatcher;
 import org.jboss.resteasy.plugins.server.servlet.ResteasyContextParameters;
+
+import static org.jboss.as.jaxrs.JaxrsLogger.JAXRS_LOGGER;
+import static org.jboss.as.jaxrs.JaxrsMessages.MESSAGES;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -37,11 +39,13 @@ import org.jboss.resteasy.plugins.server.servlet.ResteasyContextParameters;
 public class JaxrsIntegrationProcessor implements DeploymentUnitProcessor {
     private static final String JAX_RS_SERVLET_NAME = "javax.ws.rs.core.Application";
     private static final String SERVLET_INIT_PARAM = "javax.ws.rs.Application";
+    public static final String RESTEASY_SCAN = "resteasy.scan";
+    public static final String RESTEASY_SCAN_RESOURCES = "resteasy.scan.resources";
+    public static final String RESTEASY_SCAN_PROVIDERS = "resteasy.scan.providers";
 
     @Override
     public void deploy(DeploymentPhaseContext phaseContext) throws DeploymentUnitProcessingException {
         final DeploymentUnit deploymentUnit = phaseContext.getDeploymentUnit();
-        final Module module = deploymentUnit.getAttachment(Attachments.MODULE);
 
         if (!JaxrsDeploymentMarker.isJaxrsDeployment(deploymentUnit)) {
             return;
@@ -64,13 +68,16 @@ public class JaxrsIntegrationProcessor implements DeploymentUnitProcessor {
         //remove the resteasy.scan parameter
         //because it is not needed
         final List<ParamValueMetaData> params = webdata.getContextParams();
-        if(params != null) {
+        if (params != null) {
             Iterator<ParamValueMetaData> it = params.iterator();
-            while(it.hasNext()) {
+            while (it.hasNext()) {
                 final ParamValueMetaData param = it.next();
-                if(param.getParamName().equals("resteasy.scan")) {
+                if (param.getParamName().equals(RESTEASY_SCAN)) {
                     it.remove();
-                    JAXRS_LOGGER.resteasyScanWarning();
+                } else if (param.getParamName().equals(RESTEASY_SCAN_RESOURCES)) {
+                    it.remove();
+                } else if (param.getParamName().equals(RESTEASY_SCAN_PROVIDERS)) {
+                    it.remove();
                 }
             }
         }
@@ -80,9 +87,14 @@ public class JaxrsIntegrationProcessor implements DeploymentUnitProcessor {
         final List<ResteasyDeploymentData> additionalData = new ArrayList<ResteasyDeploymentData>();
         final ModuleSpecification moduleSpec = deploymentUnit.getAttachment(Attachments.MODULE_SPECIFICATION);
         if (moduleSpec != null && attachmentMap != null) {
+            final Set<ModuleIdentifier> identifiers = new HashSet<ModuleIdentifier>();
             for (ModuleDependency dep : moduleSpec.getAllDependencies()) {
-                if (attachmentMap.containsKey(dep.getIdentifier())) {
-                    additionalData.add(attachmentMap.get(dep.getIdentifier()));
+                //make sure we don't double up
+                if (!identifiers.contains(dep.getIdentifier())) {
+                    identifiers.add(dep.getIdentifier());
+                    if (attachmentMap.containsKey(dep.getIdentifier())) {
+                        additionalData.add(attachmentMap.get(dep.getIdentifier()));
+                    }
                 }
             }
             resteasy.merge(additionalData);
@@ -138,12 +150,6 @@ public class JaxrsIntegrationProcessor implements DeploymentUnitProcessor {
         if (resteasy.hasBootClasses() || resteasy.isDispatcherCreated())
             return;
 
-        //if there are no JAX-RS classes in the app just return
-        if (resteasy.getScannedApplicationClass() == null
-                && resteasy.getScannedJndiComponentResources().isEmpty()
-                && resteasy.getScannedProviderClasses().isEmpty()
-                && resteasy.getScannedResourceClasses().isEmpty()) return;
-
         boolean useScannedClass = false;
         String servletName;
         if (resteasy.getScannedApplicationClass() == null) {
@@ -157,6 +163,11 @@ public class JaxrsIntegrationProcessor implements DeploymentUnitProcessor {
             servletName = JAX_RS_SERVLET_NAME;
 
         } else {
+            if (servletMappingsExist(webdata, JAX_RS_SERVLET_NAME)) {
+                throw new DeploymentUnitProcessingException(MESSAGES.conflictUrlMapping());
+
+            }
+
             //now there are two options.
             //if there is already a servlet defined with an init param
             //we don't do anything.

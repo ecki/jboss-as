@@ -3,7 +3,6 @@ package org.jboss.as.test.iiop.transaction;
 import java.rmi.RemoteException;
 
 import javax.annotation.Resource;
-import javax.ejb.EJB;
 import javax.ejb.Stateless;
 import javax.ejb.TransactionManagement;
 import javax.ejb.TransactionManagementType;
@@ -27,11 +26,8 @@ public class ClientEjb {
     @Resource
     private UserTransaction userTransaction;
 
-    @EJB(lookup = "corbaname:iiop:localhost:3628#server/IIOPTransactionalStatelessBean")
     private IIOPTransactionalHome home;
 
-
-    @EJB(lookup = "corbaname:iiop:localhost:3628#server/IIOPTransactionalStatefulBean")
     private IIOPTransactionalStatefulHome statefulHome;
 
     public void basicTransactionPropagationTest() throws RemoteException, SystemException, NotSupportedException {
@@ -71,9 +67,35 @@ public class ClientEjb {
                 userTransaction.rollback();
             }
         }
-        if (succeeded) {
-            Assert.assertTrue(remote.isBeforeCompletion());
-        }
+        Assert.assertEquals(succeeded, remote.isBeforeCompletion());
         Assert.assertEquals((Boolean) succeeded, remote.getCommitSuceeded());
     }
+
+    public void testRollbackOnly() throws RemoteException, SystemException, NotSupportedException {
+        final IIOPTransactionalStatefulRemote remote = statefulHome.create();
+        userTransaction.begin();
+        try {
+            Assert.assertEquals(Status.STATUS_ACTIVE, remote.transactionStatus());
+            remote.rollbackOnly();
+            Assert.assertEquals(Status.STATUS_MARKED_ROLLBACK, remote.transactionStatus());
+        } finally {
+            userTransaction.rollback();
+        }
+        Assert.assertFalse(remote.isBeforeCompletion());
+        Assert.assertFalse(remote.getCommitSuceeded());
+    }
+
+    public void testRollbackOnlyBeforeCompletion() throws RemoteException, SystemException, NotSupportedException, HeuristicRollbackException, HeuristicMixedException {
+        final IIOPTransactionalStatefulRemote remote = statefulHome.create();
+        userTransaction.begin();
+        try {
+            Assert.assertEquals(Status.STATUS_ACTIVE, remote.transactionStatus());
+            remote.setRollbackOnlyBeforeCompletion(true);
+            userTransaction.commit();
+        } catch (RollbackException expected) {
+        }
+        Assert.assertFalse(remote.getCommitSuceeded());
+        Assert.assertEquals(Status.STATUS_NO_TRANSACTION, remote.transactionStatus());
+    }
+
 }

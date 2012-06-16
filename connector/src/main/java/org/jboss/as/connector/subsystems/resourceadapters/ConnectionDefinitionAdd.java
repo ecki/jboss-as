@@ -24,13 +24,14 @@ package org.jboss.as.connector.subsystems.resourceadapters;
 
 import static org.jboss.as.connector.subsystems.resourceadapters.ResourceAdaptersSubsystemProviders.ADD_CONNECTION_DEFINITION_DESC;
 import static org.jboss.as.connector.subsystems.resourceadapters.ResourceAdaptersSubsystemProviders.CONNECTIONDEFINITIONS_NODEATTRIBUTE;
+import static org.jboss.as.controller.ControllerMessages.MESSAGES;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
 
 import java.util.List;
 import java.util.Locale;
 
-import org.jboss.as.connector.ConnectorServices;
-import org.jboss.as.controller.AbstractBoottimeAddStepHandler;
+import org.jboss.as.connector.util.ConnectorServices;
+import org.jboss.as.controller.AbstractAddStepHandler;
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.PathAddress;
@@ -38,6 +39,7 @@ import org.jboss.as.controller.ServiceVerificationHandler;
 import org.jboss.as.controller.SimpleAttributeDefinition;
 import org.jboss.as.controller.descriptions.DescriptionProvider;
 import org.jboss.dmr.ModelNode;
+import org.jboss.jca.common.api.metadata.common.TransactionSupportEnum;
 import org.jboss.jca.common.api.validator.ValidateException;
 import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceName;
@@ -47,7 +49,7 @@ import org.jboss.msc.service.ServiceTarget;
  * Adds a recovery-environment to the Transactions subsystem
  *
  */
-public class ConnectionDefinitionAdd extends AbstractBoottimeAddStepHandler implements DescriptionProvider {
+public class ConnectionDefinitionAdd extends AbstractAddStepHandler implements DescriptionProvider {
 
     public static final ConnectionDefinitionAdd INSTANCE = new ConnectionDefinitionAdd();
 
@@ -65,14 +67,17 @@ public class ConnectionDefinitionAdd extends AbstractBoottimeAddStepHandler impl
     @Override
     protected void populateModel(ModelNode operation, ModelNode modelNode) throws OperationFailedException {
         for (SimpleAttributeDefinition attribute : CONNECTIONDEFINITIONS_NODEATTRIBUTE) {
-             attribute.validateAndSet(operation, modelNode);
+            if (!attribute.isAllowed(operation) && operation.hasDefined(attribute.getName())) {
+                throw new OperationFailedException(new ModelNode().set(MESSAGES.invalid(attribute.getName())));
+            }
+            attribute.validateAndSet(operation, modelNode);
         }
 
 
     }
 
     @Override
-    protected void performBoottime(OperationContext context, ModelNode operation, ModelNode recoveryEnvModel,
+    protected void performRuntime(OperationContext context, ModelNode operation, ModelNode recoveryEnvModel,
                                   ServiceVerificationHandler verificationHandler,
                                   List<ServiceController<?>> serviceControllers) throws OperationFailedException {
 
@@ -82,11 +87,15 @@ public class ConnectionDefinitionAdd extends AbstractBoottimeAddStepHandler impl
         final String poolName = PathAddress.pathAddress(address).getLastElement().getValue();
 
         try {
-            final ModifiableConnDef connectionDefinitionValue = RaOperationUtil.buildConnectionDefinitionObject(context, operation, poolName);
-
-
             ServiceName serviceName = ServiceName.of(ConnectorServices.RA_SERVICE, archiveName, poolName);
             ServiceName raServiceName = ServiceName.of(ConnectorServices.RA_SERVICE, archiveName);
+
+            final ModifiableResourceAdapter ravalue = ((ModifiableResourceAdapter) context.getServiceRegistry(false).getService(raServiceName).getValue());
+            boolean isXa = ravalue.getTransactionSupport() == TransactionSupportEnum.XATransaction;
+
+            final ModifiableConnDef connectionDefinitionValue = RaOperationUtil.buildConnectionDefinitionObject(context, operation, poolName, isXa);
+
+
 
             final ServiceTarget serviceTarget = context.getServiceTarget();
 
@@ -94,8 +103,6 @@ public class ConnectionDefinitionAdd extends AbstractBoottimeAddStepHandler impl
             ServiceController<?> controller = serviceTarget.addService(serviceName, service).setInitialMode(ServiceController.Mode.ACTIVE)
                     .addDependency(raServiceName, ModifiableResourceAdapter.class, service.getRaInjector())
                     .addListener(verificationHandler).install();
-
-            context.addStep(verificationHandler, OperationContext.Stage.VERIFY);
 
             serviceControllers.add(controller);
 

@@ -22,17 +22,9 @@
 
 package org.jboss.as.host.controller.operations;
 
-import java.net.SocketException;
-import java.net.UnknownHostException;
-import java.util.HashMap;
-import java.util.Map;
-
 import org.jboss.as.controller.ControlledProcessState;
-import org.jboss.as.controller.interfaces.ParsedInterfaceCriteria;
 import org.jboss.as.domain.controller.LocalHostControllerInfo;
-import org.jboss.as.network.NetworkInterfaceBinding;
-import org.jboss.as.server.deployment.repository.api.ContentRepository;
-import org.jboss.as.server.services.net.NetworkInterfaceService;
+import org.jboss.as.host.controller.HostControllerEnvironment;
 
 /**
  * Default implementation of {@link LocalHostControllerInfo}.
@@ -42,17 +34,16 @@ import org.jboss.as.server.services.net.NetworkInterfaceService;
 public class LocalHostControllerInfoImpl implements LocalHostControllerInfo {
 
     private final ControlledProcessState processState;
+    private final HostControllerEnvironment hostEnvironment;
 
-    private String localHostName;
+    private final String localHostName;
     private boolean master;
     private String nativeManagementInterface;
     private int nativeManagementPort;
-    private Map<String, ParsedInterfaceCriteria> parsedInterfaceCriteria = new HashMap<String, ParsedInterfaceCriteria>();
-
-    private ContentRepository contentRepository;
 
     private String remoteDcHost;
     private int remoteDcPort;
+    private String remoteDCUser;
     private String remoteSecurityRealm;
     private String httpManagementInterface;
     private int httpManagementPort;
@@ -60,12 +51,21 @@ public class LocalHostControllerInfoImpl implements LocalHostControllerInfo {
     private String nativeManagementSecurityRealm;
     private String httpManagementSecurityRealm;
 
-    public LocalHostControllerInfoImpl(final ControlledProcessState processState) {
+    /** Constructor solely for test cases */
+    public LocalHostControllerInfoImpl(final ControlledProcessState processState, final String localHostName) {
         this.processState = processState;
+        this.hostEnvironment = null;
+        this.localHostName = localHostName;
+    }
+
+    public LocalHostControllerInfoImpl(final ControlledProcessState processState, final HostControllerEnvironment hostEnvironment) {
+        this.processState = processState;
+        this.hostEnvironment = hostEnvironment;
+        this.localHostName = null;
     }
 
     public String getLocalHostName() {
-        return localHostName;
+        return hostEnvironment == null ? localHostName : hostEnvironment.getHostControllerName();
     }
 
     @Override
@@ -112,40 +112,24 @@ public class LocalHostControllerInfoImpl implements LocalHostControllerInfo {
         return httpManagementSecurityRealm;
     }
 
-    public NetworkInterfaceBinding getNetworkInterfaceBinding(String name) throws SocketException, UnknownHostException {
-        ParsedInterfaceCriteria criteria = parsedInterfaceCriteria.get(name);
-        if (criteria == null) {
-            throw new IllegalArgumentException(String.format("No interface named %s exists ", name));
-        }
-        return NetworkInterfaceService.createBinding(name, criteria);
-    }
-
-    public ContentRepository getContentRepository() {
-        return contentRepository;
-    }
-
     public String getRemoteDomainControllerHost() {
         return remoteDcHost;
     }
 
-    public int getRemoteDomainControllertPort() {
+    public int getRemoteDomainControllerPort() {
         return remoteDcPort;
+    }
+
+    public String getRemoteDomainControllerUsername() {
+        return remoteDCUser;
     }
 
     public String getRemoteDomainControllerSecurityRealm() {
         return remoteSecurityRealm;
     }
 
-    void setContentRepository(ContentRepository contentRepository) {
-        this.contentRepository = contentRepository;
-    }
-
     void setMasterDomainController(boolean master) {
         this.master = master;
-    }
-
-    void setLocalHostName(String localHostName) {
-        this.localHostName = localHostName;
     }
 
     void setNativeManagementInterface(String nativeManagementInterface) {
@@ -176,14 +160,6 @@ public class LocalHostControllerInfoImpl implements LocalHostControllerInfo {
         this.httpManagementSecurityRealm = httpManagementSecurityRealm;
     }
 
-    void addNetworkInterfaceBinding(String name, ParsedInterfaceCriteria criteria) {
-        parsedInterfaceCriteria.put(name, criteria);
-    }
-
-    void removeNetworkInterfaceBinding(String name) {
-        parsedInterfaceCriteria.remove(name);
-    }
-
     void setRemoteDomainControllerHost(String host) {
         remoteDcHost = host;
     }
@@ -192,7 +168,11 @@ public class LocalHostControllerInfoImpl implements LocalHostControllerInfo {
         remoteDcPort = port;
     }
 
-    public void setRemoteDomainControllerSecurityRealm(String remoteSecurityRealm) {
+    void setRemoteDomainControllerUsername(String userName) {
+        this.remoteDCUser = userName;
+    }
+
+    void setRemoteDomainControllerSecurityRealm(String remoteSecurityRealm) {
         this.remoteSecurityRealm = remoteSecurityRealm;
     }
 }

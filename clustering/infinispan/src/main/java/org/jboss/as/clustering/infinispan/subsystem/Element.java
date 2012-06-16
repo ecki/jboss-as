@@ -25,44 +25,63 @@ package org.jboss.as.clustering.infinispan.subsystem;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.jboss.as.controller.AttributeDefinition;
+
 /**
+ * Enumerates the elements used in the Infinispan subsystem schema.
+ *
  * @author Paul Ferraro
+ * @author Richard Achmatowicz (c) 2011 RedHat Inc.
+ * @author Tristan Tarrant
  */
 public enum Element {
     // must be first
-    UNKNOWN(null),
+    UNKNOWN((String)null),
 
     ALIAS(ModelKeys.ALIAS),
-    BUCKET_TABLE(ModelKeys.BUCKET_TABLE),
+    BINARY_KEYED_TABLE(ModelKeys.BINARY_KEYED_TABLE),
+    @Deprecated BUCKET_TABLE(ModelKeys.BUCKET_TABLE),
     CACHE_CONTAINER(ModelKeys.CACHE_CONTAINER),
     DATA_COLUMN(ModelKeys.DATA_COLUMN),
     DISTRIBUTED_CACHE(ModelKeys.DISTRIBUTED_CACHE),
-    ENTRY_TABLE(ModelKeys.ENTRY_TABLE),
+    @Deprecated ENTRY_TABLE(ModelKeys.ENTRY_TABLE),
     EVICTION(ModelKeys.EVICTION),
     EXPIRATION(ModelKeys.EXPIRATION),
     FILE_STORE(ModelKeys.FILE_STORE),
     ID_COLUMN(ModelKeys.ID_COLUMN),
     INVALIDATION_CACHE(ModelKeys.INVALIDATION_CACHE),
-    JDBC_STORE(ModelKeys.JDBC_STORE),
+    @Deprecated JDBC_STORE("jdbc-store"),
+    STRING_KEYED_JDBC_STORE(ModelKeys.STRING_KEYED_JDBC_STORE),
+    BINARY_KEYED_JDBC_STORE(ModelKeys.BINARY_KEYED_JDBC_STORE),
+    MIXED_KEYED_JDBC_STORE(ModelKeys.MIXED_KEYED_JDBC_STORE),
+    INDEXING(ModelKeys.INDEXING),
     LOCAL_CACHE(ModelKeys.LOCAL_CACHE),
     LOCKING(ModelKeys.LOCKING),
     PROPERTY(ModelKeys.PROPERTY),
-    REHASHING(ModelKeys.REHASHING),
+    @Deprecated REHASHING("rehashing"),
     REMOTE_SERVER(ModelKeys.REMOTE_SERVER),
     REMOTE_STORE(ModelKeys.REMOTE_STORE),
     REPLICATED_CACHE(ModelKeys.REPLICATED_CACHE),
     STATE_TRANSFER(ModelKeys.STATE_TRANSFER),
     STORE(ModelKeys.STORE),
-    SUBSYSTEM(org.jboss.as.controller.parsing.Element.SUBSYSTEM.getLocalName()),
+    STRING_KEYED_TABLE(ModelKeys.STRING_KEYED_TABLE),
     TIMESTAMP_COLUMN(ModelKeys.TIMESTAMP_COLUMN),
     TRANSACTION(ModelKeys.TRANSACTION),
     TRANSPORT(ModelKeys.TRANSPORT),
+    WRITE_BEHIND(ModelKeys.WRITE_BEHIND)
     ;
 
     private final String name;
+    private final AttributeDefinition definition;
 
     Element(final String name) {
         this.name = name;
+        this.definition = null;
+    }
+
+    Element(final AttributeDefinition definition) {
+        this.name = definition.getXmlName();
+        this.definition = definition;
     }
 
     /**
@@ -72,6 +91,10 @@ public enum Element {
      */
     public String getLocalName() {
         return name;
+    }
+
+    public AttributeDefinition getDefinition() {
+        return definition;
     }
 
     private static final Map<String, Element> elements;

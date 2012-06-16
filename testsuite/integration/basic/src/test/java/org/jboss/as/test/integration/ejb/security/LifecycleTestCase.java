@@ -21,8 +21,6 @@
  */
 package org.jboss.as.test.integration.ejb.security;
 
-import static org.junit.Assert.fail;
-
 import java.util.Map;
 import java.util.logging.Logger;
 
@@ -31,14 +29,20 @@ import javax.security.auth.login.LoginContext;
 
 import org.jboss.arquillian.container.test.api.Deployment;
 import org.jboss.arquillian.junit.Arquillian;
-import org.jboss.as.test.integration.ejb.security.lifecycle.EntryBean;
+import org.jboss.as.arquillian.api.ServerSetup;
 import org.jboss.as.test.integration.ejb.security.lifecycle.BaseBean;
+import org.jboss.as.test.integration.ejb.security.lifecycle.EntryBean;
+import org.jboss.as.test.integration.security.common.AbstractSecurityDomainSetup;
+import org.jboss.as.test.shared.integration.ejb.security.Util;
 import org.jboss.shrinkwrap.api.Archive;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
+import org.jboss.shrinkwrap.api.asset.StringAsset;
 import org.jboss.shrinkwrap.api.spec.WebArchive;
 import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+
+import static org.junit.Assert.fail;
 
 /**
  * EJB 3.1 Section 17.2.5 - This test case is to test the programmatic access to the callers's security context for the various
@@ -47,7 +51,8 @@ import org.junit.runner.RunWith;
  * @author <a href="mailto:darran.lofthouse@jboss.com">Darran Lofthouse</a>
  */
 @RunWith(Arquillian.class)
-public class LifecycleTestCase extends SecurityTest {
+@ServerSetup({EjbSecurityDomainSetup.class})
+public class LifecycleTestCase  {
 
     private static final Logger log = Logger.getLogger(LifecycleTestCase.class.getName());
 
@@ -64,23 +69,15 @@ public class LifecycleTestCase extends SecurityTest {
 
     @Deployment
     public static Archive<?> runAsDeployment() {
-        // FIXME hack to get things prepared before the deployment happens
-        try {
-            // create required security domains
-            createSecurityDomain();
-        } catch (Exception e) {
-            // ignore
-        }
-
         // using JavaArchive doesn't work, because of a bug in Arquillian, it only deploys wars properly
         final WebArchive war = ShrinkWrap.create(WebArchive.class, "ejb3security.war")
                 .addPackage(EntryBean.class.getPackage())
-                .addClass(SecurityTest.class)
-                .addClass(Util.class) // TODO - Should not need to exclude the interfaces.
+                .addClasses(Util.class) // TODO - Should not need to exclude the interfaces.
+                .addClasses(AbstractSecurityDomainSetup.class, EjbSecurityDomainSetup.class)
                 .addAsResource("ejb3/security/users.properties", "users.properties")
                 .addAsResource("ejb3/security/roles.properties", "roles.properties")
                 .addAsWebInfResource("ejb3/security/jboss-web.xml", "jboss-web.xml")
-                .addAsManifestResource("web-secure-programmatic-login.war/MANIFEST.MF", "MANIFEST.MF");
+                .addAsManifestResource(new StringAsset("Manifest-Version: 1.0\nDependencies: org.jboss.as.controller-client,org.jboss.dmr\n"), "MANIFEST.MF");
         log.info(war.toString(true));
         return war;
     }

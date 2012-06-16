@@ -22,35 +22,44 @@
 
 package org.jboss.as.clustering.infinispan.subsystem;
 
+import javax.xml.XMLConstants;
 import java.util.HashMap;
 import java.util.Map;
 
-import javax.xml.XMLConstants;
+import org.jboss.as.controller.AttributeDefinition;
 
 /**
  * Enumerates the attributes used in the Infinispan subsystem schema.
  * @author Paul Ferraro
+ * @author Richard Achmatowicz (c) 2011 RedHat Inc.
+ * @author Tristan Tarrant
  */
 public enum Attribute {
     // must be first
-    UNKNOWN(null),
+    UNKNOWN((String) null),
     ACQUIRE_TIMEOUT(ModelKeys.ACQUIRE_TIMEOUT),
+    ALIASES(ModelKeys.ALIASES),
+    ASYNC_MARSHALLING(ModelKeys.ASYNC_MARSHALLING),
     BATCH_SIZE(ModelKeys.BATCH_SIZE),
     BATCHING(ModelKeys.BATCHING),
     CACHE(ModelKeys.CACHE),
+    CHUNK_SIZE(ModelKeys.CHUNK_SIZE),
     CLASS(ModelKeys.CLASS),
+    CLUSTER(ModelKeys.CLUSTER),
     CONCURRENCY_LEVEL(ModelKeys.CONCURRENCY_LEVEL),
     DATASOURCE(ModelKeys.DATASOURCE),
     DEFAULT_CACHE(ModelKeys.DEFAULT_CACHE),
-    DEFAULT_CACHE_CONTAINER(ModelKeys.DEFAULT_CACHE_CONTAINER),
-    EAGER_LOCKING(ModelKeys.EAGER_LOCKING), /* deprecated */
+    @Deprecated DEFAULT_CACHE_CONTAINER("default-cache-container"),
+    @Deprecated EAGER_LOCKING("eager-locking"),
     ENABLED(ModelKeys.ENABLED),
     EVICTION_EXECUTOR(ModelKeys.EVICTION_EXECUTOR),
     EXECUTOR(ModelKeys.EXECUTOR),
     FETCH_SIZE(ModelKeys.FETCH_SIZE),
     FETCH_STATE(ModelKeys.FETCH_STATE),
-    FLUSH_TIMEOUT(ModelKeys.FLUSH_TIMEOUT),
+    FLUSH_LOCK_TIMEOUT(ModelKeys.FLUSH_LOCK_TIMEOUT),
+    @Deprecated FLUSH_TIMEOUT("flush-timeout"),
     INDEXING(ModelKeys.INDEXING),
+    INDEX(ModelKeys.INDEX),
     INTERVAL(ModelKeys.INTERVAL),
     ISOLATION(ModelKeys.ISOLATION),
     JNDI_NAME(ModelKeys.JNDI_NAME),
@@ -63,6 +72,8 @@ public enum Attribute {
     MAX_ENTRIES(ModelKeys.MAX_ENTRIES),
     MAX_IDLE(ModelKeys.MAX_IDLE),
     MODE(ModelKeys.MODE),
+    MODIFICATION_QUEUE_SIZE(ModelKeys.MODIFICATION_QUEUE_SIZE),
+    MODULE(ModelKeys.MODULE),
     NAME(ModelKeys.NAME),
     NAMESPACE(XMLConstants.XMLNS_ATTRIBUTE),
     OUTBOUND_SOCKET_BINDING(ModelKeys.OUTBOUND_SOCKET_BINDING),
@@ -79,6 +90,7 @@ public enum Attribute {
     REMOTE_TIMEOUT(ModelKeys.REMOTE_TIMEOUT),
     REPLICATION_QUEUE_EXECUTOR(ModelKeys.REPLICATION_QUEUE_EXECUTOR),
     SHARED(ModelKeys.SHARED),
+    SHUTDOWN_TIMEOUT(ModelKeys.SHUTDOWN_TIMEOUT),
     SINGLETON(ModelKeys.SINGLETON),
     SITE(ModelKeys.SITE),
     SOCKET_TIMEOUT(ModelKeys.SOCKET_TIMEOUT),
@@ -88,15 +100,23 @@ public enum Attribute {
     STRATEGY(ModelKeys.STRATEGY),
     STRIPING(ModelKeys.STRIPING),
     TCP_NO_DELAY(ModelKeys.TCP_NO_DELAY),
+    THREAD_POOL_SIZE(ModelKeys.THREAD_POOL_SIZE),
     TIMEOUT(ModelKeys.TIMEOUT),
     TYPE(ModelKeys.TYPE),
     VIRTUAL_NODES(ModelKeys.VIRTUAL_NODES),
     ;
 
     private final String name;
+    private final AttributeDefinition definition;
 
     private Attribute(final String name) {
         this.name = name;
+        this.definition = null;
+    }
+
+    private Attribute(final AttributeDefinition definition) {
+        this.name = definition.getXmlName();
+        this.definition = definition;
     }
 
     /**
@@ -106,6 +126,10 @@ public enum Attribute {
      */
     public String getLocalName() {
         return name;
+    }
+
+    public AttributeDefinition getDefinition() {
+        return definition;
     }
 
     private static final Map<String, Attribute> attributes;

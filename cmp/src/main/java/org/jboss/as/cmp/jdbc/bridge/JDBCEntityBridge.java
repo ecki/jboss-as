@@ -33,10 +33,11 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.NoSuchElementException;
 import javax.ejb.EJBException;
 import javax.ejb.RemoveException;
 import javax.sql.DataSource;
+import org.jboss.as.cmp.CmpMessages;
+import static org.jboss.as.cmp.CmpMessages.MESSAGES;
 import org.jboss.as.cmp.bridge.FieldBridge;
 import org.jboss.as.cmp.context.CmpEntityBeanContext;
 import org.jboss.as.cmp.jdbc.JDBCContext;
@@ -346,7 +347,7 @@ public class JDBCEntityBridge implements JDBCAbstractEntityBridge {
             try {
                 return primaryKeyClass.newInstance();
             } catch (Exception e) {
-                throw new EJBException("Error creating primary key instance: ", e);
+                throw MESSAGES.errorCreatingPKInstance(e);
             }
         }
         return null;
@@ -405,7 +406,7 @@ public class JDBCEntityBridge implements JDBCAbstractEntityBridge {
     public boolean[] getLoadGroupMask(String name) {
         boolean[] mask = (boolean[]) loadGroupMasks.get(name);
         if (mask == null) {
-            throw new IllegalStateException("Load group '" + name + "' is not defined. Defined load groups: " + loadGroupMasks.keySet());
+            throw MESSAGES.loadGroupNotDefined(name, loadGroupMasks.keySet());
         }
         return mask;
     }
@@ -659,7 +660,7 @@ public class JDBCEntityBridge implements JDBCAbstractEntityBridge {
                 Object fieldValue = pkField.getInstanceValue(ctx);
 
                 // updated pk object with return form set primary key value to
-                // handle single valued non-composit pks and more complicated behivors.
+                // handle single valued non-composite pks and more complicated behivors.
                 pk = pkField.setPrimaryKeyValue(pk, fieldValue);
             }
             return pk;
@@ -668,8 +669,7 @@ public class JDBCEntityBridge implements JDBCAbstractEntityBridge {
             throw e;
         } catch (Exception e) {
             // Non recoverable internal exception
-            throw new EJBException("Internal error extracting primary key from " +
-                    "instance", e);
+            throw MESSAGES.errorExtractingPk(e);
         }
     }
 
@@ -777,7 +777,7 @@ public class JDBCEntityBridge implements JDBCAbstractEntityBridge {
         JDBCContext jdbcCtx = (JDBCContext) ctx.getPersistenceContext();
         EntityState entityState = jdbcCtx.getEntityState();
         if (entityState == null)
-            throw new IllegalStateException("Entity state is null.");
+            throw MESSAGES.entityStateIsNull();
         return entityState;
     }
 
@@ -791,13 +791,18 @@ public class JDBCEntityBridge implements JDBCAbstractEntityBridge {
 
         // create pk fields
         for (JDBCCMPFieldMetaData fieldMD : cmpFieldsMD) {
-            JDBCCMPFieldBridge cmpField = createCMPField(metadata, fieldMD);
             if (fieldMD.isPrimaryKeyMember()) {
-                pkFieldsList.add(cmpField);
-            } else {
-                cmpFieldsList.add(cmpField);
+                pkFieldsList.add(createCMPField(metadata, fieldMD));
+
             }
         }
+        for (JDBCCMPFieldMetaData fieldMD : cmpFieldsMD) {
+            if (!fieldMD.isPrimaryKeyMember()) {
+                cmpFieldsList.add(createCMPField(metadata, fieldMD));
+
+            }
+        }
+
         // save the pk fields in the pk field array
         primaryKeyFields = pkFieldsList.toArray(new JDBCCMPFieldBridge[pkFieldsList.size()]);
         // add the pk fields to the front of the cmp list, per guarantee above
@@ -875,9 +880,7 @@ public class JDBCEntityBridge implements JDBCAbstractEntityBridge {
         for (String fieldName : fieldNames) {
             JDBCFieldBridge field = (JDBCFieldBridge) getFieldByName(fieldName);
             if (field == null)
-                throw new RuntimeException(
-                        "Field " + fieldName + " not found for entity " + getEntityName());
-
+                throw MESSAGES.fieldNotFound(fieldName, getEntityName());
             if (field instanceof JDBCCMRFieldBridge) {
                 JDBCCMRFieldBridge cmrField = (JDBCCMRFieldBridge) field;
                 if (cmrField.hasForeignKey()) {
@@ -886,9 +889,7 @@ public class JDBCEntityBridge implements JDBCAbstractEntityBridge {
                         group[fkFields[i].getTableIndex()] = true;
                     }
                 } else {
-                    throw new RuntimeException("Only CMR fields that have " +
-                            "a foreign-key may be a member of a load group: " +
-                            "fieldName=" + fieldName);
+                    throw MESSAGES.onlyCmrFieldsWithFkInLoadGroup(fieldName);
                 }
             } else {
                 group[((JDBCCMPFieldBridge) field).getTableIndex()] = true;
@@ -928,7 +929,7 @@ public class JDBCEntityBridge implements JDBCAbstractEntityBridge {
 
     private void loadSelectors(JDBCEntityMetaData metadata) {
         // Don't know if this is the best way to do this.  Another way would be
-        // to deligate seletors to the JDBCFindEntitiesCommand, but this is
+        // to delegate selectors to the JDBCFindEntitiesCommand, but this is
         // easier now.
         selectorsByMethod = new HashMap(metadata.getQueries().size());
         Iterator definedFinders = manager.getMetaData().getQueries().iterator();
@@ -1145,7 +1146,7 @@ public class JDBCEntityBridge implements JDBCAbstractEntityBridge {
 
             public JDBCCMPFieldBridge next() {
                 if (!hasNext())
-                    throw new NoSuchElementException();
+                    throw MESSAGES.noSuchField();
                 curIndex = nextIndex;
                 return tableFields[nextIndex++];
             }
@@ -1173,15 +1174,15 @@ public class JDBCEntityBridge implements JDBCAbstractEntityBridge {
         }
 
         public JDBCCMPFieldBridge next() {
-            throw new NoSuchElementException();
+            throw MESSAGES.noSuchField();
         }
 
         public void remove() {
-            throw new UnsupportedOperationException();
+            throw MESSAGES.emptyFieldIteratorImmutable();
         }
 
         public void removeAll() {
-            throw new UnsupportedOperationException();
+            throw MESSAGES.emptyFieldIteratorImmutable();
         }
 
         public void reset() {

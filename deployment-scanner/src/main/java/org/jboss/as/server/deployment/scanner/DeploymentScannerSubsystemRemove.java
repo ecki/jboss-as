@@ -22,45 +22,28 @@
 
 package org.jboss.as.server.deployment.scanner;
 
-import java.util.Locale;
 import org.jboss.as.controller.AbstractRemoveStepHandler;
 import org.jboss.as.controller.OperationContext;
-import org.jboss.as.controller.OperationFailedException;
-import org.jboss.as.controller.descriptions.DescriptionProvider;
-import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
-import org.jboss.dmr.ModelNode;
-
-import static org.jboss.as.server.deployment.scanner.DeploymentScannerMessages.MESSAGES;
 
 /**
  * Handles the addition of the deployment scanning subsystem.
  *
  * @author Emanuel Muckenhuber
  */
-public class DeploymentScannerSubsystemRemove extends AbstractRemoveStepHandler implements DescriptionProvider {
-
-    static final String OPERATION_NAME = ModelDescriptionConstants.REMOVE;
-
-    static final DeploymentScannerSubsystemRemove INSTANCE = new DeploymentScannerSubsystemRemove();
+public class DeploymentScannerSubsystemRemove extends AbstractRemoveStepHandler {
+ static final DeploymentScannerSubsystemRemove INSTANCE = new DeploymentScannerSubsystemRemove();
 
     private DeploymentScannerSubsystemRemove() {
         //
     }
 
-    protected void performRemove(OperationContext context, ModelNode operation, ModelNode model) throws OperationFailedException {
-        if (model.hasDefined(CommonAttributes.SCANNER) && model.get(CommonAttributes.SCANNER).asInt() > 0) {
-            throw new OperationFailedException(new ModelNode().set(MESSAGES.cannotRemoveSubsystem()));
-        }
-        super.performRemove(context, operation, model);
-    }
-
-    protected boolean requiresRuntime(OperationContext context) {
-        return false;
+    @Override
+    protected boolean requireNoChildResources() {
+        return true;
     }
 
     @Override
-    public ModelNode getModelDescription(Locale locale) {
-        return DeploymentSubsystemDescriptions.getSubsystemRemove(locale);
+    protected boolean requiresRuntime(OperationContext context) {
+        return false;
     }
-
 }

@@ -21,38 +21,31 @@
  */
 package org.jboss.as.appclient.service;
 
-import java.io.IOException;
 import java.lang.reflect.Method;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.util.concurrent.TimeUnit;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
+import java.util.Collections;
+import java.util.List;
+import java.util.ListIterator;
 
-import javax.security.auth.callback.Callback;
 import javax.security.auth.callback.CallbackHandler;
-import javax.security.auth.callback.NameCallback;
-import javax.security.auth.callback.UnsupportedCallbackException;
 
 import org.jboss.as.ee.component.Component;
 import org.jboss.as.ee.component.ComponentInstance;
 import org.jboss.as.ee.naming.InjectedEENamespaceContextSelector;
 import org.jboss.as.naming.context.NamespaceContextSelector;
 import org.jboss.as.server.CurrentServiceContainer;
+import org.jboss.as.server.deployment.SetupAction;
 import org.jboss.ejb.client.ContextSelector;
+import org.jboss.ejb.client.EJBClientConfiguration;
 import org.jboss.ejb.client.EJBClientContext;
-import org.jboss.ejb.client.remoting.IoFutureHelper;
+import org.jboss.ejb.client.remoting.ConfigBasedEJBClientContextSelector;
 import org.jboss.msc.service.Service;
 import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.service.StartContext;
 import org.jboss.msc.service.StartException;
 import org.jboss.msc.service.StopContext;
 import org.jboss.msc.value.InjectedValue;
-import org.jboss.remoting3.Connection;
-import org.jboss.remoting3.Endpoint;
-import org.jboss.remoting3.Remoting;
-import org.jboss.remoting3.remote.RemoteConnectionProviderFactory;
-import org.xnio.IoFuture;
-import org.xnio.OptionMap;
-import org.xnio.Options;
 
 import static org.jboss.as.appclient.logging.AppClientLogger.ROOT_LOGGER;
 
@@ -71,80 +64,88 @@ public class ApplicationClientStartService implements Service<ApplicationClientS
     private final InjectedValue<ApplicationClientDeploymentService> applicationClientDeploymentServiceInjectedValue = new InjectedValue<ApplicationClientDeploymentService>();
     private final InjectedValue<Component> applicationClientComponent = new InjectedValue<Component>();
     private final InjectedEENamespaceContextSelector namespaceContextSelectorInjectedValue;
+    private final List<SetupAction> setupActions;
     private final Method mainMethod;
     private final String[] parameters;
     private final ClassLoader classLoader;
+    private final ContextSelector<EJBClientContext> contextSelector;
     final String hostUrl;
 
     private Thread thread;
     private ComponentInstance instance;
 
-    public ApplicationClientStartService(final Method mainMethod, final String[] parameters, final String hostUrl, final InjectedEENamespaceContextSelector namespaceContextSelectorInjectedValue, final ClassLoader classLoader) {
+    public ApplicationClientStartService(final Method mainMethod, final String[] parameters, final InjectedEENamespaceContextSelector namespaceContextSelectorInjectedValue, final ClassLoader classLoader,  final List<SetupAction> setupActions, final String hostUrl, final CallbackHandler callbackHandler) {
         this.mainMethod = mainMethod;
         this.parameters = parameters;
         this.namespaceContextSelectorInjectedValue = namespaceContextSelectorInjectedValue;
         this.classLoader = classLoader;
         this.hostUrl = hostUrl;
+        this.setupActions = setupActions;
+        this.contextSelector = new LazyConnectionContextSelector(hostUrl, callbackHandler);
     }
 
+    public ApplicationClientStartService(final Method mainMethod, final String[] parameters, final InjectedEENamespaceContextSelector namespaceContextSelectorInjectedValue, final ClassLoader classLoader,  final List<SetupAction> setupActions, final EJBClientConfiguration configuration) {
+        this.mainMethod = mainMethod;
+        this.parameters = parameters;
+        this.namespaceContextSelectorInjectedValue = namespaceContextSelectorInjectedValue;
+        this.classLoader = classLoader;
+        this.hostUrl = null;
+        this.setupActions = setupActions;
+        this.contextSelector = new ConfigBasedEJBClientContextSelector(configuration);
+    }
     @Override
     public synchronized void start(final StartContext context) throws StartException {
 
         thread = new Thread(new Runnable() {
 
-
             @Override
             public void run() {
+                final ClassLoader oldTccl = SecurityActions.getContextClassLoader();
                 try {
-                    final Endpoint endpoint = Remoting.createEndpoint("endpoint", OptionMap.EMPTY);
-                    endpoint.addConnectionProvider("remote", new RemoteConnectionProviderFactory(), OptionMap.create(Options.SSL_ENABLED, Boolean.FALSE));
-
-                    // open a connection
-                    final IoFuture<Connection> futureConnection = endpoint.connect(new URI(hostUrl), OptionMap.create(Options.SASL_POLICY_NOANONYMOUS, Boolean.FALSE), new AnonymousCallbackHandler());
-                    final Connection connection = IoFutureHelper.get(futureConnection, 5L, TimeUnit.SECONDS);
                     try {
                         try {
+                            SecurityActions.setContextClassLoader(classLoader);
+                            AccessController.doPrivileged(new SetSelectorAction(contextSelector));
+                            applicationClientDeploymentServiceInjectedValue.getValue().getDeploymentCompleteLatch().await();
+                            NamespaceContextSelector.setDefault(namespaceContextSelectorInjectedValue);
 
-                            final ClassLoader oldTccl = SecurityActions.getContextClassLoader();
                             try {
-                                try {
-                                    SecurityActions.setContextClassLoader(classLoader);
-
-                                    final EJBClientContext ejbClientContext = EJBClientContext.create();
-                                    ejbClientContext.registerConnection(connection);
-                                    final ContextSelector<EJBClientContext> previousSelector = EJBClientContext.setConstantContext(ejbClientContext);
-                                    applicationClientDeploymentServiceInjectedValue.getValue().getDeploymentCompleteLatch().await();
-
-                                    try {
-                                        NamespaceContextSelector.pushCurrentSelector(namespaceContextSelectorInjectedValue);
-                                        //do static injection etc
-                                        //TODO: this should be better
-                                        instance = applicationClientComponent.getValue().createInstance();
-                                        mainMethod.invoke(null, new Object[]{parameters});
-                                    } finally {
-                                        if (previousSelector != null) {
-                                            EJBClientContext.setSelector(previousSelector);
-                                        }
-                                        NamespaceContextSelector.popCurrentSelector();
-                                    }
-                                }  catch (Exception e) {
-                                    ROOT_LOGGER.exceptionRunningAppClient(e, e.getClass().getSimpleName());
-                                } finally {
-                                    SecurityActions.setContextClassLoader(oldTccl);
+                                //perform any additional setup that may be needed
+                                for (SetupAction action : setupActions) {
+                                    action.setup(Collections.<String, Object>emptyMap());
                                 }
+
+                                //do static injection etc
+                                instance = applicationClientComponent.getValue().createInstance();
+
+                                mainMethod.invoke(null, new Object[]{parameters});
                             } finally {
-                                CurrentServiceContainer.getServiceContainer().shutdown();
+                                final ListIterator<SetupAction> iterator = setupActions.listIterator(setupActions.size());
+                                Throwable error = null;
+                                while (iterator.hasPrevious()) {
+                                    SetupAction action = iterator.previous();
+                                    try {
+                                        action.teardown(Collections.<String, Object>emptyMap());
+                                    } catch (Throwable e) {
+                                        error = e;
+                                    }
+                                }
+                                if (error != null) {
+                                    throw new RuntimeException(error);
+                                }
                             }
+                        } catch (Exception e) {
+                            ROOT_LOGGER.exceptionRunningAppClient(e, e.getClass().getSimpleName());
                         } finally {
-                            connection.close();
+                            SecurityActions.setContextClassLoader(oldTccl);
                         }
                     } finally {
-                        endpoint.close();
+                        if(contextSelector instanceof LazyConnectionContextSelector) {
+                            ((LazyConnectionContextSelector)contextSelector).close();
+                        }
                     }
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                } catch (URISyntaxException e) {
-                    throw new RuntimeException(e);
+                } finally {
+                    CurrentServiceContainer.getServiceContainer().shutdown();
                 }
             }
         });
@@ -154,7 +155,7 @@ public class ApplicationClientStartService implements Service<ApplicationClientS
 
     @Override
     public synchronized void stop(final StopContext context) {
-        if(instance != null) {
+        if (instance != null) {
             instance.destroy();
         }
         thread.interrupt();
@@ -174,22 +175,18 @@ public class ApplicationClientStartService implements Service<ApplicationClientS
         return applicationClientComponent;
     }
 
-    /**
-     * User: jpai
-     */
-    public class AnonymousCallbackHandler implements CallbackHandler {
+
+    private static final class SetSelectorAction implements PrivilegedAction<ContextSelector<EJBClientContext>> {
+
+        private final ContextSelector<EJBClientContext> selector;
+
+        private SetSelectorAction(final ContextSelector<EJBClientContext> selector) {
+            this.selector = selector;
+        }
 
         @Override
-        public void handle(Callback[] callbacks) throws IOException, UnsupportedCallbackException {
-            for (Callback current : callbacks) {
-                if (current instanceof NameCallback) {
-                    NameCallback ncb = (NameCallback) current;
-                    ncb.setName("anonymous");
-                } else {
-                    throw new UnsupportedCallbackException(current);
-                }
-            }
+        public ContextSelector<EJBClientContext> run() {
+            return EJBClientContext.setSelector(selector);
         }
     }
-
 }

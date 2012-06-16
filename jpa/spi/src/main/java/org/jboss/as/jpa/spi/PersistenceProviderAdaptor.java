@@ -22,9 +22,11 @@
 
 package org.jboss.as.jpa.spi;
 
-import org.jboss.msc.service.ServiceName;
-
 import java.util.Map;
+
+import org.jboss.msc.service.ServiceBuilder;
+import org.jboss.msc.service.ServiceRegistry;
+import org.jboss.msc.service.ServiceTarget;
 
 /**
  * PersistenceProvider adaptor
@@ -35,6 +37,7 @@ public interface PersistenceProviderAdaptor {
 
     /**
      * pass the JtaManager in for internal use by PersistenceProviderAdaptor implementer
+     *
      * @param jtaManager
      */
     void injectJtaManager(JtaManager jtaManager);
@@ -54,7 +57,7 @@ public interface PersistenceProviderAdaptor {
      * @param pu
      * @return
      */
-    Iterable<ServiceName> getProviderDependencies(PersistenceUnitMetadata pu);
+    void addProviderDependencies(ServiceRegistry registry, ServiceTarget target, ServiceBuilder<?> builder, PersistenceUnitMetadata pu);
 
     /**
      * Called right before persistence provider is invoked to create container entity manager factory.
@@ -77,6 +80,19 @@ public interface PersistenceProviderAdaptor {
      */
     ManagementAdaptor getManagementAdaptor();
 
+    /**
+     * for adapters that support getManagementAdaptor(), does the scoped persistence unit name
+     * correctly identify cache entities.  This is intended for Hibernate, other adapters can return true.
+     *
+     * @return the Hibernate adapter will return false if
+     * the persistence unit has specified a custom "hibernate.cache.region_prefix" property.  True otherwise.
+     *
+     */
+    boolean doesScopedPersistenceUnitNameIdentifyCacheRegionName(PersistenceUnitMetadata pu);
 
+    /**
+     * Called when we are done with the persistence unit metadata
+     */
+    void cleanup(PersistenceUnitMetadata pu);
 }
 

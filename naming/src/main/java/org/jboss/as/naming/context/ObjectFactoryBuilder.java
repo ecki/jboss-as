@@ -22,17 +22,22 @@
 
 package org.jboss.as.naming.context;
 
+import java.security.AccessController;
+import java.security.PrivilegedAction;
 import java.util.Hashtable;
 
 import javax.naming.Context;
 import javax.naming.Name;
 import javax.naming.NamingException;
 import javax.naming.Reference;
+import javax.naming.directory.Attributes;
+import javax.naming.spi.DirObjectFactory;
 import javax.naming.spi.ObjectFactory;
 
 import org.jboss.as.naming.ServiceAwareObjectFactory;
 import org.jboss.as.server.CurrentServiceContainer;
 import org.jboss.modules.Module;
+import org.jboss.msc.service.ServiceContainer;
 
 import static org.jboss.as.naming.NamingMessages.MESSAGES;
 
@@ -42,7 +47,7 @@ import static org.jboss.as.naming.NamingMessages.MESSAGES;
  *
  * @author John Bailey
  */
-public class ObjectFactoryBuilder implements javax.naming.spi.ObjectFactoryBuilder, ObjectFactory {
+public class ObjectFactoryBuilder implements javax.naming.spi.ObjectFactoryBuilder, DirObjectFactory {
 
     public static final ObjectFactoryBuilder INSTANCE = new ObjectFactoryBuilder();
 
@@ -102,6 +107,45 @@ public class ObjectFactoryBuilder implements javax.naming.spi.ObjectFactoryBuild
         return ref;
     }
 
+    /**
+     * Create an object instance.
+     *
+     * @param ref Object containing reference information
+     * @param name The name relative to nameCtx
+     * @param nameCtx The naming context
+     * @param environment The environment information
+     * @param attributes The directory attributes
+     * @return The object
+     * @throws Exception If any error occur
+     */
+    public Object getObjectInstance(final Object ref, final Name name, final Context nameCtx, final Hashtable<?, ?> environment, final Attributes attributes) throws Exception {
+        final ClassLoader classLoader = SecurityActions.getContextClassLoader();
+        if(classLoader == null) {
+            return ref;
+        }
+        final String factoriesProp = (String)environment.get(Context.OBJECT_FACTORIES);
+        if(factoriesProp != null) {
+            final String[] classes = factoriesProp.split(":");
+            for(String className : classes) {
+                try {
+                    final Class<?> factoryClass = classLoader.loadClass(className);
+                    final ObjectFactory objectFactory = ObjectFactory.class.cast(factoryClass.newInstance());
+                    final Object result;
+                    if(objectFactory instanceof DirObjectFactory) {
+                        result = DirObjectFactory.class.cast(objectFactory).getObjectInstance(ref, name, nameCtx, environment, attributes);
+                    } else {
+                        result = objectFactory.getObjectInstance(ref, name, nameCtx, environment);
+                    }
+                    if(result != null) {
+                        return result;
+                    }
+                } catch(Throwable ignored) {
+                }
+            }
+        }
+        return ref;
+    }
+
     private ObjectFactory factoryFromReference(final Reference reference, final Hashtable<?, ?> environment) throws Exception {
         if (reference instanceof ModularReference) {
             return factoryFromModularReference(ModularReference.class.cast(reference), environment);
@@ -120,11 +164,21 @@ public class ObjectFactoryBuilder implements javax.naming.spi.ObjectFactoryBuild
             final Class<?> factoryClass = classLoader.loadClass(reference.getFactoryClassName());
             ObjectFactory factory = ObjectFactory.class.cast(factoryClass.newInstance());
             if (factory instanceof ServiceAwareObjectFactory) {
-                ((ServiceAwareObjectFactory) factory).injectServiceRegistry(CurrentServiceContainer.getServiceContainer());
+                ((ServiceAwareObjectFactory) factory).injectServiceRegistry(currentServiceContainer());
             }
             return factory;
         } catch (Throwable t) {
             throw MESSAGES.objectFactoryCreationFailure(t);
         }
+    }
+
+
+    private static ServiceContainer currentServiceContainer() {
+        return AccessController.doPrivileged(new PrivilegedAction<ServiceContainer>() {
+            @Override
+            public ServiceContainer run() {
+                return CurrentServiceContainer.getServiceContainer();
+            }
+        });
     }
 }

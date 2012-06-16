@@ -25,6 +25,7 @@ package org.jboss.as.test.integration.domain.suites;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ADD;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.AUTO_START;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.CHILD_TYPE;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.COMPOSITE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.FAILED;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.FAILURE_DESCRIPTION;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.GROUP;
@@ -44,16 +45,19 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SOC
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SOCKET_BINDING_PORT_OFFSET;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.START;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.START_SERVERS;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.STEPS;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.STOP;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.STOP_SERVERS;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SUCCESS;
+import static org.jboss.as.test.integration.domain.management.util.DomainTestUtils.checkState;
+import static org.jboss.as.test.integration.domain.management.util.DomainTestUtils.executeForResult;
+import static org.jboss.as.test.integration.domain.management.util.DomainTestUtils.getServerConfigAddress;
+import static org.jboss.as.test.integration.domain.management.util.DomainTestUtils.waitUntilState;
 
-import java.io.IOException;
-
-import org.jboss.as.arquillian.container.domain.managed.DomainLifecycleUtil;
 import org.jboss.as.controller.client.ModelControllerClient;
 import org.jboss.as.controller.client.helpers.domain.DomainClient;
 import org.jboss.as.test.integration.domain.DomainTestSupport;
+import org.jboss.as.test.integration.domain.management.util.DomainLifecycleUtil;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.Property;
 import org.junit.AfterClass;
@@ -61,6 +65,13 @@ import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Ignore;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @author Emanuel Muckenhuber
@@ -128,7 +139,6 @@ public class ServerManagementTestCase {
 
     }
 
-    @Ignore("AS7-2653")
     @Test
     public void testAddAndRemoveServer() throws Exception {
         final DomainClient client = domainSlaveLifecycleUtil.getDomainClient();
@@ -136,7 +146,7 @@ public class ServerManagementTestCase {
         final ModelNode addServer = new ModelNode();
         addServer.get(OP).set(ADD);
         addServer.get(OP_ADDR).set(newServerConfigAddress);
-        addServer.get(GROUP).set("main-server-group");
+        addServer.get(GROUP).set("minimal");
         addServer.get(SOCKET_BINDING_GROUP).set("standard-sockets");
         addServer.get(SOCKET_BINDING_PORT_OFFSET).set(650);
         addServer.get(AUTO_START).set(false);
@@ -145,7 +155,8 @@ public class ServerManagementTestCase {
         Assert.assertFalse(exists(client, newRunningServerAddress));
 
         ModelNode result = client.execute(addServer);
-        validateResponse(result);
+
+        validateResponse(result, false);
 
         Assert.assertTrue(exists(client, newServerConfigAddress));
         Assert.assertFalse(exists(client, newRunningServerAddress));
@@ -163,9 +174,10 @@ public class ServerManagementTestCase {
         final ModelNode stopServer = new ModelNode();
         stopServer.get(OP).set("stop");
         stopServer.get(OP_ADDR).set(newServerConfigAddress);
+        stopServer.get("blocking").set(true);
         result = client.execute(stopServer);
         validateResponse(result);
-        waitUntilState(client, newServerConfigAddress, "STOPPED");
+        waitUntilState(client, newServerConfigAddress, "DISABLED");
 
         Assert.assertTrue(exists(client, newServerConfigAddress));
         Assert.assertFalse(exists(client, newRunningServerAddress));
@@ -265,6 +277,48 @@ public class ServerManagementTestCase {
         }
     }
 
+    @Test
+    public void testAdminOnlyMode() throws Exception {
+
+        // restart master HC in admin only mode
+        final DomainClient masterClient = domainMasterLifecycleUtil.getDomainClient();
+        ModelNode op = new ModelNode();
+        op.get(OP_ADDR).add(HOST, "master");
+        op.get(OP).set("reload");
+        op.get("admin-only").set(true);
+        domainMasterLifecycleUtil.executeAwaitConnectionClosed(op);
+
+        // Try to reconnect to the hc
+        domainMasterLifecycleUtil.connect();
+
+        op = new ModelNode();
+        op.get(OP).set(READ_ATTRIBUTE_OPERATION);
+        op.get(OP_ADDR).add(HOST, "master");
+        op.get(NAME).set("running-mode");
+
+        // Validate that we are started in the --admin-only mode
+        final ModelNode result = executeForResult(masterClient, op);
+        Assert.assertEquals("ADMIN_ONLY", result.asString());
+
+        // restart back to normal mode
+        op = new ModelNode();
+        op.get(OP_ADDR).add(HOST, "master");
+        op.get(OP).set("reload");
+        op.get("admin-only").set(false);
+        domainMasterLifecycleUtil.executeAwaitConnectionClosed(op);
+
+        // Try to reconnect to the hc
+        domainMasterLifecycleUtil.connect();
+
+        // check that the servers are up
+        waitUntilState(masterClient, "master", "main-one", "STARTED");
+        // waitUntilState(masterClient, "master", "other-one", "STARTED");
+
+        // Wait for the slave to reconnect
+        waitForHost(masterClient, "slave");
+        //Assert.assertTrue(checkState(masterClient, getServerConfigAddress("slave", "main-tree"), "STARTED"));
+    }
+
     private void executeLifecycleOperation(final ModelControllerClient client, String opName) throws IOException {
         executeLifecycleOperation(client, null, opName);
     }
@@ -286,6 +340,10 @@ public class ServerManagementTestCase {
     }
 
     private ModelNode validateResponse(ModelNode response) {
+        return validateResponse(response, true);
+    }
+
+    private ModelNode validateResponse(ModelNode response, boolean validateResult) {
 
         if(! SUCCESS.equals(response.get(OUTCOME).asString())) {
             System.out.println("Failed response:");
@@ -293,7 +351,9 @@ public class ServerManagementTestCase {
             Assert.fail(response.get(FAILURE_DESCRIPTION).toString());
         }
 
-        Assert.assertTrue("result exists", response.has(RESULT));
+        if (validateResult) {
+            Assert.assertTrue("result exists", response.has(RESULT));
+        }
         return response.get(RESULT);
     }
 
@@ -333,33 +393,30 @@ public class ServerManagementTestCase {
         }
     }
 
-    private void waitUntilState(final ModelControllerClient client, final String hostName, final String serverName, final String state) throws IOException {
-        ModelNode address = new ModelNode().add(HOST, hostName).add(SERVER_CONFIG, serverName);
-        waitUntilState(client, address, state);
-    }
-
-    private void waitUntilState(final ModelControllerClient client, final ModelNode serverAddress, final String state) throws IOException {
-        for(int i = 0; i < 20; i++) {
-            if (checkState(client, serverAddress, state)) {
+    private static void waitForHost(final ModelControllerClient client, final String hostName) throws Exception {
+        final ModelNode operation = new ModelNode();
+        operation.get(OP).set(READ_CHILDREN_NAMES_OPERATION);
+        operation.get(OP_ADDR).setEmptyList();
+        operation.get(CHILD_TYPE).set(HOST);
+        final ModelNode host = new ModelNode().set(hostName);
+        final long timeout = 30L;
+        final TimeUnit timeUnit = TimeUnit.SECONDS;
+        final long deadline = System.currentTimeMillis() + timeUnit.toMillis(timeout);
+        for(;;) {
+            final long remaining = deadline - System.currentTimeMillis();
+            final ModelNode result = client.execute(operation);
+            if(result.get(RESULT).asList().contains(host)) {
+                return;
+            }
+            if(remaining <= 0) {
                 return;
             }
             try {
-                Thread.sleep(500);
-            } catch(InterruptedException e) {
+                TimeUnit.SECONDS.sleep(1);
+            } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return;
             }
         }
-        Assert.fail(serverAddress + " never reached the " + state + " statue");
-    }
-
-    private boolean checkState(final ModelControllerClient client, final ModelNode serverAddress, final String state) throws IOException {
-        final ModelNode operation = new ModelNode();
-        operation.get(OP).set(READ_ATTRIBUTE_OPERATION);
-        operation.get(OP_ADDR).set(serverAddress);
-        operation.get(NAME).set("status");
-
-        ModelNode status = client.execute(operation);
-        return state.equals(status.get(RESULT).asString());
     }
 }

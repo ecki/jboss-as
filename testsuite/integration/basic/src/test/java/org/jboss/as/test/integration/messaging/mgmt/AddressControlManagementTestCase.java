@@ -23,6 +23,7 @@
 package org.jboss.as.test.integration.messaging.mgmt;
 
 import java.io.IOException;
+import java.util.HashMap;
 
 import junit.framework.Assert;
 import org.hornetq.api.core.TransportConfiguration;
@@ -33,11 +34,15 @@ import org.hornetq.api.core.client.ServerLocator;
 import org.hornetq.core.remoting.impl.netty.NettyConnectorFactory;
 import org.jboss.arquillian.container.test.api.RunAsClient;
 import org.jboss.arquillian.junit.Arquillian;
-import org.jboss.as.test.integration.common.JMSAdminOperations;
+import org.jboss.as.arquillian.api.ContainerResource;
+import org.jboss.as.arquillian.container.ManagementClient;
+import org.jboss.as.test.shared.TestSuiteEnvironment;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.ModelType;
 import org.jboss.dmr.Property;
+import org.junit.After;
 import org.junit.AfterClass;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -49,39 +54,59 @@ import org.junit.runner.RunWith;
  */
 @RunAsClient()
 @RunWith(Arquillian.class)
-//@Ignore("Ignore failing tests")
 public class AddressControlManagementTestCase {
 
-    private static JMSAdminOperations adminSupport;
     private static long count = System.currentTimeMillis();
 
+    private static ClientSessionFactory sessionFactory;
+
     @BeforeClass
-    public static void setup() throws Exception {
-        adminSupport = new JMSAdminOperations();
+    public static void beforeClass() throws Exception {
+
+
+        HashMap<String, Object> map = new HashMap<String, Object>();
+        map.put("host", TestSuiteEnvironment.getServerAddress());
+        TransportConfiguration transportConfiguration =
+                new TransportConfiguration(NettyConnectorFactory.class.getName(), map);
+        ServerLocator locator = HornetQClient.createServerLocatorWithoutHA(transportConfiguration);
+        locator.setBlockOnDurableSend(true);
+        locator.setBlockOnNonDurableSend(true);
+        sessionFactory =  locator.createSessionFactory();
+    }
+
+    @AfterClass
+    public static void afterClass() throws Exception {
+
+        if (sessionFactory != null) {
+            sessionFactory.cleanup();
+            sessionFactory.close();
+        }
+    }
+
+    @ContainerResource
+    private ManagementClient managementClient;
+
+    private ClientSession session;
+
+    @Before
+    public void setup() throws Exception {
 
         count++;
 
-        TransportConfiguration transportConfiguration =
-                     new TransportConfiguration(NettyConnectorFactory.class.getName());
-        ServerLocator locator = HornetQClient.createServerLocatorWithoutHA(transportConfiguration);
-        ClientSessionFactory factory =  locator.createSessionFactory();
-        session = factory.createSession();
+        session = sessionFactory.createSession("guest", "guest", false, true, true, false, 1);
         session.createQueue(getAddress(), getQueueName(), false);
         session.createQueue(getAddress(), getOtherQueueName(), false);
     }
 
-    @AfterClass
-    public static void cleanup() throws Exception {
-        if (adminSupport != null) {
-            adminSupport.close();
-        }
+    @After
+    public void cleanup() throws Exception {
 
         if (session != null) {
+            session.deleteQueue(getQueueName());
+            session.deleteQueue(getOtherQueueName());
             session.close();
         }
     }
-
-    private static ClientSession session;
 
     @Test
     public void testSubsystemRootOperations() throws Exception {
@@ -205,7 +230,7 @@ public class AddressControlManagementTestCase {
     }
 
     private ModelNode execute(final ModelNode op, final boolean expectSuccess) throws IOException {
-        ModelNode response = adminSupport.getModelControllerClient().execute(op);
+        ModelNode response = managementClient.getControllerClient().execute(op);
         final String outcome = response.get("outcome").asString();
         if (expectSuccess) {
             if (!"success".equals(outcome)) {

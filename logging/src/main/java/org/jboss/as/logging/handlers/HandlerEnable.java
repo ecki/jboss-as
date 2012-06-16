@@ -22,14 +22,15 @@
 
 package org.jboss.as.logging.handlers;
 
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
+
+import java.util.logging.Handler;
+
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationStepHandler;
 import org.jboss.as.controller.PathAddress;
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_ADDR;
-
 import org.jboss.as.logging.util.LogServices;
 import org.jboss.dmr.ModelNode;
-import org.jboss.msc.service.AbstractServiceListener;
 import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceRegistry;
 
@@ -45,25 +46,15 @@ public class HandlerEnable implements OperationStepHandler {
         final PathAddress address = PathAddress.pathAddress(operation.require(OP_ADDR));
         final String name = address.getLastElement().getValue();
 
-        if (context.getType() == OperationContext.Type.SERVER) {
+        if (context.isNormalServer()) {
             context.addStep(new OperationStepHandler() {
                 public void execute(final OperationContext context, ModelNode operation) {
                     final ServiceRegistry serviceRegistry = context.getServiceRegistry(true);
-                    final ServiceController<?> controller = serviceRegistry.getService(LogServices.handlerName(name));
+                    @SuppressWarnings("unchecked")
+                    final ServiceController<Handler> controller = (ServiceController<Handler>) serviceRegistry.getService(LogServices.handlerName(name));
                     if (controller != null) {
-                        controller.addListener(new AbstractServiceListener<Object>() {
-                            public void listenerAdded(ServiceController<?> serviceController) {
-                                serviceController.setMode(ServiceController.Mode.ACTIVE);
-                            }
-
-                            public void serviceStarted(ServiceController<?> serviceController) {
-                                context.completeStep();
-                            }
-                        });
-                    } else {
-                        context.completeStep();
+                        Handlers.enableHandler(controller.getValue(), name);
                     }
-
                     context.completeStep();
                 }
             }, OperationContext.Stage.RUNTIME);

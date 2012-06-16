@@ -22,6 +22,7 @@
 
 package org.jboss.as.ejb3.remote.protocol.versionone;
 
+import org.jboss.as.ejb3.EjbMessages;
 import org.jboss.as.ejb3.deployment.DeploymentModuleIdentifier;
 import org.jboss.ejb.client.remoting.PackedInteger;
 
@@ -29,26 +30,23 @@ import java.io.DataOutput;
 import java.io.IOException;
 
 /**
- * User: jpai
+ * @author Jaikiran Pai
  */
 class ModuleAvailabilityWriter {
 
     static final byte HEADER_MODULE_AVAILABLE = 0x08;
     static final byte HEADER_MODULE_UNAVAILABLE = 0x09;
 
-    private final String marshallingStrategy;
-
-    ModuleAvailabilityWriter(final String marshallingStrategy) {
-        this.marshallingStrategy = marshallingStrategy;
+    ModuleAvailabilityWriter() {
     }
 
     void writeModuleAvailability(final DataOutput output, final DeploymentModuleIdentifier[] availableModules) throws IOException {
 
         if (output == null) {
-            throw new IllegalArgumentException("Cannot write to null output");
+            throw EjbMessages.MESSAGES.cannotWriteToNullDataOutput();
         }
         if (availableModules == null) {
-            throw new IllegalArgumentException("EJB module identifiers cannot be null");
+            throw EjbMessages.MESSAGES.ejbModuleIdentifiersCannotBeNull();
         }
         // write the header
         output.write(HEADER_MODULE_AVAILABLE);
@@ -59,10 +57,10 @@ class ModuleAvailabilityWriter {
     void writeModuleUnAvailability(final DataOutput output, final DeploymentModuleIdentifier[] unavailableModules) throws IOException {
 
         if (output == null) {
-            throw new IllegalArgumentException("Cannot write to null output");
+            throw EjbMessages.MESSAGES.cannotWriteToNullDataOutput();
         }
         if (unavailableModules == null) {
-            throw new IllegalArgumentException("EJB module identifiers cannot be null");
+            throw EjbMessages.MESSAGES.ejbModuleIdentifiersCannotBeNull();
         }
         // write the header
         output.write(HEADER_MODULE_UNAVAILABLE);

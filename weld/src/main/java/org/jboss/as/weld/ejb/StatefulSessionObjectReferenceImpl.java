@@ -23,6 +23,8 @@ package org.jboss.as.weld.ejb;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -30,12 +32,12 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
 
-import javax.ejb.NoSuchEJBException;
-
 import org.jboss.as.ee.component.ComponentView;
 import org.jboss.as.ejb3.component.stateful.StatefulSessionComponent;
 import org.jboss.as.server.CurrentServiceContainer;
+import org.jboss.as.weld.WeldMessages;
 import org.jboss.ejb.client.SessionID;
+import org.jboss.msc.service.ServiceContainer;
 import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceName;
 import org.jboss.weld.ejb.api.SessionObjectReference;
@@ -59,13 +61,13 @@ public class StatefulSessionObjectReferenceImpl implements SessionObjectReferenc
         this.id = id;
         this.createServiceName = createServiceName;
         this.viewServices = viewServices;
-        final ServiceController<?> controller = CurrentServiceContainer.getServiceContainer().getRequiredService(createServiceName);
+        final ServiceController<?> controller = currentServiceContainer().getRequiredService(createServiceName);
         ejbComponent = (StatefulSessionComponent) controller.getValue();
     }
 
     public StatefulSessionObjectReferenceImpl(EjbDescriptorImpl<?> descriptor) {
         this.createServiceName = descriptor.getCreateServiceName();
-        final ServiceController<?> controller = CurrentServiceContainer.getServiceContainer().getRequiredService(createServiceName);
+        final ServiceController<?> controller = currentServiceContainer().getRequiredService(createServiceName);
         ejbComponent = (StatefulSessionComponent) controller.getValue();
         this.id = ejbComponent.createSession();
         this.viewServices = buildViews(descriptor);
@@ -119,19 +121,29 @@ public class StatefulSessionObjectReferenceImpl implements SessionObjectReferenc
     @SuppressWarnings({"unchecked"})
     public synchronized <S> S getBusinessObject(Class<S> businessInterfaceType) {
         if (isRemoved()) {
-            throw new NoSuchEJBException("Bean has been removed");
+            throw WeldMessages.MESSAGES.ejbHashBeenRemoved();
         }
         if (viewServices.containsKey(businessInterfaceType.getName())) {
-            final ServiceController<?> serviceController = CurrentServiceContainer.getServiceContainer().getRequiredService(viewServices.get(businessInterfaceType.getName()));
+            final ServiceController<?> serviceController = currentServiceContainer().getRequiredService(viewServices.get(businessInterfaceType.getName()));
             final ComponentView view = (ComponentView) serviceController.getValue();
             try {
-                return (S) view.createInstance(Collections.<Object, Object>singletonMap(SessionID.SESSION_ID_KEY, id)).getInstance();
+                return (S) view.createInstance(Collections.<Object, Object>singletonMap(SessionID.class, id)).getInstance();
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         } else {
-            throw new IllegalStateException("View of type " + businessInterfaceType + " not found on bean " + ejbComponent);
+            throw WeldMessages.MESSAGES.viewNotFoundOnEJB(businessInterfaceType.getName(), ejbComponent.getComponentName());
         }
+    }
+
+
+    private static ServiceContainer currentServiceContainer() {
+        return AccessController.doPrivileged(new PrivilegedAction<ServiceContainer>() {
+            @Override
+            public ServiceContainer run() {
+                return CurrentServiceContainer.getServiceContainer();
+            }
+        });
     }
 
     protected Object writeReplace() throws IOException {
@@ -149,7 +161,7 @@ public class StatefulSessionObjectReferenceImpl implements SessionObjectReferenc
     @Override
     public boolean isRemoved() {
         if (!removed) {
-            return ejbComponent.getCache().get(id) == null;
+            return !ejbComponent.getCache().contains(id);
         }
         return true;
     }

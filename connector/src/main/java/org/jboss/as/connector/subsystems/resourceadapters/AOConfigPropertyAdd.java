@@ -29,15 +29,14 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_
 import java.util.List;
 import java.util.Locale;
 
-import org.jboss.as.connector.ConnectorServices;
-import org.jboss.as.controller.AbstractBoottimeAddStepHandler;
+import org.jboss.as.connector.util.ConnectorServices;
+import org.jboss.as.controller.AbstractAddStepHandler;
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.PathAddress;
 import org.jboss.as.controller.ServiceVerificationHandler;
 import org.jboss.as.controller.descriptions.DescriptionProvider;
 import org.jboss.dmr.ModelNode;
-import org.jboss.jca.validator.rules.ao.AOConfigProperties;
 import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.service.ServiceTarget;
@@ -46,7 +45,7 @@ import org.jboss.msc.service.ServiceTarget;
  * Adds a recovery-environment to the Transactions subsystem
  *
  */
-public class AOConfigPropertyAdd extends AbstractBoottimeAddStepHandler implements DescriptionProvider {
+public class AOConfigPropertyAdd extends AbstractAddStepHandler implements DescriptionProvider {
 
     public static final AOConfigPropertyAdd INSTANCE = new AOConfigPropertyAdd();
 
@@ -69,7 +68,7 @@ public class AOConfigPropertyAdd extends AbstractBoottimeAddStepHandler implemen
     }
 
     @Override
-    protected void performBoottime(OperationContext context, ModelNode operation, ModelNode recoveryEnvModel,
+    protected void performRuntime(OperationContext context, ModelNode operation, ModelNode recoveryEnvModel,
                                   ServiceVerificationHandler verificationHandler,
                                   List<ServiceController<?>> serviceControllers) throws OperationFailedException {
 
@@ -90,7 +89,6 @@ public class AOConfigPropertyAdd extends AbstractBoottimeAddStepHandler implemen
                     .addDependency(aoServiceName, ModifiableAdminObject.class, service.getAOInjector() )
                     .addListener(verificationHandler).install();
 
-        context.addStep(verificationHandler, OperationContext.Stage.VERIFY);
     }
 
 }

@@ -32,9 +32,16 @@ if $cygwin ; then
 fi
 
 # Setup JBOSS_HOME
+RESOLVED_JBOSS_HOME=`cd "$DIRNAME/.."; pwd`
 if [ "x$JBOSS_HOME" = "x" ]; then
     # get the full path (without any relative bits)
-    JBOSS_HOME=`cd "$DIRNAME/.."; pwd`
+    JBOSS_HOME=$RESOLVED_JBOSS_HOME
+else
+ SANITIZED_JBOSS_HOME=`cd "$JBOSS_HOME"; pwd`
+ if [ "$RESOLVED_JBOSS_HOME" != "$SANITIZED_JBOSS_HOME" ]; then
+   echo "WARNING JBOSS_HOME may be pointing to a different installation - unpredictable results may occur."
+   echo ""
+ fi
 fi
 export JBOSS_HOME
 
@@ -65,10 +72,9 @@ fi
 
 # Execute the command
 eval \"$JAVA\" $JAVA_OPTS \
-    \"-Djava.endorsed.dirs=$JBOSS_HOME/modules/com/sun/xml/bin/main:$JBOSS_HOME/modules/javax/xml/ws/api/main\" \
+    \"-Djava.endorsed.dirs=$JBOSS_HOME/modules/com/sun/xml/bind/main:$JBOSS_HOME/modules/javax/xml/ws/api/main\" \
     -classpath \"$JBOSS_CLASSPATH\" \
     org.jboss.modules.Main \
     -mp \"$JBOSS_HOME/modules\" \
-    -logmodule "org.jboss.logmanager" \
     org.jboss.ws.tools.wsconsume \
     "$@"

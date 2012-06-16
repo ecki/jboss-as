@@ -64,7 +64,7 @@ final class ManagedProcess {
     private final RespawnPolicy respawnPolicy;
 
     private OutputStream stdin;
-    private State state = State.DOWN;
+    private volatile State state = State.DOWN;
     private Process process;
     private boolean shutdown;
     private boolean stopRequested = false;
@@ -149,16 +149,19 @@ final class ManagedProcess {
         }
     }
 
-    public void sendStdin(final InputStream msg) {
+    public void sendStdin(final InputStream msg) throws IOException {
+        assert holdsLock(lock); // Call under lock
         try {
             StreamUtils.copyStream(msg, stdin);
             stdin.flush();
         } catch (IOException e) {
             log.failedToSendDataBytes(e, processName);
+            throw e;
         }
     }
 
     public void reconnect(String hostName, int port, boolean managementSubsystemEndpoint, byte[] asAuthKey) {
+        assert holdsLock(lock); // Call under lock
         try {
             StreamUtils.writeUTFZBytes(stdin, hostName);
             StreamUtils.writeInt(stdin, port);
@@ -188,6 +191,8 @@ final class ManagedProcess {
         try {
             process = builder.start();
         } catch (IOException e) {
+            e.printStackTrace();
+            processController.operationFailed(processName, ProcessMessageHandler.OperationType.START);
             log.failedToStartProcess(processName);
             return;
         }
@@ -204,16 +209,24 @@ final class ManagedProcess {
         final Thread joinThread = new Thread(new JoinTask(startTime));
         joinThread.setName(String.format("reaper for %s", processName));
         joinThread.start();
+        boolean ok = false;
         try {
             stdin.write(authKey);
             stdin.flush();
+            ok = true;
         } catch (Exception e) {
             log.failedToSendAuthKey(processName, e);
         }
-        state = State.STARTED;
+
         this.process = process;
         this.stdin = stdin;
-        processController.processStarted(processName);
+
+        if(ok) {
+            state = State.STARTED;
+            processController.processStarted(processName);
+        } else {
+            processController.operationFailed(processName, ProcessMessageHandler.OperationType.START);
+        }
         return;
     }
 
@@ -242,7 +255,12 @@ final class ManagedProcess {
                 StreamUtils.safeClose(stdin);
                 state = State.STOPPING;
             } else {
-                processController.removeProcess(processName);
+                new Thread() {
+                    @Override
+                    public void run() {
+                        processController.removeProcess(processName);
+                    }
+                }.start();
             }
         }
     }
@@ -296,6 +314,16 @@ final class ManagedProcess {
                             System.exit(0);
                         }
                     }).start();
+                } else if (isPrivileged() && exitCode == ExitCodes.RESTART_PROCESS_FROM_STARTUP_SCRIPT) {
+                    // Host Controller restart via exit code picked up by script
+                    processController.removeProcess(processName);
+                    new Thread(new Runnable() {
+                        public void run() {
+                            processController.shutdown();
+                            System.exit(ExitCodes.RESTART_PROCESS_FROM_STARTUP_SCRIPT);
+                        }
+                    }).start();
+
                 } else {
                     if(! stopRequested) {
                         respawn = true;

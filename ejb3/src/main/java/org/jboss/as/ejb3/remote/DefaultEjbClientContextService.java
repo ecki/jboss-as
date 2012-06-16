@@ -21,20 +21,25 @@
  */
 package org.jboss.as.ejb3.remote;
 
-import java.util.ArrayList;
-import java.util.List;
-
 import org.jboss.ejb.client.ContextSelector;
+import org.jboss.ejb.client.DeploymentNodeSelector;
+import org.jboss.ejb.client.EJBClientConfiguration;
 import org.jboss.ejb.client.EJBClientContext;
-import org.jboss.ejb.client.EJBReceiver;
+import org.jboss.logging.Logger;
 import org.jboss.msc.inject.Injector;
 import org.jboss.msc.service.Service;
-import org.jboss.msc.service.ServiceBuilder;
 import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.service.StartContext;
 import org.jboss.msc.service.StartException;
 import org.jboss.msc.service.StopContext;
 import org.jboss.msc.value.InjectedValue;
+import org.xnio.OptionMap;
+
+import javax.security.auth.callback.CallbackHandler;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
+import java.util.Collections;
+import java.util.Iterator;
 
 /**
  * Service that manages an EJBClientContext
@@ -42,6 +47,8 @@ import org.jboss.msc.value.InjectedValue;
  * @author Stuart Douglas
  */
 public class DefaultEjbClientContextService implements Service<EJBClientContext> {
+
+    private static final Logger logger = Logger.getLogger(DefaultEjbClientContextService.class);
 
     /**
      * The base service name for these services
@@ -53,41 +60,61 @@ public class DefaultEjbClientContextService implements Service<EJBClientContext>
      */
     public static final ServiceName DEFAULT_SERVICE_NAME = BASE_SERVICE_NAME.append("default");
 
-    /**
-     * The recievers to add to the context
-     */
-    private final List<InjectedValue<EJBReceiver>> ejbReceivers = new ArrayList<InjectedValue<EJBReceiver>>();
+    // setup the EJB client context selector in a static block so that the service restart
+    // doesn't run into trouble while resetting a selector, since the ability to switch the
+    // selector will be locked https://issues.jboss.org/browse/AS7-2998
+    static {
+        // setup the selector
+        AccessController.doPrivileged(new SetSelectorAction(TCCLEJBClientContextSelector.INSTANCE));
+    }
 
-    private final InjectedValue<TCCLBasedEJBClientContextSelector> tcclEJBClientContextSelector = new InjectedValue<TCCLBasedEJBClientContextSelector>();
+    private final InjectedValue<TCCLEJBClientContextSelectorService> tcclEJBClientContextSelector = new InjectedValue<TCCLEJBClientContextSelectorService>();
+
+    private final InjectedValue<LocalEjbReceiver> defaultLocalEJBReceiver = new InjectedValue<LocalEjbReceiver>();
 
     /**
      * The client context
      */
     private volatile EJBClientContext context;
 
-    private ContextSelector<EJBClientContext> previousSelector;
+    private final boolean lockSelectorOnStart;
+
+    /**
+     * @param lockEJBClientContextSelectorOnStart
+     *         True if the EJB client context selector should be locked on start of this
+     *         service. False otherwise.
+     */
+    public DefaultEjbClientContextService(final boolean lockEJBClientContextSelectorOnStart) {
+        this.lockSelectorOnStart = lockEJBClientContextSelectorOnStart;
+    }
 
     @Override
     public synchronized void start(final StartContext context) throws StartException {
-        final EJBClientContext clientContext = EJBClientContext.create();
-        for (final InjectedValue<EJBReceiver> receiver : ejbReceivers) {
-            clientContext.registerEJBReceiver(receiver.getValue());
+        final EJBClientContext clientContext = EJBClientContext.create(new LocalOnlyEjbClientConfiguration());
+        // register the default local EJB receiver (if present - app clients don't have local EJB receivers)
+        final LocalEjbReceiver localEjbReceiver = this.defaultLocalEJBReceiver.getOptionalValue();
+        if (localEjbReceiver != null) {
+            clientContext.registerEJBReceiver(localEjbReceiver);
         }
         this.context = clientContext;
-        // setup the client context selector
-        // TODO: We set this up here, for now. But we need to rethink about how we are going to
-        // handle manual overrides of EJB client context selector by user code on the server side.
-        // Setting this up via interceptor isn't a good idea too since that will end up overriding
-        // the selector which the user code might have set intentionally. So let this be here for now
-        previousSelector = EJBClientContext.setSelector(this.tcclEJBClientContextSelector.getValue());
+        if (this.lockSelectorOnStart) {
+            // lock the EJB client context selector
+            AccessController.doPrivileged(new LockSelectorAction());
+        }
+
+        // the EJBClientContext selector is set to TCCLEJBClientContextSelector and is *locked* once
+        // (in a static block of this service) so that restarting this service will not cause failures related
+        // to resetting the selector. The TCCLEJBClientContextSelector is backed by a TCCLEJBClientContextSelectorService
+        // which is what we set here during the service start, so that the selector has the correct service to return the
+        // EJBClientContext. @see https://issues.jboss.org/browse/AS7-2998 for details
+        TCCLEJBClientContextSelector.INSTANCE.setup(this.tcclEJBClientContextSelector.getValue(), this.context);
+
     }
 
     @Override
     public synchronized void stop(final StopContext context) {
         this.context = null;
-        if (this.previousSelector != null) {
-            EJBClientContext.setSelector(this.previousSelector);
-        }
+        TCCLEJBClientContextSelector.INSTANCE.destroy();
     }
 
     @Override
@@ -95,17 +122,100 @@ public class DefaultEjbClientContextService implements Service<EJBClientContext>
         return context;
     }
 
-    public void addReceiver(final ServiceBuilder<EJBClientContext> serviceBuilder, final ServiceName serviceName) {
-        final InjectedValue<EJBReceiver> value = new InjectedValue<EJBReceiver>();
-        serviceBuilder.addDependency(serviceName, EJBReceiver.class, value);
-        ejbReceivers.add(value);
-    }
 
-    public void addReceiver(final InjectedValue<EJBReceiver> value) {
-        ejbReceivers.add(value);
-    }
-
-    public Injector<TCCLBasedEJBClientContextSelector> getTCCLBasedEJBClientContextSelectorInjector() {
+    public Injector<TCCLEJBClientContextSelectorService> getTCCLBasedEJBClientContextSelectorInjector() {
         return this.tcclEJBClientContextSelector;
     }
+
+    public Injector<LocalEjbReceiver> getDefaultLocalEJBReceiverInjector() {
+        return this.defaultLocalEJBReceiver;
+    }
+
+    private static final class SetSelectorAction implements PrivilegedAction<ContextSelector<EJBClientContext>> {
+
+        private final ContextSelector<EJBClientContext> selector;
+
+        private SetSelectorAction(final ContextSelector<EJBClientContext> selector) {
+            this.selector = selector;
+        }
+
+        @Override
+        public ContextSelector<EJBClientContext> run() {
+            return EJBClientContext.setSelector(selector);
+        }
+    }
+
+    private static final class LockSelectorAction implements PrivilegedAction<Void> {
+        @Override
+        public Void run() {
+            EJBClientContext.lockSelector();
+            return null;
+        }
+    }
+
+    /**
+     * A {@link EJBClientConfiguration} which is applicable only for a {@link EJBClientContext}
+     * consisting of just the {@link LocalEjbReceiver}. i.e. this client configuration cannot be used
+     * for setting up connections to remote servers
+     */
+    class LocalOnlyEjbClientConfiguration implements EJBClientConfiguration {
+
+        private final DeploymentNodeSelector localPreferringDeploymentNodeSelector = new LocalEJBReceiverPreferringDeploymentNodeSelector();
+
+        @Override
+        public String getEndpointName() {
+            // This client configuration will *not* be used to create endpoints
+            return null;
+        }
+
+        @Override
+        public OptionMap getEndpointCreationOptions() {
+            // This client configuration will *not* be used to create endpoints
+            return OptionMap.EMPTY;
+        }
+
+        @Override
+        public OptionMap getRemoteConnectionProviderCreationOptions() {
+            // This client configuration will *not* be used to register connection providers
+            return OptionMap.EMPTY;
+        }
+
+        @Override
+        public CallbackHandler getCallbackHandler() {
+            // This client configuration is not applicable for registering remote connections
+            return null;
+        }
+
+        @Override
+        public Iterator<RemotingConnectionConfiguration> getConnectionConfigurations() {
+            // This client configuration will *not* be used for auto creating connections to remote servers.
+            return Collections.EMPTY_SET.iterator();
+        }
+
+        @Override
+        public Iterator<ClusterConfiguration> getClusterConfigurations() {
+            return Collections.EMPTY_SET.iterator();
+        }
+
+        @Override
+        public ClusterConfiguration getClusterConfiguration(String nodeName) {
+            return null;
+        }
+
+        @Override
+        public long getInvocationTimeout() {
+            return 0;
+        }
+
+        @Override
+        public long getReconnectTasksTimeout() {
+            return 0;
+        }
+
+        @Override
+        public DeploymentNodeSelector getDeploymentNodeSelector() {
+            return this.localPreferringDeploymentNodeSelector;
+        }
+    }
+
 }

@@ -26,6 +26,7 @@ import static org.jboss.as.jpa.JpaMessages.MESSAGES;
 
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import javax.persistence.PersistenceContext;
@@ -45,7 +46,6 @@ import org.jboss.as.ee.component.LookupInjectionSource;
 import org.jboss.as.ee.component.MethodInjectionTarget;
 import org.jboss.as.ee.component.ResourceInjectionConfiguration;
 import org.jboss.as.jpa.container.PersistenceUnitSearch;
-import org.jboss.as.jpa.container.SFSBXPCMap;
 import org.jboss.as.jpa.injectors.PersistenceContextInjectionSource;
 import org.jboss.as.jpa.injectors.PersistenceUnitInjectionSource;
 import org.jboss.as.jpa.service.PersistenceUnitServiceImpl;
@@ -92,7 +92,7 @@ public class JPAAnnotationParseProcessor implements DeploymentUnitProcessor {
 
         // @PersistenceUnit
         List<AnnotationInstance> persistenceUnits = index.getAnnotations(PERSISTENCE_UNIT_ANNOTATION_NAME);
-        // create binding and injection configurations out of the @PersistenceUnit annotaitons
+        // create binding and injection configurations out of the @PersistenceUnit annotations
         this.processPersistenceAnnotations(deploymentUnit, eeModuleDescription, persistenceUnits, applicationClasses);
 
         // if we found any @PersistenceContext or @PersistenceUnit annotations then mark this as a JPA deployment
@@ -173,7 +173,7 @@ public class JPAAnnotationParseProcessor implements DeploymentUnitProcessor {
             return;
         }
 
-        final String contextNameSuffix = methodName.substring(3, 4).toLowerCase() + methodName.substring(4);
+        final String contextNameSuffix = methodName.substring(3, 4).toLowerCase(Locale.ENGLISH) + methodName.substring(4);
         final AnnotationValue declaredNameValue = annotation.value("name");
         final String declaredName = declaredNameValue != null ? declaredNameValue.asString() : null;
         final String localContextName;
@@ -245,7 +245,7 @@ public class JPAAnnotationParseProcessor implements DeploymentUnitProcessor {
                 properties = null;
             }
 
-            return new PersistenceContextInjectionSource(type, properties, puServiceName, deploymentUnit, scopedPuName, injectionTypeName, SFSBXPCMap.getXpcMap(deploymentUnit), pu);
+            return new PersistenceContextInjectionSource(type, properties, puServiceName, deploymentUnit, scopedPuName, injectionTypeName, pu);
         } else {
             return new PersistenceUnitInjectionSource(puServiceName, deploymentUnit, injectionTypeName, pu);
         }
@@ -284,7 +284,7 @@ public class JPAAnnotationParseProcessor implements DeploymentUnitProcessor {
         }
         PersistenceUnitMetadata pu = PersistenceUnitSearch.resolvePersistenceUnitSupplier(deploymentUnit, searchName);
         if (null == pu) {
-            classDescription.setInvalid(MESSAGES.deploymentUnitNotFound(searchName, deploymentUnit));
+            classDescription.setInvalid(MESSAGES.persistenceUnitNotFound(searchName, deploymentUnit));
             return null;
         }
         return pu;

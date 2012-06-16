@@ -21,33 +21,118 @@
  */
 package org.jboss.as.domain.http.server.security;
 
+import static org.jboss.as.domain.management.RealmConfigurationConstants.VERIFY_PASSWORD_CALLBACK_SUPPORTED;
+import static org.jboss.as.domain.http.server.Constants.INTERNAL_SERVER_ERROR;
+import static org.jboss.as.domain.http.server.HttpServerLogger.ROOT_LOGGER;
+import static org.jboss.as.domain.http.server.HttpServerMessages.MESSAGES;
+
+import java.io.IOException;
+import java.security.Principal;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+
+import javax.net.ssl.SSLPeerUnverifiedException;
+import javax.net.ssl.SSLSession;
+import javax.security.auth.Subject;
 import javax.security.auth.callback.Callback;
-import javax.security.auth.callback.CallbackHandler;
 import javax.security.auth.callback.NameCallback;
 import javax.security.auth.callback.PasswordCallback;
 import javax.security.auth.callback.UnsupportedCallbackException;
-import java.io.IOException;
-import java.util.Arrays;
 
-import org.jboss.as.domain.management.security.DomainCallbackHandler;
+import org.jboss.as.controller.security.SubjectUserInfo;
+import org.jboss.as.domain.management.AuthenticationMechanism;
+import org.jboss.as.domain.management.AuthorizingCallbackHandler;
+import org.jboss.as.domain.management.SecurityRealm;
+import org.jboss.com.sun.net.httpserver.Authenticator;
+import org.jboss.com.sun.net.httpserver.HttpExchange;
+import org.jboss.com.sun.net.httpserver.HttpExchange.AttributeScope;
+import org.jboss.com.sun.net.httpserver.HttpPrincipal;
+import org.jboss.com.sun.net.httpserver.HttpsExchange;
 import org.jboss.sasl.callback.VerifyPasswordCallback;
-
-import static org.jboss.as.domain.http.server.HttpServerLogger.ROOT_LOGGER;
-import static org.jboss.as.domain.http.server.HttpServerMessages.MESSAGES;
 
 /**
  * @author <a href="mailto:darran.lofthouse@jboss.com">Darran Lofthouse</a>
  */
 public class BasicAuthenticator extends org.jboss.com.sun.net.httpserver.BasicAuthenticator {
 
-    private final CallbackHandler callbackHandler;
+    private final SecurityRealm securityRealm;
 
     private final boolean verifyPasswordCallback;
+    private final ThreadLocal<AuthorizingCallbackHandler> callbackHandler = new ThreadLocal<AuthorizingCallbackHandler>();
 
-    public BasicAuthenticator(DomainCallbackHandler callbackHandler, String realm) {
-        super(realm);
-        this.callbackHandler = callbackHandler;
-        verifyPasswordCallback = contains(VerifyPasswordCallback.class, callbackHandler.getSupportedCallbacks());
+    public BasicAuthenticator(SecurityRealm realm) {
+        super(realm.getName());
+        this.securityRealm = realm;
+
+        Map<String, String> mechanismConfig = securityRealm.getMechanismConfig(AuthenticationMechanism.PLAIN);
+        if (mechanismConfig.containsKey(VERIFY_PASSWORD_CALLBACK_SUPPORTED)) {
+            verifyPasswordCallback = Boolean.parseBoolean(mechanismConfig.get(VERIFY_PASSWORD_CALLBACK_SUPPORTED));
+        } else {
+            verifyPasswordCallback = false;
+        }
+    }
+
+    @Override
+    public Result authenticate(HttpExchange httpExchange) {
+        Subject subject = (Subject) httpExchange.getAttribute(Subject.class.getName(), AttributeScope.CONNECTION);
+        // If we have a cached Subject with a HttpPrincipal this connection is already authenticated so no further action
+        // required.
+        if (subject != null) {
+            Set<HttpPrincipal> httpPrincipals = subject.getPrincipals(HttpPrincipal.class);
+            if (httpPrincipals.size() > 0) {
+                return new Success(httpPrincipals.iterator().next());
+            }
+        }
+
+        callbackHandler.set(securityRealm.getAuthorizingCallbackHandler(AuthenticationMechanism.PLAIN));
+        try {
+            return _authenticate(httpExchange);
+        } finally {
+            callbackHandler.set(null);
+        }
+    }
+
+    private Result _authenticate(HttpExchange httpExchange) {
+        Result response = null;
+        // If we already have a Principal from the SSLSession no need to continue with
+        // username / password authentication.
+        if (httpExchange instanceof HttpsExchange) {
+            HttpsExchange httpsExch = (HttpsExchange) httpExchange;
+            SSLSession session = httpsExch.getSSLSession();
+            if (session != null) {
+                try {
+                    Principal p = session.getPeerPrincipal();
+
+                    response = new Success(new HttpPrincipal(p.getName(), realm));
+                } catch (SSLPeerUnverifiedException e) {
+                }
+            }
+        }
+        if (response == null) {
+            response = super.authenticate(httpExchange);
+        }
+
+        if (response instanceof Success) {
+            // For this method to have been called a Subject with HttpPrincipal was not found within the HttpExchange so now
+            // create a new one.
+            HttpPrincipal principal = ((Success) response).getPrincipal();
+
+            try {
+                Collection<Principal> principalCol = new HashSet<Principal>();
+                principalCol.add(principal);
+                SubjectUserInfo userInfo = callbackHandler.get().createSubjectUserInfo(principalCol);
+                httpExchange.setAttribute(Subject.class.getName(), userInfo.getSubject(), AttributeScope.CONNECTION);
+
+            } catch (IOException e) {
+                ROOT_LOGGER.debug("Unable to create SubjectUserInfo", e);
+                response = new Authenticator.Failure(INTERNAL_SERVER_ERROR);
+            }
+        }
+
+        return response;
     }
 
     @Override
@@ -62,7 +147,7 @@ public class BasicAuthenticator extends org.jboss.com.sun.net.httpserver.BasicAu
         Callback[] callbacks = new Callback[]{ncb, passwordCallback};
 
         try {
-            callbackHandler.handle(callbacks);
+            callbackHandler.get().handle(callbacks);
         } catch (IOException e) {
             ROOT_LOGGER.debug("Callback handle failed.", e);
             return false;
@@ -79,8 +164,7 @@ public class BasicAuthenticator extends org.jboss.com.sun.net.httpserver.BasicAu
         }
     }
 
-    // TODO - Will do something cleaner with collections.
-    public static boolean requiredCallbacksSupported(Class[] callbacks) {
+    public static boolean requiredCallbacksSupported(Class<Callback>[] callbacks) {
         if (contains(NameCallback.class,callbacks) == false) {
             return false;
         }
@@ -91,8 +175,8 @@ public class BasicAuthenticator extends org.jboss.com.sun.net.httpserver.BasicAu
         return true;
     }
 
-    private static boolean contains(Class clazz, Class[] classes) {
-        for (Class current : classes) {
+    private static boolean contains(Class clazz, Class<Callback>[] classes) {
+        for (Class<Callback> current : classes) {
             if (current.equals(clazz)) {
                 return true;
             }

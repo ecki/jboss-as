@@ -23,9 +23,13 @@
 package org.jboss.as.server.test;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Properties;
 import java.util.Set;
@@ -39,29 +43,38 @@ import org.jboss.as.controller.AttributeDefinition;
 import org.jboss.as.controller.ControlledProcessState;
 import org.jboss.as.controller.ExpressionResolver;
 import org.jboss.as.controller.ModelController;
-import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.PathAddress;
+import org.jboss.as.controller.ProcessType;
+import org.jboss.as.controller.RunningMode;
+import org.jboss.as.controller.RunningModeControl;
 import org.jboss.as.controller.client.ModelControllerClient;
 import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
 import org.jboss.as.controller.descriptions.common.InterfaceDescription;
+import org.jboss.as.controller.extension.ExtensionRegistry;
 import org.jboss.as.controller.persistence.AbstractConfigurationPersister;
 import org.jboss.as.controller.persistence.ConfigurationPersistenceException;
 import org.jboss.as.controller.persistence.ModelMarshallingContext;
 import org.jboss.as.controller.registry.ManagementResourceRegistration;
 import org.jboss.as.controller.registry.Resource;
+import org.jboss.as.controller.services.path.PathManagerService;
+import org.jboss.as.repository.ContentRepository;
+import org.jboss.as.repository.DeploymentFileRepository;
 import org.jboss.as.server.ServerControllerModelUtil;
 import org.jboss.as.server.ServerEnvironment;
 import org.jboss.as.server.Services;
 import org.jboss.as.server.controller.descriptions.ServerDescriptionProviders;
 import org.jboss.as.server.parsing.StandaloneXml;
+import org.jboss.as.version.ProductConfig;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.ModelType;
+import org.jboss.modules.Module;
 import org.jboss.msc.service.ServiceBuilder;
 import org.jboss.msc.service.ServiceContainer;
 import org.jboss.msc.service.ServiceTarget;
 import org.jboss.msc.service.StartContext;
 import org.jboss.msc.service.StartException;
 import org.jboss.staxmapper.XMLElementWriter;
+import org.jboss.vfs.VirtualFile;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -79,9 +92,11 @@ public class ServerControllerUnitTestCase {
     @Before
     public void beforeClass() throws Exception {
         final ServiceTarget target = container.subTarget();
-        final StringConfigurationPersister persister = new StringConfigurationPersister(Collections.<ModelNode>emptyList(), new StandaloneXml(null, null));
+        final ExtensionRegistry extensionRegistry = new ExtensionRegistry(ProcessType.STANDALONE_SERVER, new RunningModeControl(RunningMode.NORMAL));
+        final StringConfigurationPersister persister = new StringConfigurationPersister(Collections.<ModelNode>emptyList(), new StandaloneXml(null, null, extensionRegistry));
+        extensionRegistry.setWriterRegistry(persister);
         final ControlledProcessState processState = new ControlledProcessState(true);
-        final ModelControllerService svc = new ModelControllerService(OperationContext.Type.MANAGEMENT, processState, persister);
+        final ModelControllerService svc = new ModelControllerService(processState, persister);
         final ServiceBuilder<ModelController> builder = target.addService(Services.JBOSS_SERVER_CONTROLLER, svc);
         builder.install();
 
@@ -104,19 +119,19 @@ public class ServerControllerUnitTestCase {
         {
             final ModelNode operation = base.clone();
             operation.get("any-address").set(true);
-            populateCritieria(operation, false);
+            populateCritieria(operation, Nesting.TOP);
             executeForFailure(client, operation);
         }
         {
             final ModelNode operation = base.clone();
             operation.get("any-ipv4-address").set(true);
-            populateCritieria(operation, false);
+            populateCritieria(operation, Nesting.TOP);
             executeForFailure(client, operation);
         }
         {
             final ModelNode operation = base.clone();
             operation.get("any-ipv6-address").set(true);
-            populateCritieria(operation, false);
+            populateCritieria(operation, Nesting.TOP);
             executeForFailure(client, operation);
         }
         {
@@ -134,8 +149,14 @@ public class ServerControllerUnitTestCase {
         {
             final ModelNode operation = base.clone();
             // operation.get("any-address").set(true);
-            populateCritieria(operation, false);
+            populateCritieria(operation, Nesting.TOP, InterfaceDescription.LOOPBACK);
             executeForResult(client, operation);
+        }
+        {
+            final ModelNode operation = base.clone();
+            // operation.get("any-address").set(true);
+            populateCritieria(operation, Nesting.TOP);
+            executeForFailure(client, operation);
         }
     }
 
@@ -184,24 +205,58 @@ public class ServerControllerUnitTestCase {
         operation.get(ModelDescriptionConstants.OP).set("add");
         operation.get(ModelDescriptionConstants.OP_ADDR).add("interface", "complex");
         // This won't be resolvable with the runtime layer enabled
-        populateCritieria(operation, false);
-        populateCritieria(operation.get("not"), true);
-        populateCritieria(operation.get("any"), true);
+        populateCritieria(operation, Nesting.TOP,
+                InterfaceDescription.LOOPBACK);
+        populateCritieria(operation.get("not"), Nesting.NOT,
+                InterfaceDescription.PUBLIC_ADDRESS,
+                InterfaceDescription.LINK_LOCAL_ADDRESS,
+                InterfaceDescription.SITE_LOCAL_ADDRESS,
+                InterfaceDescription.VIRTUAL,
+                InterfaceDescription.UP,
+                InterfaceDescription.MULTICAST,
+                InterfaceDescription.LOOPBACK_ADDRESS,
+                InterfaceDescription.POINT_TO_POINT);
+        populateCritieria(operation.get("any"), Nesting.ANY);
 
         final ModelControllerClient client = controller.createClient(Executors.newCachedThreadPool());
 
         executeForResult(client, operation);
     }
 
-    protected void populateCritieria(final ModelNode model, final boolean nested) {
+    protected void populateCritieria(final ModelNode model, final Nesting nesting, final AttributeDefinition...excluded) {
+        Set<AttributeDefinition> excludedCriteria = new HashSet<AttributeDefinition>(Arrays.asList(excluded));
         for(final AttributeDefinition def : InterfaceDescription.NESTED_ATTRIBUTES) {
+
+            if (excludedCriteria.contains(def)) {
+                continue;
+            }
+
+            final ModelNode node = model.get(def.getName());
             if(def.getType() == ModelType.BOOLEAN) {
-                model.get(def.getName()).set(true);
-            } else {
-                if(nested) {
-                    model.get(def.getName()).add("127.0.0.1");
+                node.set(true);
+            } else if (def == InterfaceDescription.INET_ADDRESS || def == InterfaceDescription.LOOPBACK_ADDRESS) {
+                if (nesting == Nesting.ANY && def == InterfaceDescription.INET_ADDRESS) {
+                    node.add("127.0.0.1");
+                } else if (nesting == Nesting.NOT && def == InterfaceDescription.INET_ADDRESS) {
+                    node.add("10.0.0.1");
                 } else {
-                    model.get(def.getName()).set("127.0.0.1");
+                    node.set("127.0.0.1");
+                }
+            } else if (def == InterfaceDescription.NIC || def == InterfaceDescription.NIC_MATCH) {
+                if (nesting == Nesting.ANY) {
+                    node.add("lo");
+                } else if (nesting == Nesting.NOT) {
+                    node.add("en3");
+                } else {
+                    node.set("lo");
+                }
+            } else if (def == InterfaceDescription.SUBNET_MATCH) {
+                if (nesting == Nesting.ANY) {
+                    node.add("127.0.0.1/24");
+                } else if (nesting == Nesting.NOT) {
+                    node.add("10.0.0.1/24");
+                } else {
+                    node.set("127.0.0.0/24");
                 }
             }
         }
@@ -215,8 +270,8 @@ public class ServerControllerUnitTestCase {
         volatile ManagementResourceRegistration rootRegistration;
         volatile Exception error;
 
-        ModelControllerService(final OperationContext.Type type, final ControlledProcessState processState, final StringConfigurationPersister persister) {
-            super(type, persister, processState, ServerDescriptionProviders.ROOT_PROVIDER, null, ExpressionResolver.DEFAULT);
+        ModelControllerService(final ControlledProcessState processState, final StringConfigurationPersister persister) {
+            super(ProcessType.EMBEDDED_SERVER, new RunningModeControl(RunningMode.ADMIN_ONLY), persister, processState, ServerDescriptionProviders.ROOT_PROVIDER, null, ExpressionResolver.DEFAULT);
             this.persister = persister;
             this.processState = processState;
         }
@@ -226,14 +281,18 @@ public class ServerControllerUnitTestCase {
             this.rootRegistration = rootRegistration;
             Properties properties = new Properties();
             properties.put("jboss.home.dir", ".");
-            final ServerEnvironment environment = new ServerEnvironment(properties, new HashMap<String, String>(), null, ServerEnvironment.LaunchType.DOMAIN);
-            ServerControllerModelUtil.initOperations(rootRegistration, null, persister, environment, processState, null, false);
+
+            final String hostControllerName = "hostControllerName"; // Host Controller name may not be null when in a managed domain
+            final ServerEnvironment environment = new ServerEnvironment(hostControllerName, properties, new HashMap<String, String>(), null, ServerEnvironment.LaunchType.DOMAIN, null, new ProductConfig(Module.getBootModuleLoader(), "."));
+            final ExtensionRegistry extensionRegistry = new ExtensionRegistry(ProcessType.STANDALONE_SERVER, new RunningModeControl(RunningMode.NORMAL));
+            ServerControllerModelUtil.initOperations(rootRegistration, MockRepository.INSTANCE, persister, environment,
+                    processState, null, null, extensionRegistry, false, MockRepository.INSTANCE, MOCK_PATH_MANAGER);
         }
 
         @Override
-        protected void boot(List<ModelNode> bootOperations) throws ConfigurationPersistenceException {
+        protected boolean boot(List<ModelNode> bootOperations, boolean rollbackOnRuntimeFailure) throws ConfigurationPersistenceException {
             try {
-                super.boot(persister.bootOperations);
+                return super.boot(persister.bootOperations, rollbackOnRuntimeFailure);
             } catch (Exception e) {
                 error = e;
             } catch (Throwable t) {
@@ -241,6 +300,7 @@ public class ServerControllerUnitTestCase {
             } finally {
                 latch.countDown();
             }
+            return false;
         }
 
         @Override
@@ -329,7 +389,7 @@ public class ServerControllerUnitTestCase {
             if (result.hasDefined("outcome") && "success".equals(result.get("outcome").asString())) {
                 return result.get("result");
             } else {
-                Assert.fail("Operation outcome is " + result.get("outcome").asString());
+                Assert.fail("Operation outcome is " + result.get("outcome").asString() + " " + result.get("failure-description"));
                 throw new RuntimeException(); // not reached
             }
         } catch (IOException e) {
@@ -337,5 +397,52 @@ public class ServerControllerUnitTestCase {
         }
     }
 
+    static final class MockRepository implements ContentRepository, DeploymentFileRepository {
 
+        static MockRepository INSTANCE = new MockRepository();
+
+        @Override
+        public File[] getDeploymentFiles(byte[] deploymentHash) {
+            return null;
+        }
+
+        @Override
+        public File getDeploymentRoot(byte[] deploymentHash) {
+            return null;
+        }
+
+        @Override
+        public void deleteDeployment(byte[] deploymentHash) {
+        }
+
+        @Override
+        public byte[] addContent(InputStream stream) throws IOException {
+            return null;
+        }
+
+        @Override
+        public VirtualFile getContent(byte[] hash) {
+            return null;
+        }
+
+        @Override
+        public boolean hasContent(byte[] hash) {
+            return false;
+        }
+
+        @Override
+        public void removeContent(byte[] hash) {
+        }
+
+    }
+
+    private static PathManagerService MOCK_PATH_MANAGER = new PathManagerService() {
+
+    };
+
+    private enum Nesting {
+        TOP,
+        ANY,
+        NOT
+    }
 }

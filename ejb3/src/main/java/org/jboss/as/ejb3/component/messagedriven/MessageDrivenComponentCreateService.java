@@ -22,35 +22,38 @@
 
 package org.jboss.as.ejb3.component.messagedriven;
 
-import org.jboss.as.connector.ConnectorServices;
+import java.util.Properties;
+
+import javax.resource.spi.ActivationSpec;
+import javax.resource.spi.ResourceAdapter;
+
 import org.jboss.as.ee.component.BasicComponent;
 import org.jboss.as.ee.component.ComponentConfiguration;
+import org.jboss.as.ejb3.EjbLogger;
 import org.jboss.as.ejb3.component.EJBComponentCreateService;
+import org.jboss.as.ejb3.component.EJBUtilities;
 import org.jboss.as.ejb3.component.pool.PoolConfig;
 import org.jboss.as.ejb3.deployment.ApplicationExceptions;
 import org.jboss.as.ejb3.inflow.EndpointDeployer;
-import org.jboss.msc.service.ServiceController;
-import org.jboss.msc.service.ServiceName;
-import org.jboss.msc.service.ServiceRegistry;
+import org.jboss.jca.core.spi.rar.Endpoint;
+import org.jboss.msc.inject.Injector;
+import org.jboss.msc.service.StartContext;
+import org.jboss.msc.service.StartException;
 import org.jboss.msc.value.InjectedValue;
 
-import javax.resource.ResourceException;
-import javax.resource.spi.ActivationSpec;
-import javax.resource.spi.ResourceAdapter;
-import java.util.Collection;
-import java.util.Properties;
-import static org.jboss.as.ejb3.EjbMessages.MESSAGES;
 /**
  * @author Stuart Douglas
  */
 public class MessageDrivenComponentCreateService extends EJBComponentCreateService {
 
     private final Class<?> messageListenerInterface;
-    private String resourceAdapterName;
     private final Properties activationProps;
+    private final String resourceAdapterName;
+    private final InjectedValue<ResourceAdapter> resourceAdapterInjectedValue = new InjectedValue<ResourceAdapter>();
     private final InjectedValue<PoolConfig> poolConfig = new InjectedValue<PoolConfig>();
-    private final InjectedValue<DefaultResourceAdapterService> defaultRANameService = new InjectedValue<DefaultResourceAdapterService>();
-
+    private final InjectedValue<DefaultResourceAdapterService> defaultResourceAdapterServiceInjectedValue = new InjectedValue<DefaultResourceAdapterService>();
+    private final InjectedValue<EJBUtilities> ejbUtilitiesInjectedValue = new InjectedValue<EJBUtilities>();
+    private final ClassLoader moduleClassLoader;
     /**
      * Construct a new instance.
      *
@@ -61,32 +64,43 @@ public class MessageDrivenComponentCreateService extends EJBComponentCreateServi
 
         final MessageDrivenComponentDescription componentDescription = (MessageDrivenComponentDescription) componentConfiguration.getComponentDescription();
         this.resourceAdapterName = this.stripDotRarSuffix(componentDescription.getResourceAdapterName());
-
         // see MessageDrivenComponentDescription.<init>
         this.messageListenerInterface = componentConfiguration.getViews().get(0).getViewClass();
 
         this.activationProps = componentDescription.getActivationProps();
+        this.moduleClassLoader = componentConfiguration.getModuleClassLoader();
+    }
+
+    @Override
+    public void start(StartContext context) throws StartException {
+        super.start(context);
+        // AS7-3073 just log a message about the MDB being started
+        EjbLogger.ROOT_LOGGER.logMDBStart(this.getComponentName(), this.resourceAdapterName);
     }
 
     @Override
     protected BasicComponent createComponent() {
-        if (this.resourceAdapterName == null) {
-            this.resourceAdapterName = this.getDefaultResourceAdapterName();
+        final String activeResourceAdapterName;
+        if (resourceAdapterName == null) {
+            activeResourceAdapterName = defaultResourceAdapterServiceInjectedValue.getValue().getDefaultResourceAdapterName();
+        } else {
+            activeResourceAdapterName = resourceAdapterName;
         }
-        final ServiceName raServiceName = this.getResourceAdapterServiceName();
-
-        final ActivationSpec activationSpec = getEndpointDeployer().createActivationSpecs(resourceAdapterName, messageListenerInterface, activationProps, getDeploymentClassLoader());
-        //final ActivationSpec activationSpec = null;
+        final ActivationSpec activationSpec = getEndpointDeployer().createActivationSpecs(activeResourceAdapterName, messageListenerInterface, activationProps, getDeploymentClassLoader());
         final MessageDrivenComponent component = new MessageDrivenComponent(this, messageListenerInterface, activationSpec);
-        // TODO: should be injected by start service
-        final ResourceAdapter resourceAdapter = getRequiredService(raServiceName, ResourceAdapter.class).getValue();
+        // set the resource adapter
+        final ResourceAdapter resourceAdapter = this.resourceAdapterInjectedValue.getValue();
         component.setResourceAdapter(resourceAdapter);
-        try {
-            activationSpec.setResourceAdapter(resourceAdapter);
-        } catch (ResourceException e) {
-            throw new RuntimeException(e);
-        }
+        // set the endpoint
+        final EJBUtilities ejbUtilities = this.ejbUtilitiesInjectedValue.getValue();
+        final Endpoint endpoint = ejbUtilities.getEndpoint(activeResourceAdapterName);
+        component.setEndpoint(endpoint);
+
         return component;
+    }
+
+    Injector<DefaultResourceAdapterService> getDefaultResourceAdapterServiceInjector() {
+        return defaultResourceAdapterServiceInjectedValue;
     }
 
     PoolConfig getPoolConfig() {
@@ -97,18 +111,6 @@ public class MessageDrivenComponentCreateService extends EJBComponentCreateServi
         return this.poolConfig;
     }
 
-    public InjectedValue<DefaultResourceAdapterService> getDefaultRANameServiceInjector() {
-        return this.defaultRANameService;
-    }
-
-    String getDefaultResourceAdapterName() {
-        final DefaultResourceAdapterService defaultResourceAdapterService = this.defaultRANameService.getOptionalValue();
-        if (defaultResourceAdapterService != null) {
-            return this.stripDotRarSuffix(defaultResourceAdapterService.getDefaultResourceAdapterName());
-        }
-        return "hornetq-ra";
-    }
-
     private ClassLoader getDeploymentClassLoader() {
         return getComponentClass().getClassLoader();
     }
@@ -117,20 +119,16 @@ public class MessageDrivenComponentCreateService extends EJBComponentCreateServi
         return getEJBUtilities();
     }
 
-    private <S> ServiceController<S> getRequiredService(final ServiceName serviceName, final Class<S> expectedType) {
-        return (ServiceController<S>) getServiceRegistry().getRequiredService(serviceName);
+    public InjectedValue<ResourceAdapter> getResourceAdapterInjector() {
+        return this.resourceAdapterInjectedValue;
     }
 
-    private ServiceRegistry getServiceRegistry() {
-        return getDeploymentUnitInjector().getValue().getServiceRegistry();
+    public Injector<EJBUtilities> getEJBUtilitiesInjector() {
+        return this.ejbUtilitiesInjectedValue;
     }
 
-    ServiceName getResourceAdapterServiceName() {
-        final Collection<ServiceName> serviceNames = ConnectorServices.getResourceAdapterServiceNames(this.resourceAdapterName);
-        if (serviceNames == null || serviceNames.isEmpty()) {
-            throw MESSAGES.failToFindResourceAdapter(this.resourceAdapterName);
-        }
-        return serviceNames.iterator().next();
+    public ClassLoader getModuleClassLoader() {
+        return moduleClassLoader;
     }
 
     private String stripDotRarSuffix(final String raName) {

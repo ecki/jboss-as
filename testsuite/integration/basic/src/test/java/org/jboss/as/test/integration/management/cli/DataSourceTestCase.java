@@ -21,23 +21,29 @@
  */
 package org.jboss.as.test.integration.management.cli;
 
+import java.net.URL;
+import org.jboss.as.test.integration.management.base.AbstractCliTestBase;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import java.util.Map;
+import junit.framework.Assert;
 
 import org.jboss.arquillian.container.test.api.Deployment;
 import org.jboss.arquillian.container.test.api.RunAsClient;
 import org.jboss.arquillian.junit.Arquillian;
+import org.jboss.arquillian.test.api.ArquillianResource;
+import org.jboss.as.test.integration.common.JndiServlet;
 import org.jboss.as.test.integration.management.util.CLIOpResult;
 import org.jboss.shrinkwrap.api.Archive;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
-import org.jboss.shrinkwrap.api.spec.JavaArchive;
+import org.jboss.shrinkwrap.api.spec.WebArchive;
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
 /**
- * TODO add/remove/modify-data-source commands are deprecated and shouldn't be used
  *
  * @author Dominik Pospisil <dpospisi@redhat.com>
  */
@@ -45,15 +51,28 @@ import org.junit.runner.RunWith;
 @RunAsClient
 public class DataSourceTestCase extends AbstractCliTestBase {
 
+    @ArquillianResource URL url;
+
     private static final String[][] DS_PROPS = new String[][] {
         {"idle-timeout-minutes", "5"}
     };
 
     @Deployment
     public static Archive<?> getDeployment() {
-        JavaArchive ja = ShrinkWrap.create(JavaArchive.class, "dummy.jar");
-        ja.addClass(DataSourceTestCase.class);
-        return ja;
+        WebArchive war = ShrinkWrap.create(WebArchive.class, "DataSourceTestCase.war");
+        war.addClass(DataSourceTestCase.class);
+        war.addClass(JndiServlet.class);
+        return war;
+    }
+
+    @BeforeClass
+    public static void before() throws Exception {
+        AbstractCliTestBase.initCLI();
+    }
+
+    @AfterClass
+    public static void after() throws Exception {
+        AbstractCliTestBase.closeCLI();
     }
 
     @Test
@@ -65,44 +84,54 @@ public class DataSourceTestCase extends AbstractCliTestBase {
 
     @Test
     public void testXaDataSource() throws Exception {
-        /*
         testAddXaDataSource();
         testModifyXaDataSource();
         testRemoveXaDataSource();
-         */
     }
 
     private void testAddDataSource() throws Exception {
 
         // add data source
-        cli.sendLine("add-data-source --jndi-name=java:jboss/datasources/TestDS --driver-name=h2 --pool-name=TestDS --connection-url=jdbc:h2:mem:test;DB_CLOSE_DELAY=-1");
+        cli.sendLine("data-source add --name=TestDS --jndi-name=java:jboss/datasources/TestDS --driver-name=h2 --connection-url=jdbc:h2:mem:test;DB_CLOSE_DELAY=-1");
 
         // check the data source is listed
         cli.sendLine("cd /subsystem=datasources/data-source");
         cli.sendLine("ls");
-        String ls = cli.readAllUnformated(WAIT_TIMEOUT, WAIT_LINETIMEOUT);
-        assertTrue(ls.contains("java:jboss/datasources/TestDS"));
+        String ls = cli.readOutput();
+        assertTrue(ls.contains("TestDS"));
+
+        // enable data source
+        cli.sendLine("data-source enable --name=TestDS");
 
         // check that it is available through JNDI
-        // TODO implement when @ArquillianResource InitialContext is done
+        String jndiClass = JndiServlet.lookup(url.toString(), "java:jboss/datasources/TestDS");
+        Assert.assertEquals("org.jboss.jca.adapters.jdbc.WrapperDataSource", jndiClass);
 
     }
 
     private void testRemoveDataSource() throws Exception {
 
+        // disable data source
+        //cli.sendLine("data-source disable --name=TestDS");
+
         // remove data source
-        cli.sendLine("remove-data-source --name=java:jboss/datasources/TestDS");
+        //cli.sendLine("data-source remove --name=TestDS");
+        cli.sendLine("/subsystem=datasources/data-source=TestDS:remove{allow-resource-service-restart=true}");
 
         //check the data source is not listed
         cli.sendLine("cd /subsystem=datasources/data-source");
         cli.sendLine("ls");
-        String ls = cli.readAllUnformated(WAIT_TIMEOUT, WAIT_LINETIMEOUT);
+        String ls = cli.readOutput();
         assertFalse(ls.contains("java:jboss/datasources/TestDS"));
+
+        // check that it is not available through JNDI
+        String jndiClass = JndiServlet.lookup(url.toString(), "java:jboss/datasources/TestDS");
+        Assert.assertEquals(JndiServlet.NOT_FOUND, jndiClass);
 
     }
 
     private void testModifyDataSource() throws Exception {
-        StringBuilder cmd = new StringBuilder("modify-data-source --jndi-name=java:jboss/datasources/TestDS");
+        StringBuilder cmd = new StringBuilder("data-source --name=TestDS");
         for (String[] props : DS_PROPS) {
             cmd.append(" --");
             cmd.append(props[0]);
@@ -112,9 +141,9 @@ public class DataSourceTestCase extends AbstractCliTestBase {
         cli.sendLine(cmd.toString());
 
         // check that datasource was modified
-        cli.sendLine("/subsystem=datasources/data-source=java\\:jboss\\/datasources\\/TestDS:read-resource(recursive=true)");       
-        CLIOpResult result = cli.readAllAsOpResult(WAIT_TIMEOUT, WAIT_LINETIMEOUT);
-        assertTrue(result.isIsOutcomeSuccess());
+        cli.sendLine("/subsystem=datasources/data-source=TestDS:read-resource(recursive=true)");
+        CLIOpResult result = cli.readAllAsOpResult();
+        assertTrue(result.getResult().toString(), result.isIsOutcomeSuccess());
         assertTrue(result.getResult() instanceof Map);
         Map dsProps = (Map) result.getResult();
         for (String[] props : DS_PROPS) assertTrue(dsProps.get(props[0]).equals(props[1]));
@@ -124,31 +153,47 @@ public class DataSourceTestCase extends AbstractCliTestBase {
     private void testAddXaDataSource() throws Exception {
 
         // add data source
-        cli.sendLine("add-data-source --jndi-name=java:jboss/datasources/TestDS --driver-name=h2 --pool-name=TestDS --connection-url=jdbc:h2:mem:test;DB_CLOSE_DELAY=-1");
+        cli.sendLine("xa-data-source add --name=TestXADS --jndi-name=java:jboss/datasources/TestXADS --driver-name=h2 --xa-datasource-properties=ServerName=localhost,PortNumber=50011");
 
         //check the data source is listed
-        cli.sendLine("cd /subsystem=datasources/data-source");
+        cli.sendLine("cd /subsystem=datasources/xa-data-source");
         cli.sendLine("ls");
-        String ls = cli.readAllUnformated(WAIT_TIMEOUT, WAIT_LINETIMEOUT);
-        assertTrue(ls.contains("java:jboss/datasources/TestDS"));
+        String ls = cli.readOutput();
+        assertTrue(ls.contains("TestXADS"));
+
+        // add URL property
+        cli.sendLine(
+                "/subsystem=datasources/xa-data-source=TestXADS/xa-datasource-properties=URL:add(value=\"jdbc:h2:mem:test\")");
+
+        // enable data source
+        cli.sendLine("xa-data-source enable --name=TestXADS");
+
+        // check that it is available through JNDI
+        String jndiClass = JndiServlet.lookup(url.toString(), "java:jboss/datasources/TestXADS");
+        Assert.assertEquals("org.jboss.jca.adapters.jdbc.WrapperDataSource", jndiClass);
+
 
     }
 
     private void testRemoveXaDataSource() throws Exception {
 
         // remove data source
-        cli.sendLine("remove-data-source --name=java:jboss/datasources/TestDS");
+        cli.sendLine("xa-data-source remove --name=TestXADS");
 
         //check the data source is not listed
-        cli.sendLine("cd /subsystem=datasources/data-source");
+        cli.sendLine("cd /subsystem=datasources/xa-data-source");
         cli.sendLine("ls");
-        String ls = cli.readAllUnformated(WAIT_TIMEOUT, WAIT_LINETIMEOUT);
-        assertFalse(ls.contains("java:jboss/datasources/TestDS"));
+        String ls = cli.readOutput();
+        Assert.assertNull(ls);
+
+        // check that it is no more available through JNDI
+        String jndiClass = JndiServlet.lookup(url.toString(), "java:jboss/datasources/TestXADS");
+        Assert.assertEquals(JndiServlet.NOT_FOUND, jndiClass);
 
     }
 
     private void testModifyXaDataSource() throws Exception {
-        StringBuilder cmd = new StringBuilder("modify-data-source --jndi-name=java:jboss/datasources/TestDS");
+        StringBuilder cmd = new StringBuilder("xa-data-source --name=TestXADS");
         for (String[] props : DS_PROPS) {
             cmd.append(" --");
             cmd.append(props[0]);
@@ -158,11 +203,11 @@ public class DataSourceTestCase extends AbstractCliTestBase {
         cli.sendLine(cmd.toString());
 
         // check that datasource was modified
-        cli.sendLine("/subsystem=datasources/data-source=java\\:jboss\\/datasources\\/TestDS:read-resource(recursive=true)");       
-        CLIOpResult result = cli.readAllAsOpResult(WAIT_TIMEOUT, WAIT_LINETIMEOUT);
+        cli.sendLine("/subsystem=datasources/xa-data-source=TestXADS:read-resource(recursive=true)");
+        CLIOpResult result = cli.readAllAsOpResult();
         assertTrue(result.isIsOutcomeSuccess());
         assertTrue(result.getResult() instanceof Map);
-        Map dsProps = (Map) result.getResult();
+        Map<String,Object> dsProps = (Map<String, Object>) result.getResult();
         for (String[] props : DS_PROPS) assertTrue(dsProps.get(props[0]).equals(props[1]));
 
     }

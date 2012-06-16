@@ -26,6 +26,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,6 +37,7 @@ import org.jboss.as.naming.ManagedReferenceFactory;
 import org.jboss.as.naming.context.NamespaceContextSelector;
 import org.jboss.as.server.deployment.reflect.ClassIndex;
 import org.jboss.invocation.InterceptorFactory;
+import org.jboss.modules.ModuleLoader;
 import org.jboss.msc.service.Service;
 
 import static org.jboss.as.ee.EeMessages.MESSAGES;
@@ -55,14 +57,16 @@ public class ComponentConfiguration {
 
     // Core component config
     private final ClassIndex classIndex;
-
-    private final ClassLoader moduleClassLoder;
+    private final ModuleLoader moduleLoader;
+    private final ClassLoader moduleClassLoader;
 
     private ComponentCreateServiceFactory componentCreateServiceFactory = ComponentCreateServiceFactory.BASIC;
 
     // Interceptor config
     private final OrderedItemContainer<InterceptorFactory> postConstructInterceptors = new OrderedItemContainer<InterceptorFactory>();
     private final OrderedItemContainer<InterceptorFactory> preDestroyInterceptors = new OrderedItemContainer<InterceptorFactory>();
+    private final OrderedItemContainer<InterceptorFactory> prePassivateInterceptors = new OrderedItemContainer<InterceptorFactory>();
+    private final OrderedItemContainer<InterceptorFactory> postActivateInterceptors = new OrderedItemContainer<InterceptorFactory>();
     private final Map<Method, OrderedItemContainer<InterceptorFactory>> componentInterceptors = new IdentityHashMap<Method, OrderedItemContainer<InterceptorFactory>>();
 
     //TODO: move this into an EJB specific configuration
@@ -81,10 +85,13 @@ public class ComponentConfiguration {
 
     private NamespaceContextSelector namespaceContextSelector;
 
-    public ComponentConfiguration(final ComponentDescription componentDescription, final ClassIndex classIndex, final ClassLoader moduleClassLoder) {
+    private final Set<Object> interceptorContextKeys = new HashSet<Object>();
+
+    public ComponentConfiguration(final ComponentDescription componentDescription, final ClassIndex classIndex, final ClassLoader moduleClassLoader, final ModuleLoader moduleLoader) {
         this.componentDescription = componentDescription;
         this.classIndex = classIndex;
-        this.moduleClassLoder = moduleClassLoder;
+        this.moduleClassLoader = moduleClassLoader;
+        this.moduleLoader = moduleLoader;
     }
 
     /**
@@ -193,31 +200,12 @@ public class ComponentConfiguration {
     }
 
     /**
-     * Adds a timeout interceptor factory to a given method. The method parameter *must* be retrived from either the
-     * {@link org.jboss.as.server.deployment.reflect.DeploymentReflectionIndex} or from {@link #getDefinedComponentMethods()},
-     * as the methods are stored in an identity hash map
+     * Adds a timeout interceptor factory to every method on the component.
      *
-     * @param method   The method to add the interceptor to
      * @param factory  The interceptor factory to add
      * @param priority The interceptors relative order
      */
-    public void addTimeoutInterceptor(Method method, InterceptorFactory factory, int priority) {
-        OrderedItemContainer<InterceptorFactory> interceptors = timeoutInterceptors.get(method);
-        if (interceptors == null) {
-            timeoutInterceptors.put(method, interceptors = new OrderedItemContainer<InterceptorFactory>());
-        }
-        interceptors.add(factory, priority);
-    }
-
-    /**
-     * Adds a timeout interceptor factory to every method on the component.
-     *
-     * TODO: this should only add it to timer methods
-     *
-     * @param factory    The interceptor factory to add
-     * @param priority   The interceptors relative order
-     */
-    public void addTimeoutInterceptor(InterceptorFactory factory, int priority) {
+    public void addTimeoutViewInterceptor(InterceptorFactory factory, int priority) {
         for (Method method : classIndex.getClassMethods()) {
             OrderedItemContainer<InterceptorFactory> interceptors = timeoutInterceptors.get(method);
             if (interceptors == null) {
@@ -225,6 +213,21 @@ public class ComponentConfiguration {
             }
             interceptors.add(factory, priority);
         }
+    }
+
+    /**
+     * Adds a timeout interceptor factory to every method on the component.
+     *
+     * @param method   The method to add it to
+     * @param factory  The interceptor factory to add
+     * @param priority The interceptors relative order
+     */
+    public void addTimeoutViewInterceptor(final Method method, InterceptorFactory factory, int priority) {
+        OrderedItemContainer<InterceptorFactory> interceptors = timeoutInterceptors.get(method);
+        if (interceptors == null) {
+            timeoutInterceptors.put(method, interceptors = new OrderedItemContainer<InterceptorFactory>());
+        }
+        interceptors.add(factory, priority);
     }
 
 
@@ -295,6 +298,48 @@ public class ComponentConfiguration {
      */
     public void addPreDestroyInterceptor(InterceptorFactory interceptorFactory, int priority) {
         preDestroyInterceptors.add(interceptorFactory, priority);
+    }
+
+    /**
+     * Get the pre-passivate interceptors.
+     * <p/>
+     * This method should only be called after all interceptors have been added
+     *
+     * @return the sorted interceptors
+     */
+    public List<InterceptorFactory> getPrePassivateInterceptors() {
+        return prePassivateInterceptors.getSortedItems();
+    }
+
+    /**
+     * Adds a pre passivate interceptor
+     *
+     * @param interceptorFactory The interceptor to add
+     * @param priority           The priority
+     */
+    public void addPrePassivateInterceptor(InterceptorFactory interceptorFactory, int priority) {
+        prePassivateInterceptors.add(interceptorFactory, priority);
+    }
+
+    /**
+     * Get the post-activate interceptors.
+     * <p/>
+     * This method should only be called after all interceptors have been added
+     *
+     * @return the sorted interceptors
+     */
+    public List<InterceptorFactory> getPostActivateInterceptors() {
+        return postActivateInterceptors.getSortedItems();
+    }
+
+    /**
+     * Adds a post activate interceptor
+     *
+     * @param interceptorFactory The interceptor to add
+     * @param priority           The priority
+     */
+    public void addPostActivateInterceptor(InterceptorFactory interceptorFactory, int priority) {
+        postActivateInterceptors.add(interceptorFactory, priority);
     }
 
     /**
@@ -370,12 +415,15 @@ public class ComponentConfiguration {
         this.namespaceContextInterceptorFactory = interceptorFactory;
     }
 
-    public ClassLoader getModuleClassLoder() {
-        return moduleClassLoder;
+    public ClassLoader getModuleClassLoader() {
+        return moduleClassLoader;
+    }
+
+    public ModuleLoader getModuleLoader() {
+        return moduleLoader;
     }
 
     /**
-     *
      * @return The components namespace context selector, if any
      */
     public NamespaceContextSelector getNamespaceContextSelector() {
@@ -384,5 +432,9 @@ public class ComponentConfiguration {
 
     public void setNamespaceContextSelector(final NamespaceContextSelector namespaceContextSelector) {
         this.namespaceContextSelector = namespaceContextSelector;
+    }
+
+    public Set<Object> getInterceptorContextKeys() {
+        return interceptorContextKeys;
     }
 }

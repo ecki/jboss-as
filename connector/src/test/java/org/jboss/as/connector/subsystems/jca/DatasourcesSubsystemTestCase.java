@@ -24,7 +24,6 @@ package org.jboss.as.connector.subsystems.jca;
 import java.io.IOException;
 
 import org.jboss.as.connector.subsystems.datasources.DataSourcesExtension;
-import org.jboss.as.controller.OperationContext;
 import org.jboss.as.subsystem.test.AbstractSubsystemBaseTest;
 import org.jboss.as.subsystem.test.AdditionalInitialization;
 
@@ -42,12 +41,11 @@ public class DatasourcesSubsystemTestCase extends AbstractSubsystemBaseTest {
     @Override
     protected String getSubsystemXml() throws IOException {
         //TODO: This is copied from standalone.xml you may want to try more combinations
-        return  "<subsystem xmlns=\"urn:jboss:domain:datasources:1.0\">" +
+        return  "<subsystem xmlns=\"urn:jboss:domain:datasources:1.1\">" +
                 "    <datasources>" +
-                "        <datasource jndi-name=\"java:jboss/datasources/ExampleDS\" enabled=\"false\" use-java-context=\"true\" pool-name=\"H2DS\">" +
+                "        <datasource jndi-name=\"java:jboss/datasources/ExampleDS\" use-java-context=\"true\" pool-name=\"H2DS\">" +
                 "            <connection-url>jdbc:h2:mem:test;DB_CLOSE_DELAY=-1</connection-url>" +
                 "            <driver>h2</driver>" +
-                "            <pool></pool>" +
                 "            <security>" +
                 "                <user-name>sa</user-name>" +
                 "                <password>sa</password>" +
@@ -62,15 +60,9 @@ public class DatasourcesSubsystemTestCase extends AbstractSubsystemBaseTest {
                 "</subsystem>";
     }
 
+
     protected AdditionalInitialization createAdditionalInitialization() {
-        return new AdditionalInitialization(){
-            @Override
-            protected OperationContext.Type getType() {
-                return OperationContext.Type.MANAGEMENT;
-            }
-
-        };
+        return AdditionalInitialization.MANAGEMENT;
     }
-
 
 }

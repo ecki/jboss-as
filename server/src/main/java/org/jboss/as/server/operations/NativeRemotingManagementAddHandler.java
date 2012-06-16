@@ -23,16 +23,14 @@
 package org.jboss.as.server.operations;
 
 import java.util.List;
-import java.util.Locale;
 
 import org.jboss.as.controller.AbstractAddStepHandler;
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.ServiceVerificationHandler;
-import org.jboss.as.controller.descriptions.DescriptionProvider;
 import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
-import org.jboss.as.controller.descriptions.common.ManagementDescription;
 import org.jboss.as.controller.remote.ModelControllerClientOperationHandlerFactoryService;
 import org.jboss.as.remoting.RemotingServices;
+import org.jboss.as.remoting.management.ManagementChannelRegistryService;
 import org.jboss.as.remoting.management.ManagementRemotingServices;
 import org.jboss.as.server.Services;
 import org.jboss.dmr.ModelNode;
@@ -47,20 +45,28 @@ import org.jboss.msc.service.ServiceTarget;
  *
  * @author Kabir Khan
  */
-public class NativeRemotingManagementAddHandler extends AbstractAddStepHandler implements DescriptionProvider {
+public class NativeRemotingManagementAddHandler extends AbstractAddStepHandler {
 
     public static final NativeRemotingManagementAddHandler INSTANCE = new NativeRemotingManagementAddHandler();
     public static final String OPERATION_NAME = ModelDescriptionConstants.ADD;
 
+    @Override
     protected void populateModel(ModelNode operation, ModelNode model) {
         model.setEmptyObject();
     }
 
+    @Override
+    protected boolean requiresRuntime(OperationContext context) {
+        return true;
+    }
+
+    @Override
     protected void performRuntime(OperationContext context, ModelNode operation, ModelNode model, ServiceVerificationHandler verificationHandler, List<ServiceController<?>> newControllers) {
 
         final ServiceTarget serviceTarget = context.getServiceTarget();
         final ServiceName endpointName = RemotingServices.SUBSYSTEM_ENDPOINT;
 
+        ManagementChannelRegistryService.addService(serviceTarget, endpointName);
         ManagementRemotingServices.installManagementChannelServices(serviceTarget,
                 endpointName,
                 new ModelControllerClientOperationHandlerFactoryService(),
@@ -68,13 +74,6 @@ public class NativeRemotingManagementAddHandler extends AbstractAddStepHandler i
                 ManagementRemotingServices.MANAGEMENT_CHANNEL,
                 verificationHandler,
                 newControllers);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    public ModelNode getModelDescription(Locale locale) {
-        return ManagementDescription.getAddNativeRemotingManagementDescription(locale);
     }
 
 }

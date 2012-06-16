@@ -23,8 +23,8 @@ package org.jboss.as.security;
 
 import org.jboss.as.controller.AttributeDefinition;
 import org.jboss.as.controller.OperationContext;
+import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.PathAddress;
-import org.jboss.as.controller.RestartParentResourceAddHandler;
 import org.jboss.as.controller.RestartParentWriteAttributeHandler;
 import org.jboss.as.controller.ServiceVerificationHandler;
 import org.jboss.as.controller.operations.validation.ParameterValidator;
@@ -48,7 +48,8 @@ public class SecurityDomainReloadWriteHandler extends RestartParentWriteAttribut
     }
 
     @Override
-    protected void recreateParentService(OperationContext context, PathAddress parentAddress, ModelNode parentModel, ServiceVerificationHandler verificationHandler) {
+    protected void recreateParentService(OperationContext context, PathAddress parentAddress, ModelNode parentModel,
+                                         ServiceVerificationHandler verificationHandler) throws OperationFailedException {
         String domainName = parentAddress.getLastElement().getValue();
         SecurityDomainAdd.INSTANCE.launchServices(context, domainName, parentModel, verificationHandler, null);
     }

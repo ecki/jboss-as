@@ -21,19 +21,23 @@
  */
 package org.jboss.as.security;
 
-import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.*;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.CODE;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.DESCRIPTION;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.MIN_LENGTH;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.NILLABLE;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.TYPE;
+import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.VALUE_TYPE;
 
 import java.util.Locale;
 import java.util.ResourceBundle;
 
-import javax.xml.stream.Location;
 import javax.xml.stream.XMLStreamException;
+import javax.xml.stream.XMLStreamReader;
 import javax.xml.stream.XMLStreamWriter;
 
 import org.jboss.as.controller.ListAttributeDefinition;
 import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.descriptions.ResourceDescriptionResolver;
-import org.jboss.as.controller.operations.validation.EnumValidator;
 import org.jboss.as.controller.operations.validation.ModelTypeValidator;
 import org.jboss.as.controller.operations.validation.ParameterValidator;
 import org.jboss.as.controller.operations.validation.ParametersOfValidator;
@@ -56,6 +60,7 @@ public class MappingModulesAttributeDefinition extends ListAttributeDefinition {
         final ParametersValidator delegate = new ParametersValidator();
         delegate.registerValidator(CODE, new StringLengthValidator(1));
         delegate.registerValidator(Constants.TYPE, new StringLengthValidator(1));
+        delegate.registerValidator(Constants.MODULE, new StringLengthValidator(1,true));
         delegate.registerValidator(Constants.MODULE_OPTIONS, new ModelTypeValidator(ModelType.OBJECT, true));
 
         validator = new ParametersOfValidator(delegate);
@@ -71,7 +76,7 @@ public class MappingModulesAttributeDefinition extends ListAttributeDefinition {
     @Override
     protected void addValueTypeDescription(ModelNode node, ResourceBundle bundle) {
         // This method being used indicates a misuse of this class
-        throw new UnsupportedOperationException("Use the ResourceDescriptionResolver variant");
+        throw SecurityMessages.MESSAGES.unsupportedOperationExceptionUseResourceDesc();
     }
 
     @Override
@@ -97,7 +102,7 @@ public class MappingModulesAttributeDefinition extends ListAttributeDefinition {
             for (ModelNode module : modules.asList()) {
                 writer.writeStartElement(getXmlName());
                 writer.writeAttribute(Attribute.CODE.getLocalName(), module.get(CODE).asString());
-                writer.writeAttribute(Attribute.TYPE.getLocalName(), module.get(Constants.TYPE).asString().toLowerCase());
+                writer.writeAttribute(Attribute.TYPE.getLocalName(), module.get(Constants.TYPE).asString().toLowerCase(Locale.ENGLISH));
 
                 if (module.hasDefined(Constants.MODULE_OPTIONS)) {
                     for (ModelNode option : module.get(Constants.MODULE_OPTIONS).asList()) {
@@ -111,7 +116,7 @@ public class MappingModulesAttributeDefinition extends ListAttributeDefinition {
         }
     }
 
-    public static ModelNode parseField(String name, String value, Location location) throws XMLStreamException {
+    public static ModelNode parseField(String name, String value, XMLStreamReader reader) throws XMLStreamException {
         final String trimmed = value == null ? null : value.trim();
         ModelNode node;
         if (trimmed != null ) {
@@ -123,7 +128,7 @@ public class MappingModulesAttributeDefinition extends ListAttributeDefinition {
         try {
             fieldValidator.validateParameter(name, node);
         } catch (OperationFailedException e) {
-            throw new XMLStreamException(e.getFailureDescription().toString(), location);
+            throw SecurityMessages.MESSAGES.xmlStreamException(e.getFailureDescription().toString(), reader.getLocation());
         }
         return node;
     }

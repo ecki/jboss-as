@@ -27,7 +27,7 @@ import javax.transaction.UserTransaction;
 import org.jboss.arquillian.container.test.api.Deployment;
 import org.jboss.arquillian.container.test.api.RunAsClient;
 import org.jboss.arquillian.junit.Arquillian;
-import org.jboss.as.test.integration.ejb.remote.common.EJBRemoteManagementUtil;
+import org.jboss.as.test.integration.ejb.remote.common.EJBManagementUtil;
 import org.jboss.ejb.client.EJBClient;
 import org.jboss.ejb.client.EJBClientTransactionContext;
 import org.jboss.ejb.client.StatelessEJBLocator;
@@ -67,7 +67,7 @@ public class EJBClientUserTransactionTestCase {
 
         final JavaArchive jar = ShrinkWrap.create(JavaArchive.class, MODULE_NAME + ".jar");
         jar.addPackage(EJBClientUserTransactionTestCase.class.getPackage());
-        jar.addAsManifestResource("ejb/remote/client/tx/persistence.xml", "persistence.xml");
+        jar.addAsManifestResource(EJBClientUserTransactionTestCase.class.getPackage(), "persistence.xml", "persistence.xml");
 
         ear.addAsModule(jar);
 
@@ -83,9 +83,33 @@ public class EJBClientUserTransactionTestCase {
     @BeforeClass
     public static void beforeTestClass() throws Exception {
         // the node name that the test methods can use
-        nodeName = EJBRemoteManagementUtil.getNodeName("localhost", 9999);
+        nodeName = EJBManagementUtil.getNodeName();
         logger.info("Using node name " + nodeName);
 
+    }
+
+    /**
+     * Tests a empty begin()/commit()
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testEmptyTxCommit() throws Exception {
+        final UserTransaction userTransaction = EJBClient.getUserTransaction(nodeName);
+        userTransaction.begin();
+        userTransaction.commit();
+    }
+
+    /**
+     * Tests a empty begin()/rollback()
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testEmptyTxRollback() throws Exception {
+        final UserTransaction userTransaction = EJBClient.getUserTransaction(nodeName);
+        userTransaction.begin();
+        userTransaction.rollback();
     }
 
     /**

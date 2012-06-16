@@ -29,7 +29,6 @@ import static org.jboss.as.jpa.hibernate4.management.HibernateDescriptionConstan
 
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.NoSuchElementException;
 import java.util.Set;
 
 import org.hibernate.stat.Statistics;
@@ -106,22 +105,22 @@ public class HibernateStatisticsResource extends PlaceholderResource.Placeholder
             if (hasCacheRegion(element)) {
                 return PlaceholderResource.INSTANCE;
             }
-            throw new NoSuchElementException(element.toString());
+            throw new NoSuchResourceException(element);
         } else if (ENTITY.equals(element.getKey())) {
             if (hasEntity(element)) {
                 return PlaceholderResource.INSTANCE;
             }
-            throw new NoSuchElementException(element.toString());
+            throw new NoSuchResourceException(element);
         } else if (COLLECTION.equals(element.getKey())) {
             if (hasCollection(element)) {
                 return PlaceholderResource.INSTANCE;
             }
-            throw new NoSuchElementException(element.toString());
+            throw new NoSuchResourceException(element);
         } else if (QUERYCACHE.equals(element.getKey())) {
             if (hasQuery(element)) {
                 return PlaceholderResource.INSTANCE;
             }
-            throw new NoSuchElementException(element.toString());
+            throw new NoSuchResourceException(element);
         } else {
             return super.requireChild(element);
         }
@@ -146,22 +145,22 @@ public class HibernateStatisticsResource extends PlaceholderResource.Placeholder
     public Resource navigate(PathAddress address) {
         if (address.size() > 0 && ENTITYCACHE.equals(address.getElement(0).getKey())) {
             if (address.size() > 1) {
-                throw new NoSuchElementException(address.subAddress(1).toString());
+                throw new NoSuchResourceException(address.getElement(1));
             }
             return PlaceholderResource.INSTANCE;
         } else if (address.size() > 0 && ENTITY.equals(address.getElement(0).getKey())) {
             if (address.size() > 1) {
-                throw new NoSuchElementException(address.subAddress(1).toString());
+                throw new NoSuchResourceException(address.getElement(1));
             }
             return PlaceholderResource.INSTANCE;
         } else if (address.size() > 0 && COLLECTION.equals(address.getElement(0).getKey())) {
             if (address.size() > 1) {
-                throw new NoSuchElementException(address.subAddress(1).toString());
+                throw new NoSuchResourceException(address.getElement(1));
             }
             return PlaceholderResource.INSTANCE;
         } else if (address.size() > 0 && QUERYCACHE.equals(address.getElement(0).getKey())) {
             if (address.size() > 1) {
-                throw new NoSuchElementException(address.subAddress(1).toString());
+                throw new NoSuchResourceException(address.getElement(1));
             }
             return PlaceholderResource.INSTANCE;
         } else {
@@ -268,8 +267,8 @@ public class HibernateStatisticsResource extends PlaceholderResource.Placeholder
         boolean result = false;
         final Statistics stats = getStatistics();
         if (stats != null) {
-            final String emtityName = element.getValue();
-            result = stats.getEntityStatistics(emtityName) != null;
+            final String entityName = element.getValue();
+            result = stats.getEntityStatistics(entityName) != null;
         }
         return result;
     }
@@ -317,7 +316,12 @@ public class HibernateStatisticsResource extends PlaceholderResource.Placeholder
                     // remove the scoped PU name plus one for '.' the separator character added to it.
                     // and replace period with underscore.  Filtered region name will be "org_jboss_as_testsuite_integration_jpa_hibernate_Employee"
                     int stripUpTo = puName.length() + 1;
-                    result.add(region.substring(stripUpTo));
+                    if (stripUpTo > 0 && stripUpTo < region.length()) {
+                        result.add(region.substring(stripUpTo));
+                    }
+                    else { // if puName is missing, just use the region as is (AS7-3858)
+                        result.add(region);
+                    }
                 }
             }
             return result;

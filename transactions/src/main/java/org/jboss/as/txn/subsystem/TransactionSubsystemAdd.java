@@ -33,6 +33,9 @@ import org.jboss.as.controller.AbstractBoottimeAddStepHandler;
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.ServiceVerificationHandler;
+import org.jboss.as.controller.services.path.PathManager;
+import org.jboss.as.controller.services.path.PathManagerService;
+import org.jboss.as.jacorb.service.CorbaNamingService;
 import org.jboss.as.naming.ManagedReferenceFactory;
 import org.jboss.as.naming.ServiceBasedNamingStore;
 import org.jboss.as.naming.ValueManagedReferenceFactory;
@@ -42,7 +45,6 @@ import org.jboss.as.network.SocketBinding;
 import org.jboss.as.server.AbstractDeploymentChainStep;
 import org.jboss.as.server.DeploymentProcessorTarget;
 import org.jboss.as.server.deployment.Phase;
-import org.jboss.as.server.services.path.RelativePathService;
 import org.jboss.as.txn.deployment.TransactionJndiBindingProcessor;
 import org.jboss.as.txn.deployment.TransactionLeakRollbackProcessor;
 import org.jboss.as.txn.service.ArjunaObjectStoreEnvironmentService;
@@ -65,10 +67,12 @@ import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.service.ServiceTarget;
 import org.jboss.msc.value.ImmediateValue;
 import org.jboss.tm.JBossXATerminator;
+import org.jboss.tm.usertx.UserTransactionRegistry;
 import org.omg.CORBA.ORB;
 
 import static org.jboss.as.txn.TransactionLogger.ROOT_LOGGER;
 import static org.jboss.as.txn.subsystem.CommonAttributes.JTS;
+import static org.jboss.as.txn.subsystem.CommonAttributes.USEHORNETQSTORE;
 
 
 /**
@@ -81,10 +85,6 @@ import static org.jboss.as.txn.subsystem.CommonAttributes.JTS;
 class TransactionSubsystemAdd extends AbstractBoottimeAddStepHandler {
 
     static final TransactionSubsystemAdd INSTANCE = new TransactionSubsystemAdd();
-
-    private static final ServiceName INTERNAL_CORE_ENV_VAR_PATH = TxnServices.JBOSS_TXN_PATHS.append("core-var-dir");
-    private static final ServiceName INTERNAL_OBJECTSTORE_PATH = TxnServices.JBOSS_TXN_PATHS.append("object-store");
-
 
     private TransactionSubsystemAdd() {
         //
@@ -102,6 +102,8 @@ class TransactionSubsystemAdd extends AbstractBoottimeAddStepHandler {
         populateModelWithObjectStoreConfig(operation, model);
 
         TransactionSubsystemRootResourceDefinition.JTS.validateAndSet(operation, model);
+
+        TransactionSubsystemRootResourceDefinition.USEHORNETQSTORE.validateAndSet(operation, model);
     }
 
     private void populateModelWithObjectStoreConfig(ModelNode operation, ModelNode objectStoreModel) throws OperationFailedException {
@@ -162,6 +164,7 @@ class TransactionSubsystemAdd extends AbstractBoottimeAddStepHandler {
                                    List<ServiceController<?>> controllers) throws OperationFailedException {
 
         boolean jts = model.hasDefined(JTS) && model.get(JTS).asBoolean();
+        boolean useHornetqJournalStore = model.hasDefined(USEHORNETQSTORE) && model.get(USEHORNETQSTORE).asBoolean();
 
         //recovery environment
         performRecoveryEnvBoottime(context, operation, model, verificationHandler, controllers, jts);
@@ -173,7 +176,7 @@ class TransactionSubsystemAdd extends AbstractBoottimeAddStepHandler {
         performCoordinatorEnvBoottime(context, operation, model, verificationHandler, controllers, jts);
 
         //object store
-        performObjectStoreBoottime(context, operation, model, verificationHandler, controllers);
+        performObjectStoreBoottime(context, operation, model, verificationHandler, controllers, useHornetqJournalStore);
 
 
         //always propagate the transaction context
@@ -183,8 +186,8 @@ class TransactionSubsystemAdd extends AbstractBoottimeAddStepHandler {
 
         context.addStep(new AbstractDeploymentChainStep() {
             protected void execute(final DeploymentProcessorTarget processorTarget) {
-                processorTarget.addDeploymentProcessor(Phase.PARSE, Phase.PARSE_TRANSACTION_ROLLBACK_ACTION, new TransactionLeakRollbackProcessor());
-                processorTarget.addDeploymentProcessor(Phase.INSTALL, Phase.INSTALL_TRANSACTION_BINDINGS, new TransactionJndiBindingProcessor());
+                processorTarget.addDeploymentProcessor(TransactionExtension.SUBSYSTEM_NAME, Phase.PARSE, Phase.PARSE_TRANSACTION_ROLLBACK_ACTION, new TransactionLeakRollbackProcessor());
+                processorTarget.addDeploymentProcessor(TransactionExtension.SUBSYSTEM_NAME, Phase.INSTALL, Phase.INSTALL_TRANSACTION_BINDINGS, new TransactionJndiBindingProcessor());
             }
         }, OperationContext.Stage.RUNTIME);
 
@@ -265,7 +268,7 @@ class TransactionSubsystemAdd extends AbstractBoottimeAddStepHandler {
 
     private void performObjectStoreBoottime(OperationContext context, ModelNode operation, ModelNode recoveryEnvModel,
                                             ServiceVerificationHandler verificationHandler,
-                                            List<ServiceController<?>> controllers) throws OperationFailedException {
+                                            List<ServiceController<?>> controllers, boolean useHornetqJournalStore) throws OperationFailedException {
 
         final String objectStorePathRef =TransactionSubsystemRootResourceDefinition.OBJECT_STORE_RELATIVE_TO.resolveModelAttribute(context, recoveryEnvModel).asString();
         final String objectStorePath = TransactionSubsystemRootResourceDefinition.OBJECT_STORE_PATH.resolveModelAttribute(context, recoveryEnvModel).asString();
@@ -275,13 +278,9 @@ class TransactionSubsystemAdd extends AbstractBoottimeAddStepHandler {
 
         ServiceTarget target = context.getServiceTarget();
         // Configure the ObjectStoreEnvironmentBeans
-        RelativePathService.addService(INTERNAL_OBJECTSTORE_PATH, objectStorePath, true, objectStorePathRef, target, controllers, verificationHandler);
-
-        final boolean useHornetqJournalStore = "true".equals(System.getProperty("usehornetqstore")); // TODO wire to domain model instead.
-
-        final ArjunaObjectStoreEnvironmentService objStoreEnvironmentService = new ArjunaObjectStoreEnvironmentService(useHornetqJournalStore);
+        final ArjunaObjectStoreEnvironmentService objStoreEnvironmentService = new ArjunaObjectStoreEnvironmentService(useHornetqJournalStore, objectStorePath, objectStorePathRef);
         controllers.add(target.addService(TxnServices.JBOSS_TXN_ARJUNA_OBJECTSTORE_ENVIRONMENT, objStoreEnvironmentService)
-                .addDependency(INTERNAL_OBJECTSTORE_PATH, String.class, objStoreEnvironmentService.getPathInjector())
+                .addDependency(PathManagerService.SERVICE_NAME, PathManager.class, objStoreEnvironmentService.getPathManagerInjector())
                 .addDependency(TxnServices.JBOSS_TXN_CORE_ENVIRONMENT)
                 .addListener(verificationHandler).setInitialMode(ServiceController.Mode.ACTIVE).install());
 
@@ -296,9 +295,16 @@ class TransactionSubsystemAdd extends AbstractBoottimeAddStepHandler {
     private void performCoreEnvironmentBootTime(OperationContext context, ModelNode operation, ModelNode coreEnvModel,
                                                 ServiceVerificationHandler verificationHandler,
                                                 List<ServiceController<?>> controllers) throws OperationFailedException {
+
         // Configure the core configuration.
         final String nodeIdentifier = TransactionSubsystemRootResourceDefinition.NODE_IDENTIFIER.resolveModelAttribute(context, coreEnvModel).asString();
-        final CoreEnvironmentService coreEnvironmentService = new CoreEnvironmentService(nodeIdentifier);
+        final String varDirPathRef = TransactionSubsystemRootResourceDefinition.RELATIVE_TO.resolveModelAttribute(context, coreEnvModel).asString();
+        final String varDirPath = TransactionSubsystemRootResourceDefinition.PATH.resolveModelAttribute(context, coreEnvModel).asString();
+        if (ROOT_LOGGER.isDebugEnabled()) {
+            ROOT_LOGGER.debugf("nodeIdentifier=%s\n", nodeIdentifier);
+            ROOT_LOGGER.debugf("varDirPathRef=%s, varDirPath=%s\n", varDirPathRef, varDirPath);
+        }
+        final CoreEnvironmentService coreEnvironmentService = new CoreEnvironmentService(nodeIdentifier, varDirPath, varDirPathRef);
 
         String socketBindingName = null;
         if (TransactionSubsystemRootResourceDefinition.PROCESS_ID_UUID.resolveModelAttribute(context, coreEnvModel).asBoolean()) {
@@ -313,16 +319,7 @@ class TransactionSubsystemAdd extends AbstractBoottimeAddStepHandler {
             coreEnvironmentService.setSocketProcessIdMaxPorts(ports);
         }
 
-        final String varDirPathRef = TransactionSubsystemRootResourceDefinition.RELATIVE_TO.resolveModelAttribute(context, coreEnvModel).asString();
-        final String varDirPath = TransactionSubsystemRootResourceDefinition.PATH.resolveModelAttribute(context, coreEnvModel).asString();
-
-        if (ROOT_LOGGER.isDebugEnabled()) {
-            ROOT_LOGGER.debugf("nodeIdentifier=%s\n", nodeIdentifier);
-            ROOT_LOGGER.debugf("varDirPathRef=%s, varDirPath=%s\n", varDirPathRef, varDirPath);
-        }
-
         ServiceTarget target = context.getServiceTarget();
-        RelativePathService.addService(INTERNAL_CORE_ENV_VAR_PATH, varDirPath, true, varDirPathRef, target, controllers, verificationHandler);
 
         final ServiceBuilder<?> coreEnvBuilder = context.getServiceTarget().addService(TxnServices.JBOSS_TXN_CORE_ENVIRONMENT, coreEnvironmentService);
         if (socketBindingName != null) {
@@ -330,7 +327,7 @@ class TransactionSubsystemAdd extends AbstractBoottimeAddStepHandler {
             ServiceName bindingName = SocketBinding.JBOSS_BINDING_NAME.append(socketBindingName);
             coreEnvBuilder.addDependency(bindingName, SocketBinding.class, coreEnvironmentService.getSocketProcessBindingInjector());
         }
-        controllers.add(coreEnvBuilder.addDependency(INTERNAL_CORE_ENV_VAR_PATH, String.class, coreEnvironmentService.getPathInjector())
+        controllers.add(coreEnvBuilder.addDependency(PathManagerService.SERVICE_NAME, PathManager.class, coreEnvironmentService.getPathManagerInjector())
                 .addListener(verificationHandler)
                 .setInitialMode(ServiceController.Mode.ACTIVE)
                 .install());
@@ -384,10 +381,12 @@ class TransactionSubsystemAdd extends AbstractBoottimeAddStepHandler {
         //if jts is enabled we need the ORB
         if (jts) {
             transactionManagerServiceServiceBuilder.addDependency(ServiceName.JBOSS.append("jacorb", "orb-service"), ORB.class, transactionManagerService.getOrbInjector());
+            transactionManagerServiceServiceBuilder.addDependency(CorbaNamingService.SERVICE_NAME);
         }
 
         controllers.add(transactionManagerServiceServiceBuilder
                 .addDependency(TxnServices.JBOSS_TXN_XA_TERMINATOR, JBossXATerminator.class, transactionManagerService.getXaTerminatorInjector())
+                .addDependency(TxnServices.JBOSS_TXN_USER_TRANSACTION_REGISTRY, UserTransactionRegistry.class, transactionManagerService.getUserTransactionRegistry())
                 .addDependency(TxnServices.JBOSS_TXN_CORE_ENVIRONMENT)
                 .addDependency(TxnServices.JBOSS_TXN_ARJUNA_OBJECTSTORE_ENVIRONMENT)
                 .addDependency(TxnServices.JBOSS_TXN_ARJUNA_RECOVERY_MANAGER)

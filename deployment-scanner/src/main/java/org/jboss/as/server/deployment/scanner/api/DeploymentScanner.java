@@ -22,6 +22,12 @@
 
 package org.jboss.as.server.deployment.scanner.api;
 
+import java.util.List;
+
+import org.jboss.as.controller.OperationContext;
+import org.jboss.as.controller.ServiceVerificationHandler;
+import org.jboss.as.server.deployment.scanner.DeploymentOperations;
+import org.jboss.msc.service.ServiceController;
 import org.jboss.msc.service.ServiceName;
 
 /**
@@ -55,9 +61,16 @@ public interface DeploymentScanner {
     void setScanInterval(long scanInterval);
 
     /**
-     * Start the scanner, if not already started.
+     * Start the scanner, if not already started, using a default {@link DeploymentOperations}.
+     *
+     * @see #startScanner(DeploymentOperations)
      */
     void startScanner();
+
+    /**
+     * Start the scanner, if not already started.
+     */
+    void startScanner(final DeploymentOperations deploymentOperations);
 
     /**
      * Stop the scanner, if not already stopped.
@@ -98,7 +111,25 @@ public interface DeploymentScanner {
      *
      * param autoDeployZip true if auto-deployment of exploded content is enabled
      */
-    void setAutoDeployExplodedContent(boolean autoDeployExploded) ;
+    void setAutoDeployExplodedContent(boolean autoDeployExploded);
+
+    /**
+     * Gets whether the scanner will attempt to deploy XML content based solely
+     * on detecting a change in the content; i.e. without requiring a
+     * marker file to trigger the deployment.
+     *
+     * @return true if auto-deployment of XML content is enabled
+     */
+    boolean isAutoDeployXMLContent();
+
+    /**
+     * Sets whether the scanner will attempt to deploy XML content based solely
+     * on detecting a change in the content; i.e. without requiring a
+     * marker file to trigger the deployment.
+     *
+     * param autoDeployXML true if auto-deployment of XML content is enabled
+     */
+    void setAutoDeployXMLContent(boolean autoDeployXML);
 
     /**
      * Set the timeout used for deployments.
@@ -106,4 +137,13 @@ public interface DeploymentScanner {
      * @param timeout The deployment timeout
      */
     void setDeploymentTimeout(long timeout);
+
+    /**
+     * Perform a scan as part of the server boot operation.
+     *
+     * @param context
+     * @param verificationHandler
+     * @param newControllers
+     */
+    void bootTimeScan(OperationContext context, ServiceVerificationHandler verificationHandler, List<ServiceController<?>> newControllers);
 }

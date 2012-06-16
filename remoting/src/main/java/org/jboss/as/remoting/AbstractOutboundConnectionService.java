@@ -22,6 +22,10 @@
 
 package org.jboss.as.remoting;
 
+import static org.jboss.as.remoting.RemotingMessages.MESSAGES;
+import static org.xnio.Options.SSL_ENABLED;
+import static org.xnio.Options.SSL_STARTTLS;
+
 import javax.security.auth.callback.Callback;
 import javax.security.auth.callback.CallbackHandler;
 import javax.security.auth.callback.NameCallback;
@@ -66,14 +70,17 @@ public abstract class AbstractOutboundConnectionService<T extends AbstractOutbou
     public void stop(StopContext context) {
     }
 
-    Injector<Endpoint> getEnpointInjector() {
+    Injector<Endpoint> getEndpointInjector() {
         return this.endpointInjectedValue;
     }
 
     void setConnectionCreationOptions(final OptionMap connectionCreationOptions) {
-        this.connectionCreationOptions = connectionCreationOptions == null ? OptionMap.EMPTY : connectionCreationOptions;
+        this.connectionCreationOptions = connectionCreationOptions == null ? getDefaultOptionMap() : connectionCreationOptions;
     }
 
+    private OptionMap getDefaultOptionMap() {
+        return OptionMap.create(SSL_ENABLED, true, SSL_STARTTLS, true);
+    }
 
     public String getConnectionName() {
         return this.connectionName;
@@ -85,18 +92,15 @@ public abstract class AbstractOutboundConnectionService<T extends AbstractOutbou
         return new AnonymousCallbackHandler();
     }
 
-    // TODO: This is temporary for now, till we decide about security related configurations
-    // for outbound connections, post Beta1
     private class AnonymousCallbackHandler implements CallbackHandler {
 
-        @Override
         public void handle(Callback[] callbacks) throws IOException, UnsupportedCallbackException {
             for (Callback current : callbacks) {
                 if (current instanceof NameCallback) {
                     NameCallback ncb = (NameCallback) current;
                     ncb.setName("anonymous");
                 } else {
-                    throw new UnsupportedCallbackException(current);
+                    throw MESSAGES.unsupportedCallback(current);
                 }
             }
         }

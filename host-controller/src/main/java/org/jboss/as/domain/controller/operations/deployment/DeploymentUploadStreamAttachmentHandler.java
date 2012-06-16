@@ -20,6 +20,7 @@ package org.jboss.as.domain.controller.operations.deployment;
 
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.INPUT_STREAM_INDEX;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.UPLOAD_DEPLOYMENT_STREAM;
+import static org.jboss.as.domain.controller.DomainControllerMessages.MESSAGES;
 
 import java.io.InputStream;
 import java.util.Locale;
@@ -30,7 +31,7 @@ import org.jboss.as.controller.descriptions.DescriptionProvider;
 import org.jboss.as.controller.descriptions.common.DeploymentDescription;
 import org.jboss.as.controller.operations.validation.IntRangeValidator;
 import org.jboss.as.controller.operations.validation.ParametersValidator;
-import org.jboss.as.server.deployment.repository.api.ContentRepository;
+import org.jboss.as.repository.ContentRepository;
 import org.jboss.dmr.ModelNode;
 
 /**
@@ -46,6 +47,16 @@ implements DescriptionProvider {
 
     private final ParametersValidator streamValidator = new ParametersValidator();
 
+    /** Constructor for a slave Host Controller */
+    public DeploymentUploadStreamAttachmentHandler() {
+        this(null);
+    }
+
+    /**
+     * Constructor for a master Host Controller
+     *
+     * @param repository the master content repository. If {@code null} this handler will function as a slave hander would.
+     */
     public DeploymentUploadStreamAttachmentHandler(final ContentRepository repository) {
         super(repository);
         this.streamValidator.registerValidator(INPUT_STREAM_INDEX, new IntRangeValidator(0));
@@ -66,12 +77,12 @@ implements DescriptionProvider {
         int streamIndex = operation.get(INPUT_STREAM_INDEX).asInt();
         int maxIndex = operationContext.getAttachmentStreamCount();
         if (streamIndex > maxIndex) {
-            throw new OperationFailedException(new ModelNode().set(String.format("Invalid '" + INPUT_STREAM_INDEX + "' value: %d, the maximum index is %d", streamIndex, maxIndex)));
+            throw new OperationFailedException(new ModelNode().set(String.format(MESSAGES.invalidValue(INPUT_STREAM_INDEX, streamIndex, maxIndex))));
         }
 
         InputStream in = operationContext.getAttachmentStream(streamIndex);
         if (in == null) {
-            throw new OperationFailedException(new ModelNode().set(String.format("Null stream at index %s", streamIndex)));
+            throw new OperationFailedException(new ModelNode().set(MESSAGES.nullStream(streamIndex)));
         }
 
         return in;

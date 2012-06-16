@@ -21,32 +21,32 @@
  */
 package org.jboss.as.test.integration.management.api.web;
 
-import org.jboss.as.test.integration.management.cli.GlobalOpsTestCase;
-import org.jboss.shrinkwrap.api.spec.JavaArchive;
-import java.util.concurrent.TimeUnit;
-import org.jboss.as.test.integration.common.HttpRequest;
-import org.jboss.arquillian.container.test.api.Deployer;
-import org.jboss.shrinkwrap.api.asset.StringAsset;
-import org.jboss.as.test.integration.management.util.SimpleServlet;
-import java.util.logging.Logger;
-
-import org.junit.AfterClass;
-import org.junit.Before;
 import java.io.IOException;
 import java.net.URL;
+import java.util.concurrent.TimeUnit;
+import java.util.logging.Logger;
+
+import org.jboss.arquillian.container.test.api.Deployer;
 import org.jboss.arquillian.container.test.api.Deployment;
 import org.jboss.arquillian.container.test.api.RunAsClient;
 import org.jboss.arquillian.junit.Arquillian;
 import org.jboss.arquillian.test.api.ArquillianResource;
-import org.jboss.as.test.integration.management.api.AbstractMgmtTestBase;
+import org.jboss.as.test.integration.common.HttpRequest;
+import org.jboss.as.test.integration.management.base.ContainerResourceMgmtTestBase;
+import org.jboss.as.test.integration.management.cli.GlobalOpsTestCase;
+import org.jboss.as.test.integration.management.util.MgmtOperationException;
+import org.jboss.as.test.integration.management.util.SimpleServlet;
 import org.jboss.dmr.ModelNode;
 import org.jboss.shrinkwrap.api.Archive;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
+import org.jboss.shrinkwrap.api.asset.StringAsset;
+import org.jboss.shrinkwrap.api.spec.JavaArchive;
 import org.jboss.shrinkwrap.api.spec.WebArchive;
-import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import static org.junit.Assert.*;
+
+import static org.jboss.as.test.integration.management.util.ModelUtil.createOpNode;
+import static org.junit.Assert.assertTrue;
 
 /**
  *
@@ -54,7 +54,7 @@ import static org.junit.Assert.*;
  */
 @RunWith(Arquillian.class)
 @RunAsClient
-public class VirtualServerTestCase extends AbstractMgmtTestBase {
+public class VirtualServerTestCase extends ContainerResourceMgmtTestBase {
 
     @ArquillianResource
     URL url;
@@ -80,18 +80,8 @@ public class VirtualServerTestCase extends AbstractMgmtTestBase {
         return war;
     }
 
-    @Before
-    public void before() throws IOException {
-        initModelControllerClient(url.getHost(), MGMT_PORT);
-    }
-
-    @AfterClass
-    public static void after() throws IOException {
-        closeModelControllerClient();
-    }
-
     @Test
-    public void testDefaultVirtualServer() throws IOException {
+    public void testDefaultVirtualServer() throws IOException, MgmtOperationException {
 
         // get default VS
         ModelNode result = executeOperation(createOpNode("subsystem=web/virtual-server=default-host", "read-resource"));
@@ -125,7 +115,7 @@ public class VirtualServerTestCase extends AbstractMgmtTestBase {
         } catch (Exception e) {
             failed = true;
         }
-        assertTrue("Deployment also on defaul server. " , failed);
+        assertTrue("Deployment also on default server. " , failed);
 
         // undeploy form virtual server
         deployer.undeploy("vsdeployment");
@@ -135,7 +125,7 @@ public class VirtualServerTestCase extends AbstractMgmtTestBase {
 
     }
 
-    private void addVirtualServer() throws IOException {
+    private void addVirtualServer() throws IOException, MgmtOperationException {
         ModelNode addOp = createOpNode("subsystem=web/virtual-server=test", "add");
         addOp.get("alias").add(virtualHost);
 
@@ -150,7 +140,7 @@ public class VirtualServerTestCase extends AbstractMgmtTestBase {
 
     }
 
-    private void removeVirtualServer() throws IOException {
+    private void removeVirtualServer() throws IOException, MgmtOperationException {
 
         executeOperation(createOpNode("subsystem=web/virtual-server=test", "remove"));
 

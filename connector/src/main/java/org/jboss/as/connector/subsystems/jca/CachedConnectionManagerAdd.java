@@ -23,15 +23,19 @@ package org.jboss.as.connector.subsystems.jca;
 
 import java.util.List;
 
-import org.jboss.as.connector.ConnectorServices;
-import org.jboss.as.connector.services.CcmService;
-import org.jboss.as.controller.AbstractBoottimeAddStepHandler;
+import org.jboss.as.connector.util.ConnectorServices;
+import org.jboss.as.connector.deployers.ra.processors.CachedConnectionManagerSetupProcessor;
+import org.jboss.as.connector.services.jca.CachedConnectionManagerService;
+import org.jboss.as.controller.AbstractAddStepHandler;
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.OperationFailedException;
 import org.jboss.as.controller.ServiceVerificationHandler;
 import org.jboss.as.controller.SimpleAttributeDefinition;
 import org.jboss.as.controller.SimpleAttributeDefinitionBuilder;
 import org.jboss.as.controller.client.helpers.MeasurementUnit;
+import org.jboss.as.server.AbstractDeploymentChainStep;
+import org.jboss.as.server.DeploymentProcessorTarget;
+import org.jboss.as.server.deployment.Phase;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.ModelType;
 import org.jboss.jca.core.spi.transaction.TransactionIntegration;
@@ -42,7 +46,7 @@ import org.jboss.msc.service.ServiceTarget;
  * @author <a href="jesper.pedersen@jboss.org">Jesper Pedersen</a>
  * @author <a href="stefano.maestri@redhat.com">Stefano Maestri</a>
  */
-public class CachedConnectionManagerAdd extends AbstractBoottimeAddStepHandler {
+public class CachedConnectionManagerAdd extends AbstractAddStepHandler {
 
     public static final CachedConnectionManagerAdd INSTANCE = new CachedConnectionManagerAdd();
 
@@ -62,6 +66,13 @@ public class CachedConnectionManagerAdd extends AbstractBoottimeAddStepHandler {
                 .setMeasurementUnit(MeasurementUnit.NONE)
                 .setRestartAllServices()
                 .setXmlName("error")
+                .build()),
+        INSTALL(SimpleAttributeDefinitionBuilder.create("install", ModelType.BOOLEAN)
+                .setAllowExpression(false)
+                .setAllowNull(true)
+                .setDefaultValue(new ModelNode().set(false))
+                .setMeasurementUnit(MeasurementUnit.NONE)
+                .setRestartAllServices()
                 .build());
 
 
@@ -84,16 +95,24 @@ public class CachedConnectionManagerAdd extends AbstractBoottimeAddStepHandler {
     }
 
     @Override
-    protected void performBoottime(final OperationContext context, final ModelNode operation, final ModelNode model,
+    protected void performRuntime(final OperationContext context, final ModelNode operation, final ModelNode model,
                                    final ServiceVerificationHandler verificationHandler, final List<ServiceController<?>> newControllers) throws OperationFailedException {
 
-        final boolean debug = CcmParameters.DEBUG.getAttribute().validateResolvedOperation(model).asBoolean();
-        final boolean error = CcmParameters.ERROR.getAttribute().validateResolvedOperation(model).asBoolean();
+        final boolean debug = CcmParameters.DEBUG.getAttribute().resolveModelAttribute(context, model).asBoolean();
+        final boolean error = CcmParameters.ERROR.getAttribute().resolveModelAttribute(context, model).asBoolean();
+        final boolean install = CcmParameters.INSTALL.getAttribute().resolveModelAttribute(context, model).asBoolean();
 
         final ServiceTarget serviceTarget = context.getServiceTarget();
 
+        if (install) {
+            context.addStep(new AbstractDeploymentChainStep() {
+                protected void execute(DeploymentProcessorTarget processorTarget) {
+                    processorTarget.addDeploymentProcessor(JcaExtension.SUBSYSTEM_NAME, Phase.POST_MODULE, Phase.POST_MODULE_CACHED_CONNECTION_MANAGER, new CachedConnectionManagerSetupProcessor());
+                }
+            }, OperationContext.Stage.RUNTIME);
+        }
 
-        CcmService ccmService = new CcmService(debug, error);
+        CachedConnectionManagerService ccmService = new CachedConnectionManagerService(debug, error);
         newControllers.add(serviceTarget
                 .addService(ConnectorServices.CCM_SERVICE, ccmService)
                 .addDependency(ConnectorServices.TRANSACTION_INTEGRATION_SERVICE, TransactionIntegration.class,

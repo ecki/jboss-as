@@ -23,6 +23,8 @@
 package org.jboss.as.clustering.infinispan.subsystem;
 
 /**
+ * Used to configure indexing of entries in the cache for searching.
+ *
  * @author Paul Ferraro
  */
 public enum Indexing {
@@ -48,6 +50,7 @@ public enum Indexing {
 
     @Override
     public String toString() {
-        return this.name().toLowerCase();
+        // remove conversion to lower case AS7-3835
+        return this.name();
     }
 }

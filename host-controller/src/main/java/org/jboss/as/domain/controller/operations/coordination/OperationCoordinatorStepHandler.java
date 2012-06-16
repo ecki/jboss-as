@@ -35,6 +35,8 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.OP_
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ROLLOUT_PLAN;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.STEPS;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.URL;
+import static org.jboss.as.domain.controller.DomainControllerLogger.HOST_CONTROLLER_LOGGER;
+import static org.jboss.as.domain.controller.DomainControllerMessages.MESSAGES;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -54,7 +56,8 @@ import org.jboss.as.controller.ProxyController;
 import org.jboss.as.controller.registry.ImmutableManagementResourceRegistration;
 import org.jboss.as.domain.controller.LocalHostControllerInfo;
 import org.jboss.as.domain.controller.operations.deployment.DeploymentFullReplaceHandler;
-import org.jboss.as.domain.controller.operations.deployment.NewDeploymentUploadUtil;
+import org.jboss.as.domain.controller.operations.deployment.DeploymentUploadUtil;
+import org.jboss.as.repository.ContentRepository;
 import org.jboss.dmr.ModelNode;
 
 /**
@@ -65,16 +68,19 @@ import org.jboss.dmr.ModelNode;
 public class OperationCoordinatorStepHandler {
 
     private final LocalHostControllerInfo localHostControllerInfo;
+    private final ContentRepository contentRepository;
     private final Map<String, ProxyController> hostProxies;
     private final Map<String, ProxyController> serverProxies;
     private final OperationSlaveStepHandler localSlaveHandler;
     private volatile ExecutorService executorService;
 
     OperationCoordinatorStepHandler(final LocalHostControllerInfo localHostControllerInfo,
+                                    ContentRepository contentRepository,
                                     final Map<String, ProxyController> hostProxies,
                                     final Map<String, ProxyController> serverProxies,
                                     final OperationSlaveStepHandler localSlaveHandler) {
         this.localHostControllerInfo = localHostControllerInfo;
+        this.contentRepository = contentRepository;
         this.hostProxies = hostProxies;
         this.serverProxies = serverProxies;
         this.localSlaveHandler = localSlaveHandler;
@@ -87,29 +93,30 @@ public class OperationCoordinatorStepHandler {
         OperationRouting routing = OperationRouting.determineRouting(operation, localHostControllerInfo, opRegistry);
 
         if (!localHostControllerInfo.isMasterDomainController()
-                && (routing.isRouteToMaster() || !routing.isLocalOnly(localHostControllerInfo.getLocalHostName()))) {
+                && !routing.isLocalOnly(localHostControllerInfo.getLocalHostName())) {
             // We cannot handle this ourselves
-            routetoMasterDomainController(context, operation);
+            routeToMasterDomainController(context, operation);
         }
         else if (routing.getSingleHost() != null && !localHostControllerInfo.getLocalHostName().equals(routing.getSingleHost())) {
-            if (PrepareStepHandler.isTraceEnabled()) {
-                PrepareStepHandler.log.trace("Remote single host");
+            if (HOST_CONTROLLER_LOGGER.isTraceEnabled()) {
+                HOST_CONTROLLER_LOGGER.trace("Remote single host");
             }
-            // Possibly a two step operation, but not coordinated by this host. Execute direct and let the remote HC
-            // coordinate any two step process (if there is one)
+            // This host is the master, but this op is addressed specifically to another host.
+            // This is possibly a two step operation, but it's not coordinated by this host.
+            // Execute direct (which will proxy the request to the intended HC) and let the remote HC coordinate
+            // any two step process (if there is one)
             executeDirect(context, operation);
         }
         else if (!routing.isTwoStep()) {
-            // It's a domain level op (probably a read) that does not require bringing in other hosts or servers
+            // It's a domain or host level op (probably a read) that does not require bringing in other hosts or servers
             executeDirect(context, operation);
         }
         else {
             // Else we are responsible for coordinating a two-phase op
-            // -- apply to DomainController models across domain and then push to servers
+            // -- domain level op: apply to HostController models across domain and then push to servers
+            // -- host level op: apply to our model  and then push to servers
             executeTwoPhaseOperation(context, operation, routing);
         }
-
-
     }
 
     public void setExecutorService(ExecutorService executorService) {
@@ -120,14 +127,13 @@ public class OperationCoordinatorStepHandler {
         return executorService == null ? Executors.newSingleThreadExecutor() : executorService;
     }
 
-    private void routetoMasterDomainController(OperationContext context, ModelNode operation) {
+    private void routeToMasterDomainController(OperationContext context, ModelNode operation) {
         // Per discussion on 2011/03/07, routing requests from a slave to the
         // master may overly complicate the security infrastructure. Therefore,
         // the ability to do this is being disabled until it's clear that it's
         // not a problem
-        context.getFailureDescription().set(String.format("Operation %s for address %s can only handled by the " +
-                "master Domain Controller; this host is not the master Domain Controller",
-                operation.get(OP).asString(), PathAddress.pathAddress(operation.get(OP_ADDR))));
+        context.getFailureDescription().set(MESSAGES.masterDomainControllerOnlyOperation(operation.get(OP).asString(),
+                PathAddress.pathAddress(operation.get(OP_ADDR))));
         context.completeStep();
     }
 
@@ -135,11 +141,11 @@ public class OperationCoordinatorStepHandler {
      * Directly handles the op in the standard way the default prepare step handler would
      * @param context the operation execution context
      * @param operation the operation
-     * @throws OperationFailedException
+     * @throws OperationFailedException if there is no handler registered for the operation
      */
     private void executeDirect(OperationContext context, ModelNode operation) throws OperationFailedException {
-        if (PrepareStepHandler.isTraceEnabled()) {
-            PrepareStepHandler.log.trace("Executing direct");
+        if (HOST_CONTROLLER_LOGGER.isTraceEnabled()) {
+            HOST_CONTROLLER_LOGGER.trace("Executing direct");
         }
         final String operationName =  operation.require(OP).asString();
         OperationStepHandler stepHandler = null;
@@ -150,14 +156,14 @@ public class OperationCoordinatorStepHandler {
         if(stepHandler != null) {
             context.addStep(stepHandler, OperationContext.Stage.MODEL);
         } else {
-            context.getFailureDescription().set(String.format("No handler for operation %s at address %s", operationName, PathAddress.pathAddress(operation.get(OP_ADDR))));
+            context.getFailureDescription().set(MESSAGES.noHandlerForOperation(operationName, PathAddress.pathAddress(operation.get(OP_ADDR))));
         }
         context.completeStep();
     }
 
     private void executeTwoPhaseOperation(OperationContext context, ModelNode operation, OperationRouting routing) throws OperationFailedException {
-        if (PrepareStepHandler.isTraceEnabled()) {
-            PrepareStepHandler.log.trace("Executing two-phase");
+        if (HOST_CONTROLLER_LOGGER.isTraceEnabled()) {
+            HOST_CONTROLLER_LOGGER.trace("Executing two-phase");
         }
 
         DomainOperationContext overallContext = new DomainOperationContext(localHostControllerInfo);
@@ -205,12 +211,11 @@ public class OperationCoordinatorStepHandler {
                     if (proxy != null) {
                         remoteProxies.put(host, proxy);
                     } else if (!global) {
-                        throw new OperationFailedException(new ModelNode().set(String.format("Operation targets host %s but that host is not registered", host)));
+                        throw MESSAGES.invalidOperationTargetHost(host);
                     }
                 }
 
-                context.addStep(slaveOp, new DomainSlaveHandler(remoteProxies, overallContext, executorService), OperationContext.Stage.DOMAIN);
-
+                context.addStep(slaveOp.clone(), new DomainSlaveHandler(remoteProxies, overallContext), OperationContext.Stage.DOMAIN);
             }
         }
 
@@ -230,7 +235,7 @@ public class OperationCoordinatorStepHandler {
             if (address.size() == 0) {
                 String opName = opNode.get(OP).asString();
                 if (DeploymentFullReplaceHandler.OPERATION_NAME.equals(opName) && hasStorableContent(opNode)) {
-                    byte[] hash = NewDeploymentUploadUtil.storeDeploymentContent(context, opNode, localHostControllerInfo.getContentRepository());
+                    byte[] hash = DeploymentUploadUtil.storeDeploymentContent(context, opNode, contentRepository);
                     opNode.get(CONTENT).get(0).remove(INPUT_STREAM_INDEX);
                     opNode.get(CONTENT).get(0).get(HASH).set(hash);
                 }
@@ -243,12 +248,12 @@ public class OperationCoordinatorStepHandler {
             }
             else if (address.size() == 1 && DEPLOYMENT.equals(address.getElement(0).getKey())
                     && ADD.equals(opNode.get(OP).asString()) && hasStorableContent(opNode)) {
-                byte[] hash = NewDeploymentUploadUtil.storeDeploymentContent(context, opNode, localHostControllerInfo.getContentRepository());
+                byte[] hash = DeploymentUploadUtil.storeDeploymentContent(context, opNode, contentRepository);
                     opNode.get(CONTENT).get(0).remove(INPUT_STREAM_INDEX);
                     opNode.get(CONTENT).get(0).get(HASH).set(hash);
             }
         } catch (IOException ioe) {
-            throw new OperationFailedException(new ModelNode().set(String.format("Caught IOException storing deployment content -- %s", ioe)));
+            throw MESSAGES.caughtExceptionStoringDeploymentContent(ioe.getClass().getSimpleName(), ioe);
         }
     }
 

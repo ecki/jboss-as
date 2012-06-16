@@ -91,10 +91,13 @@ public class JPAExtension implements Extension {
         return update;
     }
 
+    private static final int MANAGEMENT_API_MAJOR_VERSION = 1;
+    private static final int MANAGEMENT_API_MINOR_VERSION = 1;
+
 
     @Override
     public void initialize(ExtensionContext context) {
-        SubsystemRegistration registration = context.registerSubsystem(SUBSYSTEM_NAME);
+        SubsystemRegistration registration = context.registerSubsystem(SUBSYSTEM_NAME, MANAGEMENT_API_MAJOR_VERSION, MANAGEMENT_API_MINOR_VERSION);
         final ManagementResourceRegistration nodeRegistration = registration.registerSubsystemModel(DESCRIPTION);
         PersistenceUnitRegistryImpl persistenceUnitRegistry = new PersistenceUnitRegistryImpl();
         JPASubSystemAdd subsystemAdd = new JPASubSystemAdd(persistenceUnitRegistry);
@@ -114,7 +117,7 @@ public class JPAExtension implements Extension {
             // load the default persistence provider adaptor
             PersistenceProviderAdaptor provider = PersistenceProviderAdaptorLoader.loadPersistenceAdapterModule(Configuration.ADAPTER_MODULE_DEFAULT);
             final ManagementAdaptor managementAdaptor = provider.getManagementAdaptor();
-            if (managementAdaptor != null) {
+            if (managementAdaptor != null && context.isRuntimeOnlyRegistrationValid()) {
                 DescriptionProvider JPA_SUBSYSTEM = new DescriptionProvider() {
                     @Override
                     public ModelNode getModelDescription(Locale locale) {
@@ -131,6 +134,7 @@ public class JPAExtension implements Extension {
                         return subsystem;
                     }
                 };
+
                 final ManagementResourceRegistration jpaSubsystemDeployments = registration.registerDeploymentModel(JPA_SUBSYSTEM);
 
                 managementAdaptor.register(jpaSubsystemDeployments, persistenceUnitRegistry);
@@ -142,7 +146,7 @@ public class JPAExtension implements Extension {
 
     @Override
     public void initializeParsers(ExtensionParsingContext context) {
-        context.setSubsystemXmlMapping(Namespace.CURRENT.getUriString(), parser);
+        context.setSubsystemXmlMapping(SUBSYSTEM_NAME, Namespace.CURRENT.getUriString(), parser);
     }
 
     private static class JPADescribeHandler implements OperationStepHandler, DescriptionProvider {

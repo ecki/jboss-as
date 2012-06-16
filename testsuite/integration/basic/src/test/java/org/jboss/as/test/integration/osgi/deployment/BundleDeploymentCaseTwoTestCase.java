@@ -16,6 +16,7 @@
  */
 package org.jboss.as.test.integration.osgi.deployment;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 
 import java.io.InputStream;
@@ -28,11 +29,10 @@ import org.jboss.arquillian.container.test.api.Deployer;
 import org.jboss.arquillian.container.test.api.Deployment;
 import org.jboss.arquillian.junit.Arquillian;
 import org.jboss.arquillian.test.api.ArquillianResource;
-import org.jboss.as.test.integration.osgi.OSGiTestSupport;
 import org.jboss.as.test.integration.osgi.xservice.bundle.SimpleActivator;
 import org.jboss.as.test.integration.osgi.xservice.bundle.SimpleService;
-import org.jboss.osgi.testing.OSGiManifestBuilder;
-import org.jboss.osgi.testing.OSGiTestHelper;
+import org.jboss.as.test.osgi.OSGiFrameworkUtils;
+import org.jboss.osgi.spi.OSGiManifestBuilder;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
 import org.jboss.shrinkwrap.api.asset.Asset;
 import org.jboss.shrinkwrap.api.spec.JavaArchive;
@@ -65,7 +65,7 @@ public class BundleDeploymentCaseTwoTestCase {
     @Deployment
     public static JavaArchive createdeployment() {
         final JavaArchive archive = ShrinkWrap.create(JavaArchive.class, "bundle-deployment-casetwo");
-        archive.addClass(OSGiTestSupport.class);
+        archive.addClass(OSGiFrameworkUtils.class);
         archive.setManifest(new Asset() {
             public InputStream openStream() {
                 OSGiManifestBuilder builder = OSGiManifestBuilder.newInstance();
@@ -84,15 +84,15 @@ public class BundleDeploymentCaseTwoTestCase {
         deployer.deploy(BUNDLE_DEPLOYMENT_NAME);
 
         // Find the deployed bundle
-        Bundle bundle = OSGiTestSupport.getDeployedBundle(context, BUNDLE_DEPLOYMENT_NAME, null);
+        Bundle bundle = OSGiFrameworkUtils.getDeployedBundle(context, BUNDLE_DEPLOYMENT_NAME, null);
 
         // Start the bundle. Note, it may have started already
         bundle.start();
-        OSGiTestHelper.assertBundleState(Bundle.ACTIVE, bundle.getState());
+        assertEquals(Bundle.ACTIVE, bundle.getState());
 
         // Stop the bundle
         bundle.stop();
-        OSGiTestHelper.assertBundleState(Bundle.RESOLVED, bundle.getState());
+        assertEquals(Bundle.RESOLVED, bundle.getState());
 
         final CountDownLatch uninstallLatch = new CountDownLatch(1);
         context.addBundleListener(new BundleListener() {
@@ -107,7 +107,7 @@ public class BundleDeploymentCaseTwoTestCase {
         if (uninstallLatch.await(1000, TimeUnit.MILLISECONDS) == false)
             fail("UNINSTALLED event not received");
 
-        OSGiTestHelper.assertBundleState(Bundle.UNINSTALLED, bundle.getState());
+        assertEquals(Bundle.UNINSTALLED, bundle.getState());
     }
 
     @Deployment(name = BUNDLE_DEPLOYMENT_NAME, managed = false, testable = false)

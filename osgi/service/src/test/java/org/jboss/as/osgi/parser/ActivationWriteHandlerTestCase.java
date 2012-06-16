@@ -21,10 +21,13 @@
  */
 package org.jboss.as.osgi.parser;
 
+import java.util.Locale;
+
 import org.jboss.as.controller.OperationContext;
 import org.jboss.as.controller.PathAddress;
 import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
 import org.jboss.as.controller.registry.Resource;
+import org.jboss.as.osgi.management.ActivationAttributeHandler;
 import org.jboss.as.osgi.parser.SubsystemState.Activation;
 import org.jboss.dmr.ModelNode;
 import org.junit.Assert;
@@ -33,8 +36,10 @@ import org.mockito.Mockito;
 
 /**
  * @author David Bosschaert
+ * @author Thomas.Diesler@jboss.com
  */
 public class ActivationWriteHandlerTestCase {
+
     @Test
     public void testHandlerLazy() throws Exception {
         ModelNode targetNode = new ModelNode();
@@ -46,7 +51,7 @@ public class ActivationWriteHandlerTestCase {
         Mockito.when(context.readResourceForUpdate(PathAddress.EMPTY_ADDRESS)).thenReturn(resource);
 
         ModelNode operation = new ModelNode();
-        operation.get(ModelDescriptionConstants.VALUE).set(Activation.LAZY.toString().toLowerCase());
+        operation.get(ModelDescriptionConstants.VALUE).set(Activation.LAZY.toString().toLowerCase(Locale.ENGLISH));
         ActivationAttributeHandler.INSTANCE.execute(context, operation);
 
         Mockito.verify(context).completeStep();

@@ -26,6 +26,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.sql.Blob;
 import java.sql.SQLException;
+import org.jboss.as.cmp.CmpMessages;
 
 /**
  * The representation (mapping) in the Java<sup><font size=-2>TM</font></sup>
@@ -35,7 +36,7 @@ import java.sql.SQLException;
  * getting the length of an SQL <code>BLOB</code> (Binary Large Object) value,
  * for materializing a <code>BLOB</code> value on the client, and for
  * determining the position of a pattern of bytes within a <code>BLOB</code>
- * value. The ByteArrayBlob has static factory methods for construting an
+ * value. The ByteArrayBlob has static factory methods for constructing an
  * <code>BLOB</code> using either an existing serializable object, or an array
  * of bytes. This is a nice way to store serialized objects in a relational
  * field of type SQL <code>BLOB</code>.
@@ -138,27 +139,27 @@ public final class ByteArrayBlob implements Blob {
     }
 
     public InputStream getBinaryStream(long pos, long length) throws SQLException {
-        throw new UnsupportedOperationException("Unimplemented JDK6 method");
+        throw CmpMessages.MESSAGES.unimplementedMethod();
     }
 
     public OutputStream setBinaryStream(long pos)
             throws SQLException {
-        throw new UnsupportedOperationException("ByteArrayBlob is immutable");
+        throw CmpMessages.MESSAGES.byteArrayBlobIsImmutable();
     }
 
     public int setBytes(long pos, byte[] bytes)
             throws SQLException {
-        throw new UnsupportedOperationException("ByteArrayBlob is immutable");
+        throw CmpMessages.MESSAGES.byteArrayBlobIsImmutable();
     }
 
     public int setBytes(long pos, byte[] bytes, int offset, int length)
             throws SQLException {
-        throw new UnsupportedOperationException("ByteArrayBlob is immutable");
+        throw CmpMessages.MESSAGES.byteArrayBlobIsImmutable();
     }
 
     public void truncate(long length)
             throws SQLException {
-        throw new UnsupportedOperationException("ByteArrayBlob is immutable");
+        throw CmpMessages.MESSAGES.byteArrayBlobIsImmutable();
     }
 }
 

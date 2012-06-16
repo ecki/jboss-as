@@ -74,7 +74,7 @@ final class WSEndpointMetrics implements OperationStepHandler {
 
     /** {@inheritDoc} */
     public void execute(OperationContext context, ModelNode operation) throws OperationFailedException {
-        if (context.getType() == OperationContext.Type.SERVER) {
+        if (context.isNormalServer()) {
             context.addStep(new OperationStepHandler() {
                 public void execute(OperationContext context, ModelNode operation) throws OperationFailedException {
                     final ServiceController<?> controller = context.getServiceRegistry(false).getService(WSServices.REGISTRY_SERVICE);
@@ -125,7 +125,7 @@ final class WSEndpointMetrics implements OperationStepHandler {
             } else if (MAX_PROCESSING_TIME.equals(metricName)) {
                 result.set(String.valueOf(endpointMetrics.getMaxProcessingTime()));
             } else if (AVERAGE_PROCESSING_TIME.equals(metricName)) {
-                result.set(String.valueOf(endpointMetrics.getTotalProcessingTime()));
+                result.set(String.valueOf(endpointMetrics.getAverageProcessingTime()));
             } else if (TOTAL_PROCESSING_TIME.equals(metricName)) {
                 result.set(String.valueOf(endpointMetrics.getTotalProcessingTime()));
             } else if (REQUEST_COUNT.equals(metricName)) {

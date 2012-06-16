@@ -16,8 +16,16 @@
  */
 package org.jboss.as.arquillian.container;
 
+import static org.jboss.as.arquillian.container.Authentication.getCallbackHandler;
+
+import java.net.UnknownHostException;
+import java.util.Properties;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+
+import javax.naming.Context;
+import javax.naming.InitialContext;
+import javax.naming.NamingException;
 
 import org.jboss.arquillian.container.spi.client.container.DeployableContainer;
 import org.jboss.arquillian.container.spi.client.container.DeploymentException;
@@ -26,14 +34,12 @@ import org.jboss.arquillian.container.spi.client.protocol.ProtocolDescription;
 import org.jboss.arquillian.container.spi.client.protocol.metadata.ProtocolMetaData;
 import org.jboss.arquillian.container.spi.context.annotation.ContainerScoped;
 import org.jboss.arquillian.core.api.InstanceProducer;
+import org.jboss.arquillian.core.api.annotation.ApplicationScoped;
 import org.jboss.arquillian.core.api.annotation.Inject;
 import org.jboss.as.controller.client.ModelControllerClient;
-import org.jboss.as.controller.client.helpers.standalone.ServerDeploymentManager;
 import org.jboss.shrinkwrap.api.Archive;
 import org.jboss.shrinkwrap.descriptor.api.Descriptor;
 import org.jboss.util.NotImplementedException;
-
-import static org.jboss.as.arquillian.container.Authentication.getCallbackHandler;
 
 /**
  * A JBossAS deployable container
@@ -43,13 +49,22 @@ import static org.jboss.as.arquillian.container.Authentication.getCallbackHandle
  */
 public abstract class CommonDeployableContainer<T extends CommonContainerConfiguration> implements DeployableContainer<T> {
 
+    private static final String JBOSS_URL_PKG_PREFIX = "org.jboss.ejb.client.naming";
+
     private final Logger log = Logger.getLogger(CommonDeployableContainer.class.getName());
     private T containerConfig;
-    private ManagementClient managementClient;
 
     @Inject
     @ContainerScoped
-    private InstanceProducer<ArchiveDeployer> archiveDeployerInst;
+    private InstanceProducer<ManagementClient> managementClient;
+
+    @Inject
+    @ContainerScoped
+    private InstanceProducer<ArchiveDeployer> archiveDeployer;
+
+    @Inject
+    @ApplicationScoped
+    private InstanceProducer<Context> jndiContext;
 
     @Override
     public ProtocolDescription getDefaultProtocol() {
@@ -63,16 +78,34 @@ public abstract class CommonDeployableContainer<T extends CommonContainerConfigu
 
     @Override
     public final void start() throws LifecycleException {
+        if(containerConfig.getUsername() != null) {
+            Authentication.username = containerConfig.getUsername();
+            Authentication.password = containerConfig.getPassword();
+        }
 
-        ModelControllerClient modelControllerClient = ModelControllerClient.Factory.create(
-                containerConfig.getManagementAddress(),
-                containerConfig.getManagementPort(),
-                getCallbackHandler());
+        ModelControllerClient modelControllerClient = null;
+        try {
+            modelControllerClient = ModelControllerClient.Factory.create(
+                    containerConfig.getManagementAddress(),
+                    containerConfig.getManagementPort(),
+                    getCallbackHandler());
+        } catch (UnknownHostException e) {
+            throw new RuntimeException(e);
+        }
 
-        managementClient = new ManagementClient(modelControllerClient, containerConfig.getManagementAddress().getHostAddress());
+        ManagementClient client = new ManagementClient(modelControllerClient, containerConfig.getManagementAddress(), containerConfig.getManagementPort());
+        managementClient.set(client);
 
-        archiveDeployerInst.set(new ArchiveDeployer(
-                ServerDeploymentManager.Factory.create(modelControllerClient)));
+        ArchiveDeployer deployer = new ArchiveDeployer(modelControllerClient);
+        archiveDeployer.set(deployer);
+
+        try {
+            final Properties jndiProps = new Properties();
+            jndiProps.setProperty(Context.URL_PKG_PREFIXES, JBOSS_URL_PKG_PREFIX);
+            jndiContext.set(new InitialContext(jndiProps));
+        } catch (final NamingException ne) {
+            throw new LifecycleException("Could not set JNDI Naming Context", ne);
+        }
 
         try {
             startInternal();
@@ -100,25 +133,22 @@ public abstract class CommonDeployableContainer<T extends CommonContainerConfigu
     }
 
     protected ManagementClient getManagementClient() {
-        return managementClient;
+        return managementClient.get();
     }
 
     protected ModelControllerClient getModelControllerClient() {
-        return managementClient.getControllerClient();
+        return getManagementClient().getControllerClient();
     }
 
     @Override
     public ProtocolMetaData deploy(Archive<?> archive) throws DeploymentException {
-        ArchiveDeployer archiveDeployer = archiveDeployerInst.get();
-        String runtimeName = archiveDeployer.deploy(archive);
-
-        return managementClient.getDeploymentMetaData(runtimeName);
+        String runtimeName = archiveDeployer.get().deploy(archive);
+        return getManagementClient().getProtocolMetaData(runtimeName);
     }
 
     @Override
     public void undeploy(Archive<?> archive) throws DeploymentException {
-        ArchiveDeployer archiveDeployer = archiveDeployerInst.get();
-        archiveDeployer.undeploy(archive.getName());
+        archiveDeployer.get().undeploy(archive.getName());
     }
 
     @Override
@@ -133,10 +163,9 @@ public abstract class CommonDeployableContainer<T extends CommonContainerConfigu
 
     private void safeCloseClient() {
         try {
-            managementClient.close();
+            getManagementClient().close();
         } catch (Exception e) {
             log.log(Level.WARNING, "Caught exception closing ModelControllerClient", e);
         }
     }
-
 }

@@ -22,8 +22,6 @@
 package org.jboss.as.ejb3.component.messagedriven;
 
 import java.lang.reflect.Method;
-import java.util.Collections;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -36,26 +34,24 @@ import javax.transaction.TransactionManager;
 
 import org.jboss.as.ee.component.BasicComponentInstance;
 import org.jboss.as.ejb3.component.EJBComponent;
+import org.jboss.as.ejb3.component.allowedmethods.AllowedMethodsInformation;
 import org.jboss.as.ejb3.component.pool.PoolConfig;
 import org.jboss.as.ejb3.component.pool.PooledComponent;
 import org.jboss.as.ejb3.inflow.JBossMessageEndpointFactory;
 import org.jboss.as.ejb3.inflow.MessageEndpointService;
 import org.jboss.as.ejb3.pool.Pool;
 import org.jboss.as.ejb3.pool.StatelessObjectFactory;
-import org.jboss.as.ejb3.timerservice.PooledTimedObjectInvokerImpl;
-import org.jboss.as.ejb3.timerservice.spi.TimedObjectInvoker;
 import org.jboss.as.naming.ManagedReference;
 import org.jboss.invocation.Interceptor;
-import org.jboss.invocation.InterceptorFactory;
 import org.jboss.invocation.InterceptorFactoryContext;
-import org.jboss.logging.Logger;
+import org.jboss.jca.core.spi.rar.Endpoint;
 import org.jboss.msc.service.StopContext;
 
 import static java.util.Collections.emptyMap;
 import static javax.ejb.TransactionAttributeType.REQUIRED;
-import static org.jboss.as.ejb3.component.MethodIntf.BEAN;
+import static org.jboss.as.ejb3.EjbLogger.EJB3_LOGGER;
 import static org.jboss.as.ejb3.EjbLogger.ROOT_LOGGER;
-import static org.jboss.as.ejb3.EjbMessages.MESSAGES;
+import static org.jboss.as.ejb3.component.MethodIntf.BEAN;
 
 /**
  * @author <a href="mailto:cdewolf@redhat.com">Carlo de Wolf</a>
@@ -63,12 +59,14 @@ import static org.jboss.as.ejb3.EjbMessages.MESSAGES;
 public class MessageDrivenComponent extends EJBComponent implements PooledComponent<MessageDrivenComponentInstance> {
 
     private final Pool<MessageDrivenComponentInstance> pool;
+    private final String poolName;
 
     private final ActivationSpec activationSpec;
     private final MessageEndpointFactory endpointFactory;
     private final Class<?> messageListenerInterface;
+    private final ClassLoader classLoader;
     private ResourceAdapter resourceAdapter;
-    private final TimedObjectInvoker timedObjectInvoker;
+    private Endpoint endpoint;
 
     /**
      * Construct a new instance.
@@ -93,10 +91,13 @@ public class MessageDrivenComponent extends EJBComponent implements PooledCompon
         if (poolConfig == null) {
             ROOT_LOGGER.debug("Pooling is disabled for MDB " + ejbComponentCreateService.getComponentName());
             this.pool = null;
+            this.poolName = null;
         } else {
             ROOT_LOGGER.debug("Using pool config " + poolConfig + " to create pool for MDB " + ejbComponentCreateService.getComponentName());
             this.pool = poolConfig.createPool(factory);
+            this.poolName = poolConfig.getPoolName();
         }
+        this.classLoader = ejbComponentCreateService.getModuleClassLoader();
 
         this.activationSpec = activationSpec;
         this.messageListenerInterface = messageListenerInterface;
@@ -128,29 +129,18 @@ public class MessageDrivenComponent extends EJBComponent implements PooledCompon
             public void release(Object obj) {
                 // do nothing
             }
+
+            @Override
+            public ClassLoader getClassLoader() {
+                return ejbComponentCreateService.getComponentClass().getClassLoader();
+            }
         };
         this.endpointFactory = new JBossMessageEndpointFactory(getComponentClass().getClassLoader(), service);
-        final String deploymentName;
-        if(ejbComponentCreateService.getDistinctName() == null || ejbComponentCreateService.getDistinctName().length() == 0) {
-            deploymentName = ejbComponentCreateService.getApplicationName() + "." + ejbComponentCreateService.getModuleName();
-        } else {
-            deploymentName = ejbComponentCreateService.getApplicationName() + "." + ejbComponentCreateService.getModuleName() + "." + ejbComponentCreateService.getDistinctName();
-        }
-        this.timedObjectInvoker = new PooledTimedObjectInvokerImpl(this, deploymentName);
     }
 
     @Override
     protected BasicComponentInstance instantiateComponentInstance(AtomicReference<ManagedReference> instanceReference, Interceptor preDestroyInterceptor, Map<Method, Interceptor> methodInterceptors, final InterceptorFactoryContext interceptorContext) {
-        final Map<Method, Interceptor> timeouts;
-        if (timeoutInterceptors != null) {
-            timeouts = new HashMap<Method, Interceptor>();
-            for (Map.Entry<Method, InterceptorFactory> entry : timeoutInterceptors.entrySet()) {
-                timeouts.put(entry.getKey(), entry.getValue().create(interceptorContext));
-            }
-        } else {
-            timeouts = Collections.emptyMap();
-        }
-        return new MessageDrivenComponentInstance(this, instanceReference, preDestroyInterceptor, methodInterceptors, timeouts);
+        return new MessageDrivenComponentInstance(this, instanceReference, preDestroyInterceptor, methodInterceptors);
     }
 
     @Override
@@ -158,33 +148,67 @@ public class MessageDrivenComponent extends EJBComponent implements PooledCompon
         return pool;
     }
 
+    @Override
+    public String getPoolName() {
+        return poolName;
+    }
+
     protected void setResourceAdapter(ResourceAdapter resourceAdapter) {
         this.resourceAdapter = resourceAdapter;
     }
 
+    void setEndpoint(final Endpoint endpoint) {
+        this.endpoint = endpoint;
+    }
+
     @Override
     public void start() {
-        if (resourceAdapter == null)
-            throw MESSAGES.resourceAdapterNotSpecified(this);
+        if (endpoint == null) {
+            throw EJB3_LOGGER.endpointUnAvailable(this.getComponentName());
+        }
 
+        getShutDownInterceptorFactory().start();
         super.start();
 
+        ClassLoader oldTccl = SecurityActions.getContextClassLoader();
         try {
-            resourceAdapter.endpointActivation(endpointFactory, activationSpec);
+            SecurityActions.setContextClassLoader(classLoader);
+            this.endpoint.activate(endpointFactory, activationSpec);
         } catch (ResourceException e) {
             throw new RuntimeException(e);
+        } finally {
+            SecurityActions.setContextClassLoader(oldTccl);
+        }
+
+        if (this.pool != null) {
+            this.pool.start();
         }
     }
 
     @Override
     public void stop(final StopContext stopContext) {
-        resourceAdapter.endpointDeactivation(endpointFactory, activationSpec);
+
+        ClassLoader oldTccl = SecurityActions.getContextClassLoader();
+        try {
+            SecurityActions.setContextClassLoader(classLoader);
+            endpoint.deactivate(endpointFactory, activationSpec);
+        } catch (ResourceException re) {
+            throw EJB3_LOGGER.failureDuringEndpointDeactivation(this.getComponentName(), re);
+        } finally {
+            SecurityActions.setContextClassLoader(oldTccl);
+        }
+
+        getShutDownInterceptorFactory().shutdown();
+        if (this.pool != null) {
+            this.pool.stop();
+        }
+
 
         super.stop(stopContext);
     }
 
     @Override
-    public TimedObjectInvoker getTimedObjectInvoker() {
-        return timedObjectInvoker;
+    public AllowedMethodsInformation getAllowedMethodsInformation() {
+        return MessageDrivenAllowedMethodsInformation.INSTANCE;
     }
 }

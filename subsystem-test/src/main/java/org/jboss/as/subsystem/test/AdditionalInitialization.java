@@ -1,8 +1,8 @@
 package org.jboss.as.subsystem.test;
 
-import org.jboss.as.controller.ExtensionContext;
-import org.jboss.as.controller.OperationContext;
-import org.jboss.as.controller.OperationContext.Type;
+import org.jboss.as.controller.extension.ExtensionRegistry;
+import org.jboss.as.controller.ProcessType;
+import org.jboss.as.controller.RunningMode;
 import org.jboss.as.controller.registry.ManagementResourceRegistration;
 import org.jboss.as.controller.registry.Resource;
 import org.jboss.as.subsystem.test.ModelDescriptionValidator.ValidationConfiguration;
@@ -15,15 +15,19 @@ import org.jboss.msc.service.ServiceTarget;
  * @author <a href="kabir.khan@jboss.com">Kabir Khan</a>
  */
 public class AdditionalInitialization extends AdditionalParsers {
+    public static final AdditionalInitialization MANAGEMENT = new AdditionalInitialization() {
+        @Override
+        protected RunningMode getRunningMode() {
+            return RunningMode.ADMIN_ONLY;
+        }
+    };
 
-    /**
-     * Return {@code OperationContext.Type#MANAGEMENT} to only affect the model from your tested operations, and thus avoid installing services into the service controller.
-     * Return {@code OperationContext.Type#SERVER} to install services, this is the default.
-     *
-     * @return the type
-     */
-    protected OperationContext.Type getType() {
-        return Type.SERVER;
+    protected ProcessType getProcessType() {
+        return ProcessType.STANDALONE_SERVER;
+    }
+
+    protected RunningMode getRunningMode() {
+        return RunningMode.NORMAL;
     }
 
     /**
@@ -76,11 +80,12 @@ public class AdditionalInitialization extends AdditionalParsers {
     /**
      * Allows extra initialization of the model and addition of extra subsystems
      *
-     * @param extensionContext allows installation of extra subsystem extensions, call {@code Extension.initialize(extensionContext)} for each extra extension you have
+     * @param extensionRegistry allows installation of extra subsystem extensions, call {@link ExtensionRegistry#getExtensionContext(String)}
+     *                          and then {@code Extension.initialize(extensionContext)} for each extra extension you have
      * @param rootResource the root model resource which allows you to for example add child elements to the model
      * @param rootRegistration the root resource registration which allows you to for example add additional operations to the model
      */
-    protected void initializeExtraSubystemsAndModel(ExtensionContext extensionContext, Resource rootResource, ManagementResourceRegistration rootRegistration) {
+    protected void initializeExtraSubystemsAndModel(ExtensionRegistry extensionRegistry, Resource rootResource, ManagementResourceRegistration rootRegistration) {
     }
 
 }

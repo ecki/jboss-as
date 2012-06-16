@@ -30,12 +30,12 @@
     <parent>
         <groupId>org.jboss.as</groupId>
         <artifactId>jboss-as-parent</artifactId>
-        <version>7.1.0.CR1-SNAPSHOT</version>
+        <version>7.2.0.Alpha1-SNAPSHOT</version>
     </parent>
 
     <groupId>org.jboss.as</groupId>
     <artifactId>jboss-as-jacorb</artifactId>
-    <version>7.1.0.CR1-SNAPSHOT</version>
+    <version>7.2.0.Alpha1-SNAPSHOT</version>
     <packaging>jar</packaging>
 
     <name>JBoss Application Server: JacORB Subsystem</name>
@@ -65,7 +65,7 @@
                    <configuration>
                       <artifactItems>
                          <artifactItem>
-                            <groupId>jacorb</groupId>
+                            <groupId>org.jacorb</groupId>
                             <artifactId>jacorb</artifactId>
                             <type>jar</type>
                             <overWrite>true</overWrite>
@@ -82,7 +82,7 @@
 
     <dependencies>
         <dependency>
-            <groupId>jacorb</groupId>
+            <groupId>org.jacorb</groupId>
             <artifactId>jacorb</artifactId>
         </dependency>
 
@@ -97,13 +97,28 @@
         </dependency>
 
         <dependency>
+            <groupId>org.jboss.as</groupId>
+            <artifactId>jboss-as-network</artifactId>
+        </dependency>
+
+        <dependency>
             <groupId>org.jboss.jbossts</groupId>
             <artifactId>jbossjts</artifactId>
         </dependency>
 
         <dependency>
+            <groupId>org.jboss.metadata</groupId>
+            <artifactId>jboss-metadata-common</artifactId>
+        </dependency>
+
+        <dependency>
             <groupId>org.jboss.spec.javax.rmi</groupId>
             <artifactId>jboss-rmi-api_1.0_spec</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jboss.metadata</groupId>
+            <artifactId>jboss-metadata-ejb</artifactId>
         </dependency>
 
         <dependency>

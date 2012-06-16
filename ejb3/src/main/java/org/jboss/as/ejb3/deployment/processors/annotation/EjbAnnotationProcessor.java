@@ -53,6 +53,7 @@ public class EjbAnnotationProcessor extends AbstractEEAnnotationProcessor {
         factories.add(new ConcurrencyManagementAnnotationInformationFactory());
         factories.add(new AccessTimeoutAnnotationInformationFactory());
         factories.add(new TransactionAttributeAnnotationInformationFactory());
+        factories.add(new TransactionTimeoutAnnotationInformationFactory());
         factories.add(new TransactionManagementAnnotationInformationFactory());
         factories.add(new RemoveAnnotationInformationFactory());
         factories.add(new BooleanAnnotationInformationFactory<Startup>(Startup.class));
@@ -63,14 +64,17 @@ public class EjbAnnotationProcessor extends AbstractEEAnnotationProcessor {
         factories.add(new ResourceAdaptorAnnotationInformationFactory());
         factories.add(new InitAnnotationInformationFactory());
 
+        // pool
+        factories.add(new PoolAnnotationInformationFactory());
+
         //session synchronization
         factories.add(new BooleanAnnotationInformationFactory<AfterBegin>(AfterBegin.class));
         factories.add(new BooleanAnnotationInformationFactory<BeforeCompletion>(BeforeCompletion.class));
         factories.add(new BooleanAnnotationInformationFactory<AfterCompletion>(AfterCompletion.class));
 
-
         //security annotations
         factories.add(new RunAsAnnotationInformationFactory());
+        factories.add(new RunAsPrincipalAnnotationInformationFactory());
         factories.add(new SecurityDomainAnnotationInformationFactory());
         factories.add(new DeclareRolesAnnotationInformationFactory());
         factories.add(new RolesAllowedAnnotationInformationFactory());
@@ -80,6 +84,10 @@ public class EjbAnnotationProcessor extends AbstractEEAnnotationProcessor {
         //view annotations
         factories.add(new LocalHomeAnnotationInformationFactory());
         factories.add(new RemoteHomeAnnotationInformationFactory());
+
+        // clustering/cache annotations
+        factories.add(new ClusteredAnnotationInformationFactory());
+        factories.add(new CacheAnnotationInformationFactory());
 
         this.factories = Collections.unmodifiableList(factories);
     }

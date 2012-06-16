@@ -23,6 +23,7 @@
 package org.jboss.as.test.iiop.transaction;
 
 import java.io.IOException;
+import java.util.Properties;
 
 import javax.naming.InitialContext;
 import javax.naming.NamingException;
@@ -36,8 +37,13 @@ import org.jboss.arquillian.container.test.api.Deployment;
 import org.jboss.arquillian.container.test.api.OperateOnDeployment;
 import org.jboss.arquillian.container.test.api.TargetsContainer;
 import org.jboss.arquillian.junit.Arquillian;
+import org.jboss.as.network.NetworkUtils;
+import org.jboss.as.test.iiop.basic.BasicIIOPInvocationTestCase;
+import org.jboss.as.test.shared.FileUtils;
+import org.jboss.as.test.shared.PropertiesValueResolver;
 import org.jboss.shrinkwrap.api.Archive;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
+import org.jboss.shrinkwrap.api.asset.StringAsset;
 import org.jboss.shrinkwrap.api.spec.JavaArchive;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -55,17 +61,29 @@ public class TransactionIIOPInvocationTestCase {
         final JavaArchive jar = ShrinkWrap.create(JavaArchive.class, "server.jar");
         jar.addClasses(IIOPTransactionalStatelessBean.class, IIOPTransactionalHome.class,
                 IIOPTransactionalRemote.class, IIOPTransactionalStatefulHome.class,
-                IIOPTransactionalStatefulRemote.class, IIOPTransactionalStatefulBean.class);
+                IIOPTransactionalStatefulRemote.class, IIOPTransactionalStatefulBean.class)
+            .addAsManifestResource(TransactionIIOPInvocationTestCase.class.getPackage(), "jboss-ejb3.xml", "jboss-ejb3.xml");
         return jar;
     }
 
     @Deployment(name = "client", testable = true)
     @TargetsContainer("iiop-client")
     public static Archive<?> clientDeployment() {
+
+        String ejbJar = FileUtils.readFile(TransactionIIOPInvocationTestCase.class, "ejb-jar.xml");
+
+        final Properties properties = new Properties();
+        properties.putAll(System.getProperties());
+        if(properties.containsKey("node1")) {
+            properties.put("node1", NetworkUtils.formatPossibleIpv6Address((String) properties.get("node1")));
+        }
+
         final JavaArchive jar = ShrinkWrap.create(JavaArchive.class, "client.jar");
         jar.addClasses(ClientEjb.class, IIOPTransactionalHome.class,
                 IIOPTransactionalRemote.class, TransactionIIOPInvocationTestCase.class
-                , IIOPTransactionalStatefulHome.class, IIOPTransactionalStatefulRemote.class);
+                , IIOPTransactionalStatefulHome.class, IIOPTransactionalStatefulRemote.class)
+                .addAsManifestResource(TransactionIIOPInvocationTestCase.class.getPackage(), "jboss-ejb3.xml", "jboss-ejb3.xml")
+                .addAsManifestResource(new StringAsset(PropertiesValueResolver.replaceProperties(ejbJar, properties)), "ejb-jar.xml");
         return jar;
     }
 
@@ -76,6 +94,22 @@ public class TransactionIIOPInvocationTestCase {
         final ClientEjb ejb = (ClientEjb) context.lookup("java:module/" + ClientEjb.class.getSimpleName());
         ejb.basicTransactionPropagationTest();
 
+    }
+
+    @Test
+    @OperateOnDeployment("client")
+    public void testRollbackOnly() throws IOException, NamingException, NotSupportedException, SystemException {
+        final InitialContext context = new InitialContext();
+        final ClientEjb ejb = (ClientEjb) context.lookup("java:module/" + ClientEjb.class.getSimpleName());
+        ejb.testRollbackOnly();
+    }
+
+    @Test
+    @OperateOnDeployment("client")
+    public void testRollbackOnlyBeforeCompletion() throws IOException, NamingException, NotSupportedException, SystemException, HeuristicMixedException, HeuristicRollbackException {
+        final InitialContext context = new InitialContext();
+        final ClientEjb ejb = (ClientEjb) context.lookup("java:module/" + ClientEjb.class.getSimpleName());
+        ejb.testRollbackOnlyBeforeCompletion();
     }
 
     @Test

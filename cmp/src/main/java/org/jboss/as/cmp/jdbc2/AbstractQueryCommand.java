@@ -33,6 +33,8 @@ import java.util.List;
 import java.util.Set;
 import javax.ejb.FinderException;
 import javax.ejb.ObjectNotFoundException;
+import org.jboss.as.cmp.CmpMessages;
+import static org.jboss.as.cmp.CmpMessages.MESSAGES;
 import org.jboss.as.cmp.ejbql.SelectFunction;
 import org.jboss.as.cmp.jdbc.JDBCQueryCommand;
 import org.jboss.as.cmp.jdbc.JDBCUtil;
@@ -173,7 +175,7 @@ public abstract class AbstractQueryCommand implements QueryCommand {
         ResultSet rs = null;
         boolean throwRuntimeExceptions = entity.getMetaData().getThrowRuntimeExceptions();
 
-        // if metadata is true, the getconnection is done inside
+        // if metadata is true, the getConnection is done inside
         // its own try catch block to throw a runtime exception (EJBException)
         if (throwRuntimeExceptions) {
             try {
@@ -189,7 +191,7 @@ public abstract class AbstractQueryCommand implements QueryCommand {
                 log.debug("executing: " + sql);
             }
 
-            // if metadata is false, the getconnection is done inside this try catch block
+            // if metadata is false, the getConnection is done inside this try catch block
             if (!throwRuntimeExceptions) {
                 con = entity.getDataSource().getConnection();
             }
@@ -214,10 +216,7 @@ public abstract class AbstractQueryCommand implements QueryCommand {
             JDBCUtil.safeClose(ps);
             JDBCUtil.safeClose(con);
 
-            log.error("Finder failed: " + e.getMessage(), e);
-            FinderException fe = new FinderException(e.getMessage());
-            fe.initCause(e);
-            throw fe;
+            throw CmpMessages.MESSAGES.finderFailed(e);
         }
 
         result = collectionStrategy.readResultSet(con, ps, rs, limit, count, factory);
@@ -239,7 +238,7 @@ public abstract class AbstractQueryCommand implements QueryCommand {
         ResultSet rs = null;
         boolean throwRuntimeExceptions = entity.getMetaData().getThrowRuntimeExceptions();
 
-        // if metadata is true, the getconnection is done inside
+        // if metadata is true, the getConnection is done inside
         // its own try catch block to throw a runtime exception (EJBException)
         if (throwRuntimeExceptions) {
             try {
@@ -255,7 +254,7 @@ public abstract class AbstractQueryCommand implements QueryCommand {
                 log.debug("executing: " + sql);
             }
 
-            // if metadata is false, the getconnection is done inside this try catch block
+            // if metadata is false, the getConnection is done inside this try catch block
             if (!throwRuntimeExceptions) {
                 con = entity.getDataSource().getConnection();
             }
@@ -277,7 +276,7 @@ public abstract class AbstractQueryCommand implements QueryCommand {
                     while (rs.next()) {
                         list.add(resultReader.readRow(rs, factory));
                     }
-                    throw new FinderException("More than one instance matches the single-object finder criteria: " + list);
+                    throw MESSAGES.moreThanOneInstanceForSingleValueFinder(list);
                 }
             } else {
                 throw new ObjectNotFoundException();
@@ -303,12 +302,7 @@ public abstract class AbstractQueryCommand implements QueryCommand {
             for (int i = 0; i < p.size(); i++) {
                 Object pi = p.get(i);
                 if (!(pi instanceof QueryParameter)) {
-                    throw new IllegalArgumentException("Element "
-                            +
-                            i
-                            +
-                            " of list is not an instance of QueryParameter, but " +
-                            p.get(i).getClass().getName());
+                    throw CmpMessages.MESSAGES.elementNotQueryParam(i, p.get(i).getClass().getName());
                 }
                 params[i] = (QueryParameter) pi;
             }
@@ -403,8 +397,7 @@ public abstract class AbstractQueryCommand implements QueryCommand {
                     result = Collections.EMPTY_SET;
                 }
             } catch (Exception e) {
-                log.error("Finder failed: " + e.getMessage(), e);
-                throw new FinderException(e.getMessage());
+                throw MESSAGES.finderFailed(e);
             } finally {
                 JDBCUtil.safeClose(rs);
                 JDBCUtil.safeClose(ps);

@@ -22,10 +22,6 @@
 
 package org.jboss.as.test.integration.jpa.hibernate;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
-
 import java.util.Set;
 
 import javax.naming.InitialContext;
@@ -33,6 +29,7 @@ import javax.naming.NamingException;
 
 import org.jboss.arquillian.container.test.api.Deployment;
 import org.jboss.arquillian.junit.Arquillian;
+import org.jboss.arquillian.junit.InSequence;
 import org.jboss.arquillian.test.api.ArquillianResource;
 import org.jboss.as.test.integration.jpa.hibernate.entity.Company;
 import org.jboss.as.test.integration.jpa.hibernate.entity.Customer;
@@ -42,8 +39,13 @@ import org.jboss.shrinkwrap.api.Archive;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
 import org.jboss.shrinkwrap.api.asset.StringAsset;
 import org.jboss.shrinkwrap.api.spec.JavaArchive;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Hibernate entity tests (based on the EAP 5 test), using {@link EntityTest} bean. Tests relations between entities,
@@ -68,8 +70,6 @@ public class EntityTestCase {
             + "      <property name=\"hibernate.hbm2ddl.auto\" value=\"create-drop\"/>"
             + "      <property name=\"hibernate.cache.use_second_level_cache\" value=\"true\"/>"
             + "      <property name=\"hibernate.cache.use_query_cache\" value=\"false\"/>"
-            + "      <property name=\"hibernate.cache.region.factory_class\" value=\"org.hibernate.cache.infinispan.JndiInfinispanRegionFactory\"/>"
-            + "      <property name=\"hibernate.cache.infinispan.cachemanager\" value=\"java:jboss/infinispan/hibernate\"/>"
             + "     </properties>" + "  </persistence-unit>" + "</persistence>";
 
     @ArquillianResource
@@ -96,6 +96,7 @@ public class EntityTestCase {
 
 
     @Test
+    @InSequence(1)
     public void testOneToMany() throws Exception {
 
         EntityTest test = lookup("EntityTest", EntityTest.class);
@@ -113,6 +114,7 @@ public class EntityTestCase {
     }
 
     @Test
+    @InSequence(2)
     public void testManyToOne() throws Exception {
 
         EntityTest test = lookup("EntityTest", EntityTest.class);
@@ -132,6 +134,7 @@ public class EntityTestCase {
     }
 
     @Test
+    @InSequence(3)
     public void testManyToMany() throws Exception {
 
         EntityTest test = lookup("EntityTest", EntityTest.class);
@@ -149,6 +152,7 @@ public class EntityTestCase {
     }
 
     @Test
+    @InSequence(4)
     public void testNamedQueries() throws Exception {
 
         EntityTest test = lookup("EntityTest", EntityTest.class);
@@ -160,6 +164,7 @@ public class EntityTestCase {
     }
 
     @Test
+    @InSequence(5)
     public void testFlush() throws Exception {
 
         EntityTest test = lookup("EntityTest", EntityTest.class);

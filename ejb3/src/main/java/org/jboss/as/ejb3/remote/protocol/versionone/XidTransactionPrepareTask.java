@@ -25,10 +25,11 @@ package org.jboss.as.ejb3.remote.protocol.versionone;
 import com.arjuna.ats.arjuna.coordinator.TwoPhaseOutcome;
 import com.arjuna.ats.internal.jta.transaction.arjunacore.jca.SubordinateTransaction;
 import com.arjuna.ats.internal.jta.transaction.arjunacore.jca.SubordinationManager;
+import org.jboss.as.ejb3.EjbLogger;
 import org.jboss.as.ejb3.remote.EJBRemoteTransactionsRepository;
 import org.jboss.ejb.client.XidTransactionID;
 import org.jboss.logging.Logger;
-import org.jboss.remoting3.Channel;
+import org.jboss.marshalling.MarshallerFactory;
 import org.xnio.IoUtils;
 
 import javax.transaction.HeuristicCommitException;
@@ -49,9 +50,10 @@ class XidTransactionPrepareTask extends XidTransactionManagementTask {
     private static final Logger logger = Logger.getLogger(XidTransactionPrepareTask.class);
 
     XidTransactionPrepareTask(final TransactionRequestHandler txRequestHandler, final EJBRemoteTransactionsRepository transactionsRepository,
-                              final XidTransactionID xidTransactionID, final Channel channel, final short invocationId) {
+                              final MarshallerFactory marshallerFactory, final XidTransactionID xidTransactionID,
+                              final ChannelAssociation channelAssociation, final short invocationId) {
 
-        super(txRequestHandler, transactionsRepository, xidTransactionID, channel, invocationId);
+        super(txRequestHandler, transactionsRepository, marshallerFactory, xidTransactionID, channelAssociation, invocationId);
     }
 
     @Override
@@ -62,11 +64,11 @@ class XidTransactionPrepareTask extends XidTransactionManagementTask {
             try {
                 // write out a failure message to the channel to let the client know that
                 // the transaction operation failed
-                transactionRequestHandler.writeException(this.channel, this.invocationId, t, null);
+                transactionRequestHandler.writeException(this.channelAssociation, this.marshallerFactory, this.invocationId, t, null);
             } catch (IOException e) {
                 logger.error("Could not write out message to channel due to", e);
                 // close the channel
-                IoUtils.safeClose(this.channel);
+                IoUtils.safeClose(this.channelAssociation.getChannel());
             }
             return;
         }
@@ -78,18 +80,25 @@ class XidTransactionPrepareTask extends XidTransactionManagementTask {
         final int prepareResult = this.prepareTransaction();
         // write out the "prepare" result
         try {
-            transactionRequestHandler.writeTxPrepareResponseMessage(this.channel, this.invocationId, prepareResult);
+            transactionRequestHandler.writeTxPrepareResponseMessage(this.channelAssociation, this.invocationId, prepareResult);
         } catch (IOException e) {
             logger.error("Could not write out invocation success message to channel due to", e);
             // close the channel
-            IoUtils.safeClose(this.channel);
+            IoUtils.safeClose(this.channelAssociation.getChannel());
         }
     }
 
 
     private int prepareTransaction() throws Throwable {
         // first associate the tx on this thread, by resuming the tx
-        final Transaction transaction = this.transactionsRepository.removeTransaction(this.xidTransactionID);
+        final Transaction transaction = this.transactionsRepository.getTransaction(this.xidTransactionID);
+        if(transaction == null) {
+            if(EjbLogger.EJB3_INVOCATION_LOGGER.isDebugEnabled()) {
+                //this happens if no ejb invocations where made within the TX
+                EjbLogger.EJB3_INVOCATION_LOGGER.debug("Not preparing transaction " + this.xidTransactionID + " as is was not found on the server");
+            }
+            return XAResource.XA_OK;
+        }
         this.resumeTransaction(transaction);
         try {
             // now "prepare"
@@ -145,7 +154,7 @@ class XidTransactionPrepareTask extends XidTransactionManagementTask {
                     throw new XAException(XAException.XA_RBOTHER);
             }
         } finally {
-            // disassociate the tx that was asssociated (resumed) on this thread.
+            // disassociate the tx that was associated (resumed) on this thread.
             // This needs to be done explicitly because the SubOrdinationManager isn't responsible
             // for clearing the tx context from the thread
             this.transactionsRepository.getTransactionManager().suspend();

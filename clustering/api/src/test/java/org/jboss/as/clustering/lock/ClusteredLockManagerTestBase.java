@@ -1,14 +1,26 @@
 package org.jboss.as.clustering.lock;
 
-import static org.mockito.Mockito.*;
-import static org.mockito.AdditionalMatchers.*;
-import static org.jboss.as.clustering.lock.LockParamsMatcher.*;
-import static org.junit.Assert.*;
+import static org.jboss.as.clustering.lock.LockParamsMatcher.eqLockParams;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+import static org.mockito.AdditionalMatchers.aryEq;
+import static org.mockito.Matchers.any;
+import static org.mockito.Matchers.anyInt;
+import static org.mockito.Matchers.anyLong;
+import static org.mockito.Matchers.eq;
+import static org.mockito.Matchers.same;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Vector;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -83,11 +95,11 @@ public abstract class ClusteredLockManagerTestBase<T extends AbstractClusterLock
 
         assertEquals("Current view is empty when unstarted", 0, testee.getCurrentView().size());
 
-        when(rpcDispatcher.getClusterNodes()).thenReturn(new ClusterNode[] { node1 });
+        when(rpcDispatcher.getClusterNodes()).thenReturn(Arrays.asList(node1));
 
         testee.start();
 
-        verify(rpcDispatcher).registerRPCHandler(eq("test"), any(RpcTarget.class), same(rpcDispatcher.getClass().getClassLoader()));
+        verify(rpcDispatcher).registerRPCHandler(eq("test"), any(RpcTarget.class));
         verify(notifier).registerGroupMembershipListener(testee);
 
         assertEquals("Current view is correct", 1, testee.getCurrentView().size());
@@ -131,13 +143,13 @@ public abstract class ClusteredLockManagerTestBase<T extends AbstractClusterLock
         ClusterNode dead = members.get(0);
         assertFalse(node1.equals(dead));
 
-        Vector<ClusterNode> newView = getView(node1, 0, 3);
+        List<ClusterNode> newView = getView(node1, 0, 3);
         newView.remove(dead);
 
-        Vector<ClusterNode> addedMembers = new Vector<ClusterNode>(newView);
+        List<ClusterNode> addedMembers = new ArrayList<ClusterNode>(newView);
         addedMembers.removeAll(members);
 
-        Vector<ClusterNode> deadMembers = new Vector<ClusterNode>();
+        List<ClusterNode> deadMembers = new ArrayList<ClusterNode>();
         deadMembers.add(dead);
 
         testee.membershipChanged(deadMembers, addedMembers, newView);
@@ -485,15 +497,15 @@ public abstract class ClusteredLockManagerTestBase<T extends AbstractClusterLock
 
         ArgumentCaptor<RpcTarget> c = ArgumentCaptor.forClass(RpcTarget.class);
         
-        Vector<ClusterNode> view = getView(node, viewPos, viewSize);
-        when(rpcDispatcher.getClusterNodes()).thenReturn(view.toArray(new ClusterNode[view.size()]));
+        List<ClusterNode> view = getView(node, viewPos, viewSize);
+        when(rpcDispatcher.getClusterNodes()).thenReturn(view);
         when(rpcDispatcher.isConsistentWith(notifier)).thenReturn(true);
         
         T testee = createClusteredLockManager("test", rpcDispatcher, notifier, handler);
 
         testee.start();
         
-        verify(rpcDispatcher).registerRPCHandler(eq("test"), c.capture(), same(rpcDispatcher.getClass().getClassLoader()));
+        verify(rpcDispatcher).registerRPCHandler(eq("test"), c.capture());
         verify(notifier).registerGroupMembershipListener(same(testee));
         verify(handler).setLocalNode(same(node));
         
@@ -502,8 +514,8 @@ public abstract class ClusteredLockManagerTestBase<T extends AbstractClusterLock
 
     protected abstract T createClusteredLockManager(String serviceHAName, GroupRpcDispatcher rpcDispatcher, GroupMembershipNotifier notifier, LocalLockHandler handler);
 
-    private Vector<ClusterNode> getView(ClusterNode member, int viewPos, int numMembers) {
-        Vector<ClusterNode> all = new Vector<ClusterNode>(Arrays.asList(new ClusterNode[] { node1, node2, node3 }));
+    private List<ClusterNode> getView(ClusterNode member, int viewPos, int numMembers) {
+        List<ClusterNode> all = new ArrayList<ClusterNode>(Arrays.asList(node1, node2, node3));
         all.remove(member);
         while (all.size() > numMembers - 1) // -1 'cause we'll add one in a sec
         {

@@ -26,8 +26,10 @@ import java.net.BindException;
 import java.net.InetSocketAddress;
 import java.util.concurrent.ExecutorService;
 
+import org.jboss.as.controller.ControlledProcessStateService;
 import org.jboss.as.controller.ModelController;
 import org.jboss.as.controller.client.ModelControllerClient;
+import org.jboss.as.domain.http.server.ConsoleMode;
 import org.jboss.as.domain.http.server.ManagementHttpServer;
 import org.jboss.as.domain.management.security.SecurityRealmService;
 import org.jboss.as.network.ManagedBinding;
@@ -35,6 +37,7 @@ import org.jboss.as.network.ManagedBindingRegistry;
 import org.jboss.as.network.NetworkInterfaceBinding;
 import org.jboss.as.network.SocketBinding;
 import org.jboss.as.network.SocketBindingManager;
+import org.jboss.as.server.ServerMessages;
 import org.jboss.as.server.mgmt.domain.HttpManagement;
 import org.jboss.msc.inject.Injector;
 import org.jboss.msc.service.Service;
@@ -61,6 +64,9 @@ public class HttpManagementService implements Service<HttpManagement> {
     private final InjectedValue<Integer> securePortValue = new InjectedValue<Integer>();
     private final InjectedValue<ExecutorService> executorServiceValue = new InjectedValue<ExecutorService>();
     private final InjectedValue<SecurityRealmService> securityRealmServiceValue = new InjectedValue<SecurityRealmService>();
+    private final InjectedValue<ControlledProcessStateService> controlledProcessStateServiceValue = new InjectedValue<ControlledProcessStateService>();
+    private final ConsoleMode consoleMode;
+    private final String consoleSlot;
     private ManagementHttpServer serverManagement;
     private SocketBindingManager socketBindingManager;
     private boolean useUnmanagedBindings = false;
@@ -78,7 +84,14 @@ public class HttpManagementService implements Service<HttpManagement> {
 
         @Override
         public int getHttpPort() {
-            return basicManagedBinding == null ? -1 : basicManagedBinding.getBindAddress().getPort();
+            if (basicManagedBinding != null) {
+                return basicManagedBinding.getBindAddress().getPort();
+            }
+            Integer port = portValue.getOptionalValue();
+            if (port != null) {
+                return port;
+            }
+            return -1;
         }
 
         @Override
@@ -95,7 +108,14 @@ public class HttpManagementService implements Service<HttpManagement> {
 
         @Override
         public int getHttpsPort() {
-            return secureManagedBinding == null ? -1 : secureManagedBinding.getBindAddress().getPort();
+            if (secureManagedBinding != null) {
+                return secureManagedBinding.getBindAddress().getPort();
+            }
+            Integer securePort = securePortValue.getOptionalValue();
+            if (securePort != null) {
+                return securePort;
+            }
+            return -1;
         }
 
         @Override
@@ -109,7 +129,16 @@ public class HttpManagementService implements Service<HttpManagement> {
             }
             return binding;
         }
+
+        public boolean hasConsole() {
+            return consoleMode.hasConsole();
+        }
     };
+
+    public HttpManagementService(ConsoleMode consoleMode, String consoleSlot) {
+        this.consoleMode = consoleMode;
+        this.consoleSlot = consoleSlot;
+    }
 
     /**
      * Starts the service.
@@ -119,6 +148,7 @@ public class HttpManagementService implements Service<HttpManagement> {
      */
     public synchronized void start(StartContext context) throws StartException {
         final ModelController modelController = modelControllerValue.getValue();
+        final ControlledProcessStateService controlledProcessStateService = controlledProcessStateServiceValue.getValue();
         final ExecutorService executorService = executorServiceValue.getValue();
         final ModelControllerClient modelControllerClient = modelController.createClient(executorService);
         socketBindingManager = injectedSocketBindingManager.getOptionalValue();
@@ -151,7 +181,8 @@ public class HttpManagementService implements Service<HttpManagement> {
         }
 
         try {
-            serverManagement = ManagementHttpServer.create(bindAddress, secureBindAddress, 50, modelControllerClient, executorService, securityRealmService);
+            serverManagement = ManagementHttpServer.create(bindAddress, secureBindAddress, 50, modelControllerClient,
+                    executorService, securityRealmService, controlledProcessStateService, consoleMode, consoleSlot);
             serverManagement.start();
 
             // Register the now-created sockets with the SBM
@@ -186,7 +217,7 @@ public class HttpManagementService implements Service<HttpManagement> {
                 sb.append(" ").append(secureBindAddress);
             throw new StartException(sb.toString(), e);
         } catch (Exception e) {
-            throw new StartException("Failed to start serverManagement socket", e);
+            throw ServerMessages.MESSAGES.failedToStartHttpManagementService(e);
         }
     }
 
@@ -291,6 +322,15 @@ public class HttpManagementService implements Service<HttpManagement> {
      */
     public InjectedValue<SecurityRealmService> getSecurityRealmInjector() {
         return securityRealmServiceValue;
+    }
+
+    /**
+     * Get the security realm injector.
+     *
+     * @return the securityRealmServiceValue
+     */
+    public InjectedValue<ControlledProcessStateService> getControlledProcessStateServiceInjector() {
+        return controlledProcessStateServiceValue;
     }
 
 }

@@ -30,7 +30,7 @@ import org.jboss.as.clustering.web.IncomingDistributableSessionData;
 import static org.jboss.as.clustering.web.impl.ClusteringWebMessages.MESSAGES;
 
 /**
- * Base implementation of {@link DistributableSessionData}.
+ * Base implementation of {@link IncomingDistributableSessionData}.
  *
  * @author Brian Stansberry
  */
@@ -41,10 +41,6 @@ public class IncomingDistributableSessionDataImpl implements IncomingDistributab
     private volatile Map<String, Object> attributes;
 
     public IncomingDistributableSessionDataImpl(Integer version, Long timestamp, DistributableSessionMetadata metadata) {
-        assert version != null : MESSAGES.nullVar("version");
-        assert timestamp != null : MESSAGES.nullVar("timestamp");
-        assert metadata != null : MESSAGES.nullVar("metadata");
-
         this.version = version.intValue();
         this.timestamp = timestamp.longValue();
         this.metadata = metadata;
@@ -53,7 +49,7 @@ public class IncomingDistributableSessionDataImpl implements IncomingDistributab
     /**
      * {@inheritDoc}
      *
-     * @see org.jboss.web.tomcat.service.session.distributedcache.spi.IncomingDistributableSessionData#providesSessionAttributes()
+     * @see org.jboss.as.clustering.web.IncomingDistributableSessionData#providesSessionAttributes()
      */
     @Override
     public boolean providesSessionAttributes() {
@@ -63,7 +59,7 @@ public class IncomingDistributableSessionDataImpl implements IncomingDistributab
     /**
      * {@inheritDoc}
      *
-     * @see org.jboss.web.tomcat.service.session.distributedcache.spi.IncomingDistributableSessionData#getSessionAttributes()
+     * @see org.jboss.as.clustering.web.IncomingDistributableSessionData#getSessionAttributes()
      */
     @Override
     public Map<String, Object> getSessionAttributes() {
@@ -86,7 +82,7 @@ public class IncomingDistributableSessionDataImpl implements IncomingDistributab
     /**
      * {@inheritDoc}
      *
-     * @see org.jboss.web.tomcat.service.session.distributedcache.spi.IncomingDistributableSessionData#getMetadata()
+     * @see org.jboss.as.clustering.web.IncomingDistributableSessionData#getMetadata()
      */
     @Override
     public DistributableSessionMetadata getMetadata() {
@@ -96,7 +92,7 @@ public class IncomingDistributableSessionDataImpl implements IncomingDistributab
     /**
      * {@inheritDoc}
      *
-     * @see org.jboss.web.tomcat.service.session.distributedcache.spi.IncomingDistributableSessionData#getTimestamp()
+     * @see org.jboss.as.clustering.web.IncomingDistributableSessionData#getTimestamp()
      */
     @Override
     public long getTimestamp() {
@@ -106,7 +102,7 @@ public class IncomingDistributableSessionDataImpl implements IncomingDistributab
     /**
      * {@inheritDoc}
      *
-     * @see org.jboss.web.tomcat.service.session.distributedcache.spi.IncomingDistributableSessionData#getVersion()
+     * @see org.jboss.as.clustering.web.IncomingDistributableSessionData#getVersion()
      */
     @Override
     public int getVersion() {

@@ -21,9 +21,11 @@
  */
 package org.jboss.as.cli;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 
 import org.jboss.as.cli.operation.OperationFormatException;
 import org.jboss.as.cli.operation.OperationRequestAddress;
@@ -38,36 +40,63 @@ import org.jboss.dmr.Property;
  */
 public class Util {
 
+    public static final String LINE_SEPARATOR = Util.getLineSeparator();
+
     public static final String ACCESS_TYPE = "access-type";
     public static final String ADD = "add";
     public static final String ADDRESS = "address";
+    public static final String ALLOWED = "allowed";
+    public static final String ALLOW_RESOURCE_SERVICE_RESTART = "allow-resource-service-restart";
+    public static final String ARCHIVE = "archive";
     public static final String ATTRIBUTES = "attributes";
     public static final String BYTES = "bytes";
     public static final String CHILDREN = "children";
+    public static final String CHILD_TYPE = "child-type";
     public static final String COMPOSITE = "composite";
     public static final String CONCURRENT_GROUPS = "concurrent-groups";
     public static final String CONTENT = "content";
+    public static final String DATASOURCES = "datasources";
     public static final String DEPLOY = "deploy";
     public static final String DEPLOYMENT = "deployment";
+    public static final String DEPLOYMENT_NAME = "deployment-name";
     public static final String DESCRIPTION = "description";
     public static final String DOMAIN_FAILURE_DESCRIPTION = "domain-failure-description";
+    public static final String DOMAIN_RESULTS = "domain-results";
+    public static final String DRIVER_MODULE_NAME = "driver-module-name";
+    public static final String DRIVER_NAME = "driver-name";
+    public static final String ENABLED = "enabled";
     public static final String EXPRESSIONS_ALLOWED = "expressions-allowed";
-    public static final String HEAD_COMMENT_ALLOWED = "head-comment-allowed";
     public static final String FAILURE_DESCRIPTION = "failure-description";
     public static final String FULL_REPLACE_DEPLOYMENT = "full-replace-deployment";
+    public static final String FALSE = "false";
+    public static final String HEAD_COMMENT_ALLOWED = "head-comment-allowed";
+    public static final String HOST = "host";
+    public static final String ID = "id";
     public static final String IN_SERIES = "in-series";
+    public static final String INCLUDE_DEFAULTS = "include-defaults";
     public static final String INCLUDE_RUNTIME = "include-runtime";
     public static final String INPUT_STREAM_INDEX = "input-stream-index";
-    public static final String MIN_OCCURS = "min-occurs";
+    public static final String INSTALLED_DRIVERS_LIST = "installed-drivers-list";
+    public static final String MANAGEMENT_CLIENT_CONTENT = "management-client-content";
+    public static final String MAX_FAILED_SERVERS = "max-failed-servers";
+    public static final String MAX_FAILURE_PERCENTAGE = "max-failure-percentage";
     public static final String MAX_OCCURS = "max-occurs";
+    public static final String MIN_OCCURS = "min-occurs";
+    public static final String MODULE_SLOT = "module-slot";
     public static final String NAME = "name";
     public static final String NILLABLE = "nillable";
     public static final String OPERATION = "operation";
     public static final String OPERATION_HEADERS = "operation-headers";
     public static final String OUTCOME = "outcome";
+    public static final String PATH = "path";
+    public static final String PERSISTENT = "persistent";
+    public static final String PROBLEM = "problem";
+    public static final String PRODUCT_NAME = "product-name";
+    public static final String PRODUCT_VERSION = "product-version";
     public static final String PROFILE = "profile";
     public static final String READ_ATTRIBUTE = "read-attribute";
     public static final String READ_CHILDREN_NAMES = "read-children-names";
+    public static final String READ_CHILDREN_RESOURCES = "read-children-resources";
     public static final String READ_CHILDREN_TYPES = "read-children-types";
     public static final String READ_ONLY = "read-only";
     public static final String READ_OPERATION_DESCRIPTION = "read-operation-description";
@@ -75,29 +104,44 @@ public class Util {
     public static final String READ_WRITE = "read-write";
     public static final String READ_RESOURCE = "read-resource";
     public static final String READ_RESOURCE_DESCRIPTION = "read-resource-description";
+    public static final String RELEASE_CODENAME = "release-codename";
+    public static final String RELEASE_VERSION = "release-version";
+    public static final String REPLY_PROPERTIES = "reply-properties";
     public static final String REQUEST_PROPERTIES = "request-properties";
     public static final String REQUIRED = "required";
+    public static final String RESPONSE_HEADERS = "response-headers";
     public static final String RESTART_REQUIRED = "restart-required";
     public static final String RESULT = "result";
+    public static final String ROLLED_BACK = "rolled-back";
+    public static final String ROLLBACK_ACROSS_GROUPS = "rollback-across-groups";
+    public static final String ROLLBACK_FAILURE_DESCRIPTION = "rollback-failure-description";
+    public static final String ROLLBACK_ON_RUNTIME_FAILURE = "rollback-on-runtime-failure";
+    public static final String ROLLING_TO_SERVERS = "rolling-to-servers";
     public static final String ROLLOUT_PLAN = "rollout-plan";
+    public static final String ROLLOUT_PLANS = "rollout-plans";
     public static final String RUNTIME_NAME = "runtime-name";
+    public static final String SERVER = "server";
     public static final String SERVER_GROUP = "server-group";
+    public static final String STATUS = "status";
     public static final String STEP_1 = "step-1";
     public static final String STEP_2 = "step-2";
     public static final String STEP_3 = "step-3";
     public static final String STEPS = "steps";
     public static final String STORAGE = "storage";
+    public static final String SUBSYSTEM = "subsystem";
     public static final String SUCCESS = "success";
     public static final String TAIL_COMMENT_ALLOWED = "tail-comment-allowed";
     public static final String TRUE = "true";
     public static final String TYPE = "type";
+    public static final String UNDEFINE_ATTRIBUTE = "undefine-attribute";
+    public static final String VALID = "valid";
     public static final String VALIDATE_ADDRESS = "validate-address";
     public static final String VALUE = "value";
     public static final String VALUE_TYPE = "value-type";
     public static final String WRITE_ATTRIBUTE = "write-attribute";
 
     public static boolean isWindows() {
-        return SecurityActions.getSystemProperty("os.name").toLowerCase().indexOf("windows") >= 0;
+        return SecurityActions.getSystemProperty("os.name").toLowerCase(Locale.ENGLISH).indexOf("windows") >= 0;
     }
 
     public static boolean isSuccess(ModelNode operationResult) {
@@ -117,6 +161,19 @@ public class Util {
         }
         if(descr.hasDefined(Util.DOMAIN_FAILURE_DESCRIPTION)) {
             descr = descr.get(Util.DOMAIN_FAILURE_DESCRIPTION);
+        }
+        if(descr.hasDefined(Util.ROLLED_BACK)) {
+            final StringBuilder buf = new StringBuilder();
+            buf.append(descr.asString());
+            if(descr.get(Util.ROLLED_BACK).asBoolean()) {
+                buf.append("(The operation was rolled back)");
+            } else if(descr.hasDefined(Util.ROLLBACK_FAILURE_DESCRIPTION)){
+                buf.append(descr.get(Util.ROLLBACK_FAILURE_DESCRIPTION).asString());
+            } else {
+                buf.append("(The operation also failed to rollback, failure description is not available.)");
+            }
+        } else {
+            return descr.asString();
         }
         return descr.asString();
     }
@@ -233,9 +290,9 @@ public class Util {
             DefaultOperationRequestBuilder builder = new DefaultOperationRequestBuilder();
             ModelNode request;
             try {
-                builder.setOperationName("read-children-names");
-                builder.addNode("server-group", serverGroup);
-                builder.addProperty("child-type", "deployment");
+                builder.setOperationName(Util.READ_CHILDREN_NAMES);
+                builder.addNode(Util.SERVER_GROUP, serverGroup);
+                builder.addProperty(Util.CHILD_TYPE, Util.DEPLOYMENT);
                 request = builder.buildRequest();
             } catch (OperationFormatException e) {
                 throw new IllegalStateException("Failed to build operation", e);
@@ -578,5 +635,52 @@ public class Util {
             toSet = new ModelNode().set(value);
         }
         request.get(name).set(toSet);
+    }
+
+    public static ModelNode buildRequest(CommandContext ctx, final OperationRequestAddress address, String operation)
+            throws CommandFormatException {
+        final ModelNode request = new ModelNode();
+        request.get(Util.OPERATION).set(operation);
+        final ModelNode addressNode = request.get(Util.ADDRESS);
+        if (address.isEmpty()) {
+            addressNode.setEmptyList();
+        } else {
+            if(address.endsOnType()) {
+                throw new CommandFormatException("The address ends on a type: " + address.getNodeType());
+            }
+            for(OperationRequestAddress.Node node : address) {
+                addressNode.add(node.getType(), node.getName());
+            }
+        }
+        return request;
+    }
+
+    public static ModelNode getRolloutPlan(ModelControllerClient client, String name) throws CommandFormatException {
+        final ModelNode request = new ModelNode();
+        request.get(OPERATION).set(READ_ATTRIBUTE);
+        final ModelNode addr = request.get(ADDRESS);
+        addr.add(MANAGEMENT_CLIENT_CONTENT, ROLLOUT_PLANS);
+        addr.add(ROLLOUT_PLAN, name);
+        request.get(NAME).set(CONTENT);
+        final ModelNode response;
+        try {
+            response = client.execute(request);
+        } catch(IOException e) {
+            throw new CommandFormatException("Failed to execute request: " + e.getMessage(), e);
+        }
+        if(!response.hasDefined(OUTCOME)) {
+            throw new CommandFormatException("Operation response if missing outcome: " + response);
+        }
+        if(!response.get(OUTCOME).asString().equals(SUCCESS)) {
+            throw new CommandFormatException("Failed to load rollout plan: " + response);
+        }
+        if(!response.hasDefined(RESULT)) {
+            throw new CommandFormatException("Operation response is missing result.");
+        }
+        return response.get(RESULT);
+    }
+
+    public static String getLineSeparator() {
+        return SecurityActions.getSystemProperty("line.separator");
     }
 }

@@ -25,6 +25,7 @@ import org.jboss.as.cli.CommandContext;
 import org.jboss.as.cli.CommandFormatException;
 import org.jboss.as.cli.batch.BatchManager;
 import org.jboss.as.cli.handlers.CommandHandlerWithHelp;
+import org.jboss.as.cli.impl.ArgumentWithValue;
 import org.jboss.as.cli.operation.ParsedCommandLine;
 
 /**
@@ -35,6 +36,8 @@ public class BatchHoldbackHandler extends CommandHandlerWithHelp {
 
     public BatchHoldbackHandler() {
         super("batch-holdback");
+        // purely for validation, so the arguments are recognized
+        new ArgumentWithValue(this, 0, "--name");
     }
 
     @Override
@@ -53,8 +56,7 @@ public class BatchHoldbackHandler extends CommandHandlerWithHelp {
 
         BatchManager batchManager = ctx.getBatchManager();
         if(!batchManager.isBatchActive()) {
-            ctx.printLine("No active batch to holdback.");
-            return;
+            throw new CommandFormatException("No active batch to holdback.");
         }
 
         String name = null;
@@ -64,12 +66,11 @@ public class BatchHoldbackHandler extends CommandHandlerWithHelp {
         }
 
         if(batchManager.isHeldback(name)) {
-            ctx.printLine("There already is " + (name == null ? "unnamed" : "'" + name + "'") + " batch held back.");
-            return;
+            throw new CommandFormatException("There already is " + (name == null ? "unnamed" : "'" + name + "'") + " batch held back.");
         }
 
         if(!batchManager.holdbackActiveBatch(name)) {
-            ctx.printLine("Failed to holdback the batch.");
+            throw new CommandFormatException("Failed to holdback the batch.");
         }
     }
 }

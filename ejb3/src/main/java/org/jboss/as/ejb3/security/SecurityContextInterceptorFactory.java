@@ -21,12 +21,13 @@
  */
 package org.jboss.as.ejb3.security;
 
+import java.util.Map;
 import java.util.Set;
 
+import org.jboss.as.controller.security.ServerSecurityManager;
 import org.jboss.as.ee.component.Component;
 import org.jboss.as.ee.component.ComponentInterceptorFactory;
 import org.jboss.as.ejb3.component.EJBComponent;
-import org.jboss.as.security.service.SimpleSecurityManager;
 import org.jboss.invocation.Interceptor;
 import org.jboss.invocation.InterceptorFactoryContext;
 import org.jboss.metadata.javaee.spec.SecurityRolesMetaData;
@@ -35,9 +36,9 @@ import static org.jboss.as.ejb3.EjbLogger.ROOT_LOGGER;
 import static org.jboss.as.ejb3.EjbMessages.MESSAGES;
 /**
  * @author <a href="mailto:cdewolf@redhat.com">Carlo de Wolf</a>
+ * @author Anil Saldhana
  */
 public class SecurityContextInterceptorFactory extends ComponentInterceptorFactory {
-
 
     @Override
     protected Interceptor create(final Component component, final InterceptorFactoryContext context) {
@@ -45,7 +46,7 @@ public class SecurityContextInterceptorFactory extends ComponentInterceptorFacto
             throw MESSAGES.unexpectedComponent(component, EJBComponent.class);
         }
         final EJBComponent ejbComponent = (EJBComponent) component;
-        final SimpleSecurityManager securityManager = ejbComponent.getSecurityManager();
+        final ServerSecurityManager securityManager = ejbComponent.getSecurityManager();
         final EJBSecurityMetaData securityMetaData = ejbComponent.getSecurityMetaData();
         final String securityDomain = securityMetaData.getSecurityDomain();
         if (securityDomain == null) {
@@ -59,8 +60,16 @@ public class SecurityContextInterceptorFactory extends ComponentInterceptorFacto
         final String runAsPrincipal = securityMetaData.getRunAsPrincipal();
         final SecurityRolesMetaData securityRoles = securityMetaData.getSecurityRoles();
         Set<String> extraRoles = null;
-        if (securityRoles != null)
+        Map<String,Set<String>> principalVsRolesMap = null;
+        if (securityRoles != null && runAsPrincipal != null) {
+            principalVsRolesMap = securityRoles.getPrincipalVersusRolesMap();
             extraRoles = securityRoles.getSecurityRoleNamesByPrincipal(runAsPrincipal);
-        return new SecurityContextInterceptor(securityManager, securityDomain, runAs, runAsPrincipal, extraRoles);
+        }
+        SecurityContextInterceptorHolder holder = new SecurityContextInterceptorHolder();
+        holder.setSecurityManager(securityManager).setSecurityDomain(securityDomain)
+        .setRunAs(runAs).setRunAsPrincipal(runAsPrincipal)
+        .setExtraRoles(extraRoles).setPrincipalVsRolesMap(principalVsRolesMap);
+
+        return new SecurityContextInterceptor(holder);
     }
 }

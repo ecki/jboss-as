@@ -25,6 +25,8 @@ package org.jboss.as.cli.handlers;
 import java.util.List;
 
 import org.jboss.as.cli.CommandContext;
+import org.jboss.as.cli.CommandFormatException;
+import org.jboss.as.cli.CommandLineException;
 import org.jboss.as.cli.operation.ParsedCommandLine;
 
 /**
@@ -43,12 +45,20 @@ public class ConnectHandler extends CommandHandlerWithHelp {
     }
 
     @Override
-    public boolean hasArgument(int index) {
+    public boolean hasArgument(CommandContext ctx, int index) {
         return index <= 1;
     }
 
     @Override
-    protected void doHandle(CommandContext ctx) {
+    protected void recognizeArguments(CommandContext ctx) throws CommandFormatException {
+        final ParsedCommandLine parsedCmd = ctx.getParsedCommandLine();
+        if(parsedCmd.getOtherProperties().size() > 1) {
+            throw new CommandFormatException("The command accepts only one argument but received: " + parsedCmd.getOtherProperties());
+        }
+    }
+
+    @Override
+    protected void doHandle(CommandContext ctx) throws CommandLineException {
 
         int port = -1;
         String host = null;
@@ -57,12 +67,11 @@ public class ConnectHandler extends CommandHandlerWithHelp {
 
         if(!args.isEmpty()) {
             if(args.size() != 1) {
-                ctx.printLine("The command expects only one argument but got " + args);
-                return;
+                throw new CommandFormatException("The command expects only one argument but got " + args);
             }
             final String arg = args.get(0);
             String portStr = null;
-            int colonIndex = arg.indexOf(':');
+            int colonIndex = arg.lastIndexOf(':');
             if(colonIndex < 0) {
                 // default port
                 host = arg;
@@ -70,21 +79,35 @@ public class ConnectHandler extends CommandHandlerWithHelp {
                 // default host
                 portStr = arg.substring(1).trim();
             } else {
-                host = arg.substring(0, colonIndex).trim();
-                portStr = arg.substring(colonIndex + 1).trim();
+                final boolean hasPort;
+                int closeBracket = arg.lastIndexOf(']');
+                if (closeBracket != -1) {
+                    //possible ip v6
+                    if (closeBracket > colonIndex) {
+                        hasPort = false;
+                    } else {
+                        hasPort = true;
+                    }
+                } else {
+                    //probably ip v4
+                    hasPort = true;
+                }
+                if (hasPort) {
+                    host = arg.substring(0, colonIndex).trim();
+                    portStr = arg.substring(colonIndex + 1).trim();
+                } else {
+                    host = arg;
+                }
             }
 
             if(portStr != null) {
                 try {
                     port = Integer.parseInt(portStr);
                 } catch(NumberFormatException e) {
-                    ctx.printLine("The port must be a valid non-negative integer: '" + args + "'");
-                    return;
+                    throw new CommandFormatException("The port must be a valid non-negative integer: '" + args + "'");
                 }
-
                 if(port < 0) {
-                    ctx.printLine("The port must be a valid non-negative integer: '" + args + "'");
-                    return;
+                    throw new CommandFormatException("The port must be a valid non-negative integer: '" + args + "'");
                 }
             }
         }
