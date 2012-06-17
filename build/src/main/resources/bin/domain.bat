@@ -3,12 +3,10 @@ rem -------------------------------------------------------------------------
 rem JBoss Bootstrap Script for Windows
 rem -------------------------------------------------------------------------
 
-rem $Id$
-
 @if not "%ECHO%" == ""  echo %ECHO%
-@if "%OS%" == "Windows_NT" setlocal
 
 if "%OS%" == "Windows_NT" (
+  setlocal
   set "DIRNAME=%~dp0%"
 ) else (
   set DIRNAME=.\
@@ -24,6 +22,7 @@ if exist "%DOMAIN_CONF%" (
 ) else (
    echo Config file not found "%DOMAIN_CONF%"
 )
+set JAVA_OPTS=
 
 pushd %DIRNAME%..
 set "RESOLVED_JBOSS_HOME=%CD%"
@@ -43,15 +42,6 @@ if "%RESOLVED_JBOSS_HOME%" NEQ "%SANITIZED_JBOSS_HOME%" (
 
 set DIRNAME=
 
-if "%OS%" == "Windows_NT" (
-  set "PROGNAME=%~nx0%"
-) else (
-  set "PROGNAME=domain.bat"
-)
-
-rem Setup JBoss specific properties
-set JAVA_OPTS=-Dprogram.name=%PROGNAME% %JAVA_OPTS%
-
 if "x%JAVA_HOME%" == "x" (
   set  JAVA=java
   echo JAVA_HOME is not set. Unexpected results may occur.
@@ -67,7 +57,7 @@ if not errorlevel == 1 (
   set "HOST_CONTROLLER_JAVA_OPTS=%HOST_CONTROLLER_JAVA_OPTS% -server"
 )
 
-rem Find run.jar, or we can't continue
+rem Find jboss-modules.jar, or we can't continue
 if exist "%JBOSS_HOME%\jboss-modules.jar" (
     set "RUNJAR=%JBOSS_HOME%\jboss-modules.jar"
 ) else (
@@ -107,7 +97,8 @@ echo   JBOSS_HOME: %JBOSS_HOME%
 echo.
 echo   JAVA: %JAVA%
 echo.
-echo   JAVA_OPTS: %JAVA_OPTS%
+echo   PC JAVA_OPTS: %PROCESS_CONTROLLER_JAVA_OPTS%
+echo   HC JAVA_OPTS: %HOST_CONTROLLER_JAVA_OPTS%
 echo.
 echo ===============================================================================
 echo.
@@ -116,7 +107,7 @@ echo.
 "%JAVA%" %PROCESS_CONTROLLER_JAVA_OPTS% ^
  "-Dorg.jboss.boot.log.file=%JBOSS_LOG_DIR%\process-controller.log" ^
  "-Dlogging.configuration=file:%JBOSS_CONFIG_DIR%/logging.properties" ^
-    -jar "%JBOSS_HOME%\jboss-modules.jar" ^
+    -jar "%RUNJAR%" ^
     -mp "%JBOSS_MODULEPATH%" ^
      org.jboss.as.process-controller ^
     -jboss-home "%JBOSS_HOME%" ^
