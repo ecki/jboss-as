@@ -101,7 +101,7 @@ public final class DomainServerMain {
         final MarshallerFactory factory = Marshalling.getMarshallerFactory("river", DomainServerMain.class.getClassLoader());
         final Unmarshaller unmarshaller;
         final ByteInput byteInput;
-        final AsyncFuture<ServiceContainer> containerFuture;
+        final ServiceContainer container;
         try {
             Module.registerURLStreamHandlerFactoryModule(Module.getBootModuleLoader().loadModule(ModuleIdentifier.create("org.jboss.vfs")));
             final MarshallingConfiguration configuration = new MarshallingConfiguration();
@@ -112,17 +112,17 @@ public final class DomainServerMain {
             unmarshaller.start(byteInput);
             final ServerTask task = unmarshaller.readObject(ServerTask.class);
             unmarshaller.finish();
-            containerFuture = task.run(Arrays.<ServiceActivator>asList(new ServiceActivator() {
+            final AsyncFuture<ServiceContainer> containerFuture = task.run(Arrays.<ServiceActivator>asList(new ServiceActivator() {
                 @Override
                 public void activate(final ServiceActivatorContext serviceActivatorContext) {
                     // TODO activate host controller client service
                 }
             }));
+            container = containerFuture.get(); // TODO: timeout?
         } catch (Exception e) {
             e.printStackTrace(initialError);
             System.exit(ExitCodes.FAILED);
             throw new IllegalStateException(); // not reached
-        } finally {
         }
         for (;;) try {
             final String hostName = StreamUtils.readUTFZBytes(initialInput);
@@ -132,20 +132,19 @@ public final class DomainServerMain {
             StreamUtils.readFully(initialInput, asAuthKey);
 
             // Get the host-controller server client
-            final ServiceContainer container = containerFuture.get();
             final HostControllerClient client = getRequiredService(container, HostControllerConnectionService.SERVICE_NAME, HostControllerClient.class);
             // Reconnect to the host-controller
             client.reconnect(hostName, port, asAuthKey, managementSubsystemEndpoint);
 
         } catch (InterruptedIOException e) {
-            Thread.interrupted();
-            // ignore
+            Thread.currentThread().interrupt(); // restore state
+            break; // TODO: error code
         } catch (EOFException e) {
             // this means it's time to exit
             break;
         } catch (Exception e) {
             e.printStackTrace();
-            break;
+            break; // TODO: error code
         }
 
         // Once the input stream is cut off, shut down
